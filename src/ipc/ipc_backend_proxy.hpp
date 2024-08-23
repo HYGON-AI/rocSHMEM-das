@@ -20,27 +20,50 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#ifndef ROCSHMEM_CONTEXT_IPC_GTEST_HPP
-#define ROCSHMEM_CONTEXT_IPC_GTEST_HPP
+#ifndef LIBRARY_SRC_IPC_BACKEND_PROXY_HPP_
+#define LIBRARY_SRC_IPC_BACKEND_PROXY_HPP_
 
-#include "gtest/gtest.h"
-
-#include "../src/ipc/context_ipc_device.hpp"
-#include "../src/ipc/backend_ipc.hpp"
+#include "../device_proxy.hpp"
+#include "../atomic_return.hpp"
 
 namespace rocshmem {
 
-class ContextIpcTestFixture : public ::testing::Test
-{
-  protected:
-    /**
-     * @brief Context Ipc Test
-     */
-   IPCBackend be{MPI_COMM_WORLD};
-
-   IPCContext ipc_context_ {&be};
+struct IPCBackendRegister {
+  char *g_ret{nullptr};
+  atomic_ret_t *atomic_ret{nullptr};
+  SymmetricHeap *heap_ptr{nullptr};
 };
 
-} // namespace rocshmem
+template <typename ALLOCATOR>
+class IPCBackendProxy {
+  using ProxyT = DeviceProxy<ALLOCATOR, IPCBackendRegister>;
 
-#endif // ROCSHMEM_CONTEXT_IPC_GTEST_HPP
+ public:
+  /*
+   * Placement new the memory which is allocated by proxy_
+   */
+  IPCBackendProxy() { new (proxy_.get()) IPCBackendRegister(); }
+
+  /*
+   * Since placement new is called in the constructor, then
+   * delete must be called manually.
+   */
+  ~IPCBackendProxy() { proxy_.get()->~IPCBackendRegister(); }
+
+  /*
+   * @brief Provide access to the memory referenced by the proxy
+   */
+  __host__ __device__ IPCBackendRegister *get() { return proxy_.get(); }
+
+ private:
+  /*
+   * @brief Memory managed by the lifetime of this object
+   */
+  ProxyT proxy_{};
+};
+
+using IPCBackendProxyT = IPCBackendProxy<HIPHostAllocator>;
+
+}  // namespace rocshmem
+
+#endif  // #define LIBRARY_SRC_IPC_BACKEND_PROXY_HPP_

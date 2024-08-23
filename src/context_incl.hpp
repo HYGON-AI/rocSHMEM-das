@@ -29,9 +29,12 @@
 #ifdef USE_GPU_IB
 #include "gpu_ib/context_ib_device.hpp"
 #include "gpu_ib/context_ib_host.hpp"
-#else
+#elif defined (USE_RO)
 #include "reverse_offload/context_ro_device.hpp"
 #include "reverse_offload/context_ro_host.hpp"
+#else
+#include "ipc/context_ipc_device.hpp"
+#include "ipc/context_ipc_host.hpp"
 #endif
 
 #endif  // LIBRARY_SRC_CONTEXT_INCL_HPP_

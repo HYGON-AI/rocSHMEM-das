@@ -20,7 +20,7 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#include "context_ipc.hpp"
+#include "context_ipc_device.hpp"
 #include "context_ipc_tmpl_device.hpp"
 
 #include <hip/hip_runtime.h>
