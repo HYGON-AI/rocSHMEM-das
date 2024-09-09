@@ -39,7 +39,8 @@ namespace rocshmem {
 __host__ IPCContext::IPCContext(Backend *b)
     : Context(b, false) {
   IPCBackend *backend{static_cast<IPCBackend *>(b)};
-  ipcImpl = &backend->ipcImpl;
+  ipcImpl_.ipc_bases = b->ipcImpl.ipc_bases;
+  ipcImpl_.shm_size = b->ipcImpl.shm_size;
 
   auto *bp{backend->ipc_backend_proxy.get()};
 
@@ -59,22 +60,18 @@ __device__ void IPCContext::ctx_destroy(){
 
 __device__ void IPCContext::putmem(void *dest, const void *source, size_t nelems,
                                   int pe) {
-  // TODO (Avinash) check if PE is available for IPC using (isIpcAvailable)
-  int local_pe = pe % ipcImpl->shm_size;
   uint64_t L_offset =
-      reinterpret_cast<char *>(dest) - ipcImpl->ipc_bases[my_pe];
-  ipcImpl->ipcCopy(ipcImpl->ipc_bases[local_pe] + L_offset,
+      reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
+  ipcImpl_.ipcCopy(ipcImpl_.ipc_bases[pe] + L_offset,
                    const_cast<void *>(source), nelems);
 }
 
 __device__ void IPCContext::getmem(void *dest, const void *source, size_t nelems,
                                   int pe) {
-  // TODO (Avinash) check if PE is available for IPC using (isIpcAvailable)
-  int local_pe = pe % ipcImpl->shm_size;
   const char *src_typed = reinterpret_cast<const char *>(source);
   uint64_t L_offset =
-      const_cast<char *>(src_typed) - ipcImpl->ipc_bases[my_pe];
-  ipcImpl->ipcCopy(dest, ipcImpl->ipc_bases[local_pe] + L_offset, nelems);
+      const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[my_pe];
+  ipcImpl_.ipcCopy(dest, ipcImpl_.ipc_bases[pe] + L_offset, nelems);
 }
 
 __device__ void IPCContext::putmem_nbi(void *dest, const void *source,
@@ -103,23 +100,19 @@ __device__ void *IPCContext::shmem_ptr(const void *dest, int pe) {
 
 __device__ void IPCContext::putmem_wg(void *dest, const void *source,
                                      size_t nelems, int pe) {
-  // TODO (Avinash) check if PE is available for IPC using (isIpcAvailable)
-  int local_pe = pe % ipcImpl->shm_size;
   uint64_t L_offset =
-      reinterpret_cast<char *>(dest) - ipcImpl->ipc_bases[my_pe];
-  ipcImpl->ipcCopy_wg(ipcImpl->ipc_bases[local_pe] + L_offset,
+      reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
+  ipcImpl_.ipcCopy_wg(ipcImpl_.ipc_bases[pe] + L_offset,
                       const_cast<void *>(source), nelems);
   __syncthreads();
 }
 
 __device__ void IPCContext::getmem_wg(void *dest, const void *source,
                                      size_t nelems, int pe) {
-  // TODO (Avinash) check if PE is available for IPC using (isIpcAvailable)
-  int local_pe = pe % ipcImpl->shm_size;
   const char *src_typed = reinterpret_cast<const char *>(source);
   uint64_t L_offset =
-      const_cast<char *>(src_typed) - ipcImpl->ipc_bases[my_pe];
-  ipcImpl->ipcCopy_wg(dest, ipcImpl->ipc_bases[local_pe] + L_offset, nelems);
+      const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[my_pe];
+  ipcImpl_.ipcCopy_wg(dest, ipcImpl_.ipc_bases[pe] + L_offset, nelems);
   __syncthreads();
 }
 
@@ -135,22 +128,18 @@ __device__ void IPCContext::getmem_nbi_wg(void *dest, const void *source,
 
 __device__ void IPCContext::putmem_wave(void *dest, const void *source,
                                        size_t nelems, int pe) {
-  // TODO (Avinash) check if PE is available for IPC using (isIpcAvailable)
-  int local_pe = pe % ipcImpl->shm_size;
   uint64_t L_offset =
-      reinterpret_cast<char *>(dest) - ipcImpl->ipc_bases[my_pe];
-  ipcImpl->ipcCopy_wave(ipcImpl->ipc_bases[local_pe] + L_offset,
+      reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
+  ipcImpl_.ipcCopy_wave(ipcImpl_.ipc_bases[pe] + L_offset,
                         const_cast<void *>(source), nelems);
 }
 
 __device__ void IPCContext::getmem_wave(void *dest, const void *source,
                                        size_t nelems, int pe) {
-  // TODO (Avinash) check if PE is available for IPC using (isIpcAvailable)
-  int local_pe = pe % ipcImpl->shm_size;
   const char *src_typed = reinterpret_cast<const char *>(source);
   uint64_t L_offset =
-      const_cast<char *>(src_typed) - ipcImpl->ipc_bases[my_pe];
-  ipcImpl->ipcCopy_wave(dest, ipcImpl->ipc_bases[local_pe] + L_offset,
+      const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[my_pe];
+  ipcImpl_.ipcCopy_wave(dest, ipcImpl_.ipc_bases[pe] + L_offset,
                         nelems);
 }
 
