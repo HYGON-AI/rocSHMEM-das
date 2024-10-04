@@ -24,6 +24,8 @@
 #define LIBRARY_SRC_IPC_CONTEXT_DEVICE_HPP_
 
 #include "../context.hpp"
+#include "../atomic.hpp"
+#include "../team.hpp"
 
 namespace rocshmem {
 
@@ -232,6 +234,20 @@ class IPCContext : public Context {
 
   //Temporary scratchpad memory used by internal barrier algorithms.
   int64_t *barrier_sync{nullptr};
+
+  //Struct defining memory ordering for atomic operations.
+  detail::atomic::rocshmem_memory_orders orders_{};
+
+  //Buffer to perform Atomic store to enforce memory ordering
+  int *fence_pool{nullptr};
+
+ public:
+  //TODO(Avinash):
+  //Make tinfo private variable, it requires changes to the context
+  //creation API in backend
+
+  //Team information for the team associated with the context
+  TeamInfo *tinfo{nullptr};
 };
 
 }  // namespace rocshmem

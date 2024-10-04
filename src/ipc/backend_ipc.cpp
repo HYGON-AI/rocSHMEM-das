@@ -82,11 +82,14 @@ IPCBackend::IPCBackend(MPI_Comm comm)
 
   allocate_atomic_region(&bp->atomic_ret, MAX_NUM_BLOCKS);
 
-  default_context_proxy_ = IPCDefaultContextProxyT(this);
-
   setup_team_world();
 
+  TeamInfo *tinfo = team_tracker.get_team_world()->tinfo_wrt_world;
+  default_context_proxy_ = IPCDefaultContextProxyT(this, tinfo);
+
   roc_shmem_collective_init();
+
+  setup_fence_buffer();
 
   teams_init();
 
@@ -141,6 +144,8 @@ __device__ bool IPCBackend::create_ctx(int64_t options, roc_shmem_ctx_t *ctx) {
   ctx_ = pop_result.value;
 
   ctx->ctx_opaque = ctx_;
+
+  ctx_->tinfo = reinterpret_cast<TeamInfo *>(ctx->team_opaque);
   return true;
 }
 
@@ -285,6 +290,14 @@ void IPCBackend::teams_destroy() {
 
   free(pool_bitmask_);
   free(reduced_bitmask_);
+}
+
+void IPCBackend::setup_fence_buffer() {
+  /*
+  * Allocate heap space for fence
+  */
+  fence_pool = reinterpret_cast<int *>(roc_shmem_malloc(
+      sizeof(int) * num_pes));
 }
 
 void IPCBackend::roc_shmem_collective_init() {
