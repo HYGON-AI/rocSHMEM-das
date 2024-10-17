@@ -52,10 +52,14 @@
 #include "team_ctx_infra_tester.hpp"
 #include "team_ctx_primitive_tester.hpp"
 #include "team_reduction_tester.hpp"
+#include "wave_level_primitives.hpp"
 
 Tester::Tester(TesterArguments args) : args(args) {
   _type = (TestType)args.algorithm;
   _shmem_context = args.shmem_context;
+  CHECK_HIP(hipGetDevice(&device_id));
+  CHECK_HIP(hipGetDeviceProperties(&deviceProps, device_id));
+  num_warps = (args.wg_size - 1) / deviceProps.warpSize + 1;
   CHECK_HIP(hipStreamCreate(&stream));
   CHECK_HIP(hipEventCreate(&start_event));
   CHECK_HIP(hipEventCreate(&stop_event));
@@ -72,6 +76,11 @@ Tester::~Tester() {
 std::vector<Tester*> Tester::create(TesterArguments args) {
   int rank = args.myid;
   std::vector<Tester*> testers;
+  hipDeviceProp_t deviceProps;
+  int device_id, numWarps;
+  CHECK_HIP(hipGetDevice(&device_id));
+  CHECK_HIP(hipGetDeviceProperties(&deviceProps, device_id));
+  numWarps = (args.wg_size - 1) / deviceProps.warpSize + 1;
 
   if (rank == 0) std::cout << "*** Creating Test: ";
 
@@ -468,25 +477,73 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       testers.push_back(new ShmemPtrTester(args));
       return testers;
     case WGGetTestType:
-      if (rank == 0) std::cout << "Blocking WG level Gets***" << std::endl;
+      if (rank == 0) {
+        if (args.num_wgs > 1)
+          std::cout << "Tiled Blocking WG level Gets***" << std::endl;
+        else std::cout << "Blocking WG level Gets***" << std::endl;
+      }
       testers.push_back(new ExtendedPrimitiveTester(args));
       return testers;
     case WGGetNBITestType:
-      if (rank == 0) std::cout << "Non-Blocking WG level Gets***" << std::endl;
+      if (rank == 0) {
+        if (args.num_wgs > 1)
+          std::cout << "Tiled Non-Blocking WG level Gets***" << std::endl;
+        else std::cout << "Non-Blocking WG level Gets***" << std::endl;
+      }
       testers.push_back(new ExtendedPrimitiveTester(args));
       return testers;
     case WGPutTestType:
-      if (rank == 0) std::cout << "Blocking WG level Puts***" << std::endl;
+      if (rank == 0) {
+        if (args.num_wgs > 1)
+          std::cout << "Tiled Blocking WG level Puts***" << std::endl;
+        else std::cout << "Blocking WG level Puts***" << std::endl;
+      }
       testers.push_back(new ExtendedPrimitiveTester(args));
       return testers;
     case WGPutNBITestType:
-      if (rank == 0) std::cout << "Non-Blocking WG level Puts***" << std::endl;
+      if (rank == 0) {
+        if (args.num_wgs > 1)
+          std::cout << "Tiled Non-Blocking WG level Puts***" << std::endl;
+        else std::cout << "Non-Blocking WG level Puts***" << std::endl;
+      }
       testers.push_back(new ExtendedPrimitiveTester(args));
       return testers;
     case PutNBIMRTestType:
       if (rank == 0)
         std::cout << "Non-Blocking Put message rate***" << std::endl;
       testers.push_back(new PrimitiveMRTester(args));
+      return testers;
+    case WAVEGetTestType:
+      if (rank == 0) {
+        if (args.num_wgs > 1 || numWarps > 1)
+          std::cout << "Tiled Blocking WAVE level Gets***" << std::endl;
+        else std::cout << "Blocking WAVE level Gets***" << std::endl;
+      }
+      testers.push_back(new WaveLevelPrimitiveTester(args));
+      return testers;
+    case WAVEGetNBITestType:
+      if (rank == 0) {
+        if (args.num_wgs > 1 || numWarps > 1)
+          std::cout << "Tiled Non-Blocking WAVE level Gets***" << std::endl;
+        else std::cout << "Non-Blocking WAVE level Gets***" << std::endl;
+      }
+      testers.push_back(new WaveLevelPrimitiveTester(args));
+      return testers;
+    case WAVEPutTestType:
+      if (rank == 0) {
+        if (args.num_wgs > 1 || numWarps > 1)
+          std::cout << "Tiled Blocking WAVE level Puts***" << std::endl;
+        else std::cout << "Blocking WAVE level Puts***" << std::endl;
+      }
+      testers.push_back(new WaveLevelPrimitiveTester(args));
+      return testers;
+    case WAVEPutNBITestType:
+      if (rank == 0) {
+        if (args.num_wgs > 1 || numWarps > 1)
+          std::cout << "Tiled Non-Blocking WAVE level Puts***" << std::endl;
+        else std::cout << "Non-Blocking WAVE level Puts***" << std::endl;
+      }
+      testers.push_back(new WaveLevelPrimitiveTester(args));
       return testers;
     default:
       if (rank == 0) std::cout << "Unknown***" << std::endl;
@@ -560,10 +617,32 @@ void Tester::execute() {
     // data validation
     verifyResults(size);
 
+    /**
+     * Adjust size for *_wg and *_wave functions
+    */
+    uint64_t size_ = size;
+    TestType type = (TestType)args.algorithm;
+    switch (type) {
+      case WAVEGetTestType:
+      case WAVEGetNBITestType:
+      case WAVEPutTestType:
+      case WAVEPutNBITestType:
+        size_ *= (args.num_wgs * num_warps);
+        break;
+      case WGGetTestType:
+      case WGGetNBITestType:
+      case WGPutTestType:
+      case WGPutNBITestType:
+        size_ *= args.num_wgs;
+        break;
+      default:
+        break;
+    }
+
     barrier();
 
     if (_type != TeamCtxInfraTestType) {
-      print(size);
+      print(size_);
     }
   }
 }
@@ -655,6 +734,10 @@ uint64_t Tester::gpuCyclesToMicroseconds(uint64_t cycles) {
 uint64_t Tester::timerAvgInMicroseconds() {
   uint64_t sum = 0;
 
+  /**
+   * TODO: (bpotter/avinash) Modify the calcuation for the Tiled version of
+   *       puts and gets at wavefront level
+  */
   for (int i = 0; i < args.num_wgs; i++) {
     sum += gpuCyclesToMicroseconds(timer[i]);
   }

@@ -20,7 +20,7 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#include "extended_primitives.hpp"
+#include "wave_level_primitives.hpp"
 
 #include <roc_shmem/roc_shmem.hpp>
 
@@ -31,21 +31,23 @@ using namespace rocshmem;
 /******************************************************************************
  * DEVICE TEST KERNEL
  *****************************************************************************/
-__global__ void ExtendedPrimitiveTest(int loop, int skip, uint64_t *timer,
+__global__ void WaveLevelPrimitiveTest(int loop, int skip, uint64_t *timer,
                                       char *s_buf, char *r_buf, int size,
-                                      TestType type,
-                                      ShmemContextType ctx_type) {
+                                      TestType type, ShmemContextType ctx_type,
+                                      int wf_size) {
   __shared__ roc_shmem_ctx_t ctx;
   roc_shmem_wg_init();
   roc_shmem_wg_ctx_create(ctx_type, &ctx);
 
   /**
-   * Calculate start index for each work group for tiled version
-   * If the number of work groups is greater than 1, this kernel performs a
+   * Calculate start index for each wavefront for tiled version
+   * If the number of wavefronts is greater than 1, this kernel performs a
    * tiled functional test
   */
   uint64_t start;
-  uint64_t idx = size * get_flat_grid_id();
+  int wf_id = get_flat_block_id() / wf_size;
+  int wg_offset = size * get_flat_grid_id() * (get_flat_block_size() / wf_size);
+  int idx = wf_id * size + wg_offset;
   s_buf += idx;
   r_buf += idx;
 
@@ -53,17 +55,17 @@ __global__ void ExtendedPrimitiveTest(int loop, int skip, uint64_t *timer,
     if (i == skip) start = roc_shmem_timer();
 
     switch (type) {
-      case WGGetTestType:
-        roc_shmemx_ctx_getmem_wg(ctx, r_buf, s_buf, size, 1);
+      case WAVEGetTestType:
+        roc_shmemx_ctx_getmem_wave(ctx, r_buf, s_buf, size, 1);
         break;
-      case WGGetNBITestType:
-        roc_shmemx_ctx_getmem_nbi_wg(ctx, r_buf, s_buf, size, 1);
+      case WAVEGetNBITestType:
+        roc_shmemx_ctx_getmem_nbi_wave(ctx, r_buf, s_buf, size, 1);
         break;
-      case WGPutTestType:
-        roc_shmemx_ctx_putmem_wg(ctx, r_buf, s_buf, size, 1);
+      case WAVEPutTestType:
+        roc_shmemx_ctx_putmem_wave(ctx, r_buf, s_buf, size, 1);
         break;
-      case WGPutNBITestType:
-        roc_shmemx_ctx_putmem_nbi_wg(ctx, r_buf, s_buf, size, 1);
+      case WAVEPutNBITestType:
+        roc_shmemx_ctx_putmem_nbi_wave(ctx, r_buf, s_buf, size, 1);
         break;
       default:
         break;
@@ -83,37 +85,40 @@ __global__ void ExtendedPrimitiveTest(int loop, int skip, uint64_t *timer,
 /******************************************************************************
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
-ExtendedPrimitiveTester::ExtendedPrimitiveTester(TesterArguments args)
+WaveLevelPrimitiveTester::WaveLevelPrimitiveTester(TesterArguments args)
     : Tester(args) {
-  s_buf = static_cast<int*>(roc_shmem_malloc(args.max_msg_size * args.num_wgs));
-  r_buf = static_cast<int*>(roc_shmem_malloc(args.max_msg_size * args.num_wgs));
+  s_buf = static_cast<int*>(
+      roc_shmem_malloc(args.max_msg_size * args.num_wgs * num_warps));
+  r_buf = static_cast<int*>(
+      roc_shmem_malloc(args.max_msg_size * args.num_wgs * num_warps));
 }
 
-ExtendedPrimitiveTester::~ExtendedPrimitiveTester() {
+WaveLevelPrimitiveTester::~WaveLevelPrimitiveTester() {
   roc_shmem_free(s_buf);
   roc_shmem_free(r_buf);
 }
 
-void ExtendedPrimitiveTester::resetBuffers(uint64_t size) {
-  num_elems = (size * args.num_wgs) / sizeof(int);
+void WaveLevelPrimitiveTester::resetBuffers(uint64_t size) {
+  num_elems = (size * args.num_wgs * num_warps) / sizeof(int);
   std::iota(s_buf, s_buf + num_elems, 0);
-  memset(r_buf, 0, size * args.num_wgs);
+  memset(r_buf, 0, size * args.num_wgs * num_warps);
 }
 
-void ExtendedPrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize,
+void WaveLevelPrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize,
                                            int loop, uint64_t size) {
   size_t shared_bytes = 0;
 
-  hipLaunchKernelGGL(ExtendedPrimitiveTest, gridSize, blockSize, shared_bytes,
+  hipLaunchKernelGGL(WaveLevelPrimitiveTest, gridSize, blockSize, shared_bytes,
                      stream, loop, args.skip, timer, (char*)s_buf,
-                     (char*)r_buf, size, _type, _shmem_context);
+                     (char*)r_buf, size, _type, _shmem_context,
+                     deviceProps.warpSize);
 
-  num_msgs = (loop + args.skip) * gridSize.x;
-  num_timed_msgs = loop * gridSize.x;
+  num_msgs = (loop + args.skip) * gridSize.x * num_warps;
+  num_timed_msgs = loop * gridSize.x * num_warps;
 }
 
-void ExtendedPrimitiveTester::verifyResults(uint64_t size) {
-  int check_id = (_type == WGGetTestType || _type == WGGetNBITestType)
+void WaveLevelPrimitiveTester::verifyResults(uint64_t size) {
+  int check_id = (_type == WAVEGetTestType || _type == WAVEGetNBITestType)
                      ? 0
                      : 1;
 

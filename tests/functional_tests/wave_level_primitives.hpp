@@ -20,8 +20,8 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#ifndef _EXTENDED_PRIMITIVES_HPP_
-#define _EXTENDED_PRIMITIVES_HPP_
+#ifndef _WAVE_LEVEL_PRIMITIVE_TEST_HPP_
+#define _WAVE_LEVEL_PRIMITIVE_TEST_HPP_
 
 #include "tester.hpp"
 #include "../src/util.hpp"
@@ -29,10 +29,10 @@
 /******************************************************************************
  * HOST TESTER CLASS
  *****************************************************************************/
-class ExtendedPrimitiveTester : public Tester {
+class WaveLevelPrimitiveTester : public Tester {
  public:
-  explicit ExtendedPrimitiveTester(TesterArguments args);
-  virtual ~ExtendedPrimitiveTester();
+  explicit WaveLevelPrimitiveTester(TesterArguments args);
+  virtual ~WaveLevelPrimitiveTester();
 
  protected:
   virtual void resetBuffers(uint64_t size) override;
