@@ -136,9 +136,8 @@ void TesterArguments::get_rocshmem_arguments() {
   myid = roc_shmem_my_pe();
 
   TestType type = (TestType)algorithm;
-  if ((type != ReductionTestType) && (type != BarrierAllTestType) &&
-      (type != SyncAllTestType) && (type != SyncTestType) &&
-      (type != BroadcastTestType) && (type != AllToAllTestType) &&
+  if ((type != BarrierAllTestType) && (type != SyncAllTestType) &&
+      (type != SyncTestType) && (type != AllToAllTestType) &&
       (type != FCollectTestType) && (type != TeamReductionTestType) &&
       (type != TeamBroadcastTestType) && (type != PingAllTestType)) {
     if (numprocs != 2) {

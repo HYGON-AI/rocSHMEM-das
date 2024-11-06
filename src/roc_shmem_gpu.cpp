@@ -430,33 +430,11 @@ __device__ void *roc_shmem_ptr(const void *dest, int pe) {
 }
 
 template <typename T, ROC_SHMEM_OP Op>
-__device__ void roc_shmem_wg_to_all(roc_shmem_ctx_t ctx, T *dest,
-                                    const T *source, int nreduce, int PE_start,
-                                    int logPE_stride, int PE_size, T *pWrk,
-                                    long *pSync) {
-  GPU_DPRINTF("Function: roc_shmem_to_all\n");
-
-  get_internal_ctx(ctx)->to_all<T, Op>(dest, source, nreduce, PE_start,
-                                       logPE_stride, PE_size, pWrk, pSync);
-}
-
-template <typename T, ROC_SHMEM_OP Op>
 __device__ void roc_shmem_wg_to_all(roc_shmem_ctx_t ctx, roc_shmem_team_t team,
                                     T *dest, const T *source, int nreduce) {
   GPU_DPRINTF("Function: roc_shmem_to_all\n");
 
   get_internal_ctx(ctx)->to_all<T, Op>(team, dest, source, nreduce);
-}
-
-template <typename T>
-__device__ void roc_shmem_wg_broadcast(roc_shmem_ctx_t ctx, T *dest,
-                                       const T *source, int nelem, int pe_root,
-                                       int pe_start, int log_pe_stride,
-                                       int pe_size, long *p_sync) {
-  GPU_DPRINTF("Function: roc_shmem_broadcast\n");
-
-  get_internal_ctx(ctx)->broadcast<T>(dest, source, nelem, pe_root, pe_start,
-                                      log_pe_stride, pe_size, p_sync);
 }
 
 template <typename T>
@@ -887,9 +865,6 @@ __device__ int roc_shmem_team_translate_pe(roc_shmem_team_t src_team,
  */
 #define REDUCTION_GEN(T, Op)                                                 \
   template __device__ void roc_shmem_wg_to_all<T, Op>(                       \
-      roc_shmem_ctx_t ctx, T * dest, const T *source, int nreduce,           \
-      int PE_start, int logPE_stride, int PE_size, T *pWrk, long *pSync);    \
-  template __device__ void roc_shmem_wg_to_all<T, Op>(                       \
       roc_shmem_ctx_t ctx, roc_shmem_team_t team, T * dest, const T *source, \
       int nreduce);
 
@@ -919,9 +894,6 @@ __device__ int roc_shmem_team_translate_pe(roc_shmem_team_t src_team,
   template __device__ void roc_shmem_get_nbi<T>(T * dest, const T *source,     \
                                                 size_t nelems, int pe);        \
   template __device__ T roc_shmem_g<T>(const T *source, int pe);               \
-  template __device__ void roc_shmem_wg_broadcast<T>(                          \
-      roc_shmem_ctx_t ctx, T * dest, const T *source, int nelem, int pe_root,  \
-      int pe_start, int log_pe_stride, int pe_size, long *p_sync);             \
   template __device__ void roc_shmem_wg_broadcast<T>(                          \
       roc_shmem_ctx_t ctx, roc_shmem_team_t team, T * dest, const T *source,   \
       int nelem, int pe_root);                                                 \
@@ -1101,12 +1073,6 @@ __device__ int roc_shmem_team_translate_pe(roc_shmem_team_t src_team,
 
 #define REDUCTION_DEF_GEN(T, TNAME, Op_API, Op)                             \
   __device__ void roc_shmem_ctx_##TNAME##_##Op_API##_wg_to_all(             \
-      roc_shmem_ctx_t ctx, T *dest, const T *source, int nreduce,           \
-      int PE_start, int logPE_stride, int PE_size, T *pWrk, long *pSync) {  \
-    roc_shmem_wg_to_all<T, Op>(ctx, dest, source, nreduce, PE_start,        \
-                               logPE_stride, PE_size, pWrk, pSync);         \
-  }                                                                         \
-  __device__ void roc_shmem_ctx_##TNAME##_##Op_API##_wg_to_all(             \
       roc_shmem_ctx_t ctx, roc_shmem_team_t team, T *dest, const T *source, \
       int nreduce) {                                                        \
     roc_shmem_wg_to_all<T, Op>(ctx, team, dest, source, nreduce);           \
@@ -1239,12 +1205,6 @@ __device__ int roc_shmem_team_translate_pe(roc_shmem_team_t src_team,
   __device__ void roc_shmemx_##TNAME##_get_nbi_wg(T *dest, const T *source,    \
                                                   size_t nelems, int pe) {     \
     roc_shmemx_get_nbi_wg<T>(dest, source, nelems, pe);                        \
-  }                                                                            \
-  __device__ void roc_shmem_ctx_##TNAME##_wg_broadcast(                        \
-      roc_shmem_ctx_t ctx, T *dest, const T *source, int nelem, int pe_root,   \
-      int pe_start, int log_pe_stride, int pe_size, long *p_sync) {            \
-    roc_shmem_wg_broadcast<T>(ctx, dest, source, nelem, pe_root, pe_start,     \
-                              log_pe_stride, pe_size, p_sync);                 \
   }                                                                            \
   __device__ void roc_shmem_ctx_##TNAME##_wg_broadcast(                        \
       roc_shmem_ctx_t ctx, roc_shmem_team_t team, T *dest, const T *source,    \

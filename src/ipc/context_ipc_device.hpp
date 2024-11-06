@@ -122,11 +122,6 @@ class IPCContext : public Context {
 
   // Collectives
   template <typename T, ROC_SHMEM_OP Op>
-  __device__ void to_all(T *dest, const T *source, int nreduce, int PE_start,
-                         int logPE_stride, int PE_size, T *pWrk,
-                         long *pSync);  // NOLINT(runtime/int)
-
-  template <typename T, ROC_SHMEM_OP Op>
   __device__ void to_all(roc_shmem_team_t team, T *dest, const T *source,
                          int nreduce);
 
@@ -134,10 +129,6 @@ class IPCContext : public Context {
   __device__ void broadcast(roc_shmem_team_t team, T *dest, const T *source,
                             int nelems, int pe_root);
 
-  template <typename T>
-  __device__ void broadcast(T *dest, const T *source, int nelems, int pe_root,
-                            int pe_start, int log_pe_stride, int pe_size,
-                            long *p_sync);  // NOLINT(runtime/int)
   template <typename T>
   __device__ void alltoall(roc_shmem_team_t team, T *dest, const T *source,
                            int nelems);
@@ -206,7 +197,17 @@ class IPCContext : public Context {
   char* g_ret;
 
   //internal functions used by collective operations
-   template <typename T>
+  template <typename T, ROC_SHMEM_OP Op>
+  __device__ void internal_to_all(T *dest, const T *source, int nreduce, int PE_start,
+                         int stride, int PE_size, T *pWrk,
+                         long *pSync);  // NOLINT(runtime/int)
+
+  template <typename T>
+  __device__ void internal_broadcast(T *dest, const T *source, int nelems, int pe_root,
+                            int pe_start, int stride, int pe_size,
+                            long *p_sync);  // NOLINT(runtime/int)
+
+  template <typename T>
   __device__ void internal_put_broadcast(T *dst, const T *src, int nelems,
                                          int pe_root, int PE_start,
                                          int logPE_stride, int PE_size);  // NOLINT(runtime/int)

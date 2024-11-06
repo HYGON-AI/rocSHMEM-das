@@ -35,7 +35,6 @@
 #include "amo_extended_tester.hpp"
 #include "amo_standard_tester.hpp"
 #include "barrier_all_tester.hpp"
-#include "broadcast_tester.hpp"
 #include "empty_tester.hpp"
 #include "extended_primitives.hpp"
 #include "fcollect_tester.hpp"
@@ -44,7 +43,6 @@
 #include "primitive_mr_tester.hpp"
 #include "primitive_tester.hpp"
 #include "random_access_tester.hpp"
-#include "reduction_tester.hpp"
 #include "shmem_ptr_tester.hpp"
 #include "swarm_tester.hpp"
 #include "sync_tester.hpp"
@@ -154,130 +152,6 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
                        : std::make_pair(false, "Got " + std::to_string(v) +
                                                    ", Expect " +
                                                    std::to_string(n_pes));
-          }));
-      return testers;
-    case ReductionTestType:
-      if (rank == 0) std::cout << "All-to-All Reduction ###" << std::endl;
-
-      testers.push_back(new ReductionTester<float, ROC_SHMEM_SUM>(
-          args,
-          [](float& f1, float& f2) {
-            f1 = 1;
-            f2 = 1;
-          },
-          [](float v, float n_pes) {
-            return (v == n_pes)
-                       ? std::make_pair(true, "")
-                       : std::make_pair(false, "Got " + std::to_string(v) +
-                                                   ", Expect " +
-                                                   std::to_string(n_pes));
-          }));
-
-#if 0
-            testers.push_back(
-                new ReductionTester<double, ROC_SHMEM_SUM>(
-                    args,
-                    [](double& f1, double& f2)
-                    {
-                        f1=1;
-                        f2=1;
-                    },
-                    [](double v, double n_pes)
-                    {
-                        return (v == n_pes) ?
-                            std::make_pair(true, "") :
-                            std::make_pair(false,
-                                "Got "+ std::to_string(v) + ", Expect " + std::to_string(n_pes));
-                    }
-                )
-            );
-
-            testers.push_back( new ReductionTester<long double, ROC_SHMEM_SUM>(args,
-                            [](long double& f1,long  double& f2){f1=1; f2=1;},
-                            [](long double v){ return (v==2.0) ? std::make_pair(true, "") :
-                                   std::make_pair(false, "Got "+ std::to_string(v) +", Expect 2.0. [r3]."); }));
-            testers.push_back( new ReductionTester<short, ROC_SHMEM_SUM>(args,
-                            [](short& f1, short& f2){f1=1; f2=2;},
-                            [](short v){ return (v==3) ? std::make_pair(true, "") :
-                                   std::make_pair(false, "Got "+ std::to_string(v) +", Expect 3. [r4]."); }));
-            testers.push_back( new ReductionTester<int, ROC_SHMEM_SUM>(args,
-                            [](int& f1, int& f2){f1=1; f2=2;},
-                            [](int v){ return (v==3) ? std::make_pair(true, "") :
-                                   std::make_pair(false, "Got "+ std::to_string(v) +", Expect 3. [r5]."); }));
-            testers.push_back( new ReductionTester<long long, ROC_SHMEM_SUM>(args,
-                            [](long long& f1, long long& f2){f1=1; f2=2;},
-                            [](long long v){ return (v==3) ? std::make_pair(true, "") :
-                                   std::make_pair(false, "Got "+ std::to_string(v) +", Expect 3. [r6]."); }));
-            testers.push_back( new ReductionTester<long long, ROC_SHMEM_SUM>(args,
-                            [](long long& f1, long long& f2){f1=1; f2=2;},
-                            [](long long v){ return (v==3) ? std::make_pair(true, "") :
-                                   std::make_pair(false, "Got "+ std::to_string(v) +", Expect 3. [r7]."); }));
-            // seems like deadlock or soemthing, this test hang forever
-            testers.push_back( new ReductionTester<short, ROC_SHMEM_MIN>(args,
-                            [](short& f1, short& f2){f1=1; f2=2;},
-                            [](short v){ return (v==1) ? std::make_pair(true, "") :
-                                   std::make_pair(false, "Got "+ std::to_string(v) +", Expect 1. [r8]."); }));
-            testers.push_back( new ReductionTester<int, ROC_SHMEM_MIN>(args,
-                            [](int& f1, int& f2){f1=1; f2=2;},
-                            [](int v){ return (v==1) ? std::make_pair(true, "") :
-                                   std::make_pair(false, "Got "+ std::to_string(v) +", Expect 1. [r9]."); }));
-            testers.push_back( new ReductionTester<long long, ROC_SHMEM_MIN>(args,
-                            [](long long& f1, long long& f2){f1=1; f2=2;},
-                            [](long long v){ return (v==1) ? std::make_pair(true, "") :
-                                   std::make_pair(false, "Got "+ std::to_string(v) +", Expect 1. [r10]."); }));
-            testers.push_back( new ReductionTester<long long, ROC_SHMEM_MIN>(args,
-                            [](long long& f1, long long& f2){f1=1; f2=2;},
-                            [](long long v){ return (v==1) ? std::make_pair(true, "") :
-                                   std::make_pair(false, "Got "+ std::to_string(v) +", Expect 1. [r11]."); }));
-            testers.push_back( new ReductionTester<int, ROC_SHMEM_MAX>(args,
-                            [](int& f1, int& f2){f1=1; f2=2;},
-                            [](int v){ return (v==2) ? std::make_pair(true, "") :
-                                   std::make_pair(false, "Got "+ std::to_string(v) +", Expect 2. [r12]."); }));
-            testers.push_back( new ReductionTester<long long, ROC_SHMEM_MAX>(args,
-                            [](long long& f1, long long& f2){f1=1; f2=2;},
-                            [](long long v){ return (v==2) ? std::make_pair(true, "") :
-                                   std::make_pair(false, "Got "+ std::to_string(v) +", Expect 2. [r13]."); }));
-            testers.push_back( new ReductionTester<long long, ROC_SHMEM_MAX>(args,
-                            [](long long& f1, long long& f2){f1=1; f2=2;},
-                            [](long long v){ return (v==2) ? std::make_pair(true, "") :
-                                   std::make_pair(false, "Got "+ std::to_string(v) +", Expect 2. [r14]."); }));
-#endif
-      return testers;
-    case BroadcastTestType:
-      if (rank == 0) {
-        std::cout << "Broadcast Test ###" << std::endl;
-      }
-      testers.push_back(new BroadcastTester<long>(
-          args,
-          [](long& f1, long& f2) {
-            f1 = 1;
-            f2 = 2;
-          },
-          [rank](long v) {
-            long expected_val;
-            /**
-             * The verification routine here requires that the
-             * PE_root value is 0 which denotes that the
-             * sending processing element is rank 0.
-             *
-             * The difference in expected values arises from
-             * the specification for broadcast where the
-             * PE_root processing element does not copy the
-             * contents from its own source to dest during
-             * the broadcast.
-             */
-            if (rank == 0) {
-              expected_val = 2;
-            } else {
-              expected_val = 1;
-            }
-
-            return (v == expected_val)
-                       ? std::make_pair(true, "")
-                       : std::make_pair(
-                             false, "Rank " + std::to_string(rank) + ", Got " +
-                                        std::to_string(v) + ", Expect " +
-                                        std::to_string(expected_val));
           }));
       return testers;
     case TeamBroadcastTestType:
@@ -658,9 +532,7 @@ bool Tester::peLaunchesKernel() {
   /**
    * Some test types are active on both sides.
    */
-  is_launcher = is_launcher || (_type == ReductionTestType) ||
-                (_type == TeamReductionTestType) ||
-                (_type == BroadcastTestType) ||
+  is_launcher = is_launcher || (_type == TeamReductionTestType) ||
                 (_type == TeamBroadcastTestType) ||
                 (_type == AllToAllTestType) || (_type == FCollectTestType) ||
                 (_type == PingPongTestType) || (_type == BarrierAllTestType) ||
