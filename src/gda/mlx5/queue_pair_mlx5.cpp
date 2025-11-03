@@ -31,12 +31,16 @@
 namespace rocshmem {
 
 __device__ void QueuePair::mlx5_ring_doorbell(uint64_t db_val, uint64_t my_sq_counter) {
+  if (gpuHdpReg != nullptr) {
+    __hip_atomic_store(reinterpret_cast<uint32_t*>(gpuHdpReg), (uint32_t)0x1, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
+  }
   swap_endian_store(const_cast<uint32_t*>(dbrec), (uint32_t)my_sq_counter);
   __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
   __hip_atomic_store(db.ptr, db_val, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
   uint64_t db_uint = __hip_atomic_load(&db.uint, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
   db_uint ^= 0x100;
+
   __hip_atomic_store(&db.uint, db_uint, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
 }
 
@@ -71,7 +75,7 @@ __device__ void QueuePair::mlx5_quiet() {
       if (is_leader) {
         done = __hip_atomic_compare_exchange_strong(&quiet_active, &active, active + quiet_amount, __ATOMIC_RELAXED, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
         if (done) {
-          wave_cq_consumer = __hip_atomic_fetch_add(&cq_consumer, quiet_amount, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+          wave_cq_consumer = __hip_atomic_fetch_add((uint64_t*)&cq_consumer, quiet_amount, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
         }
       }
       done = __shfl(done, leader_phys_lane_id);
@@ -117,7 +121,7 @@ __device__ void QueuePair::mlx5_quiet() {
 
       uint64_t sunk_wqe_id = wqe_broadcast[wavefront_id];
       __hip_atomic_fetch_max(&sq_sunk, sunk_wqe_id, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-      __hip_atomic_fetch_add(&quiet_completed, quiet_amount, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+      __hip_atomic_fetch_add((uint64_t*)&quiet_completed, quiet_amount, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     }
   }
 }
@@ -192,7 +196,7 @@ __device__ __forceinline__ void QueuePair::mlx5_ring_doorbell(
 
   mlx5_ring_doorbell(*ctrl_wqe_8B_for_db, wave_sq_counter + num_wqes);
 
-  __hip_atomic_fetch_add(&quiet_posted, num_wqes,
+  __hip_atomic_fetch_add((uint64_t*)&quiet_posted, num_wqes,
     __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
 
   __hip_atomic_store(&sq_db_touched, wave_sq_counter + num_wqes,
@@ -214,7 +218,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int32_t size, uintptr_t laddr,
 
   // 1. Leader allocates SQ entries for the whole wave
   if (is_leader) {
-    wave_sq_counter = __hip_atomic_fetch_add(&sq_posted, num_wqes,
+    wave_sq_counter = __hip_atomic_fetch_add((uint64_t*)&sq_posted, num_wqes,
                       __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_AGENT);
   }
   wave_sq_counter = __shfl(wave_sq_counter, leader_phys_lane_id);
@@ -289,7 +293,7 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo(int32_t size,
 
   // 1. Leader allocates SQ entries for the whole wave
   if (is_leader) {
-    wave_sq_counter = __hip_atomic_fetch_add(&sq_posted, num_wqes,
+    wave_sq_counter = __hip_atomic_fetch_add((uint64_t*)&sq_posted, num_wqes,
                       __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
   }
   wave_sq_counter = __shfl(wave_sq_counter, leader_phys_lane_id);

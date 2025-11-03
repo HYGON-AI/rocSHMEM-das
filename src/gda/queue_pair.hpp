@@ -399,6 +399,7 @@ class QueuePair {
   FreeListT* fetching_atomic_freelist{nullptr};
 
   HIPAllocator allocator{};
+  uint32_t* gpuHdpReg = nullptr;
 
   uint8_t gda_op_rdma_write;
   uint8_t gda_op_rdma_read;

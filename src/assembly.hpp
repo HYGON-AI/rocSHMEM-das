@@ -46,7 +46,7 @@ __device__ __forceinline__ int uncached_load_ubyte(uint8_t* src) {
 #endif
 #if defined(__gfx908__)
 #endif
-#if defined(__gfx90a__) || defined(__gfx1100__)
+#if defined(__gfx936__) || defined (__gfx1100__)
   asm volatile(
       "global_load_ubyte %0 %1 off glc slc \n"
       "s_waitcnt vmcnt(0)"
@@ -76,7 +76,7 @@ __device__ __forceinline__ void refresh_volatile_sbyte(volatile int *assigned_va
 #endif
 #if defined(__gfx908__)
 #endif
-#if defined(__gfx90a__) || defined(__gfx1100__)
+#if defined(__gfx936__) || defined (__gfx1100__)
   asm volatile(
     "global_load_sbyte %0 %1 off glc slc\n "
     "s_waitcnt vmcnt(0)"
@@ -105,7 +105,7 @@ __device__ __forceinline__ void refresh_volatile_dwordx2(volatile uint64_t *assi
 #endif
 #if defined(__gfx908__)
 #endif
-#if defined(__gfx90a__) || defined(__gfx1100__)
+#if defined(__gfx936__) || defined (__gfx1100__)
   asm volatile(
     "global_load_dwordx2 %0 %1 off glc slc\n "
     "s_waitcnt vmcnt(0)"
@@ -143,7 +143,7 @@ NOWARN(-Wdeprecated-volatile,
 #endif
 #if defined(__gfx908__)
 #endif
-#if defined(__gfx90a__) || defined(__gfx1100__)
+#if defined(__gfx936__) || defined (__gfx1100__)
         asm volatile(
             "global_load_dword %0 %1 off glc slc \n"
             "s_waitcnt vmcnt(0)"
@@ -170,7 +170,7 @@ NOWARN(-Wdeprecated-volatile,
 #endif
 #if defined(__gfx908__)
 #endif
-#if defined(__gfx90a__) || defined(__gfx1100__)
+#if defined(__gfx936__) || defined (__gfx1100__)
         asm volatile(
             "global_load_dwordx2 %0 %1 off glc slc \n"
             "s_waitcnt vmcnt(0)"
@@ -206,7 +206,7 @@ __device__ __forceinline__ void __roc_flush() {
 #endif
 #if defined(__gfx908__) || defined(__gfx1100__)
 #endif
-#if defined(__gfx90a__)
+#if defined(__gfx936__)
 //  asm volatile("s_dcache_wb;");
 //  asm volatile("buffer_wbl2;");
 #endif
@@ -225,7 +225,7 @@ __device__ __forceinline__ void store_asm(uint8_t* val, uint8_t* dst,
 #endif
 #if defined(__gfx908__)
 #endif
-#if defined(__gfx90a__)
+#if defined(__gfx936__)
       int16_t val16{*(reinterpret_cast<int16_t*>(val))};
       asm volatile("flat_store_short %0 %1 glc slc" : : "v"(dst), "v"(val16));
 #endif
@@ -249,7 +249,7 @@ __device__ __forceinline__ void store_asm(uint8_t* val, uint8_t* dst,
 #endif
 #if defined(__gfx908__)
 #endif
-#if defined(__gfx90a__) || defined(__gfx1100__)
+#if defined(__gfx936__) || defined (__gfx1100__)
       asm volatile("flat_store_dword %0 %1 glc slc" : : "v"(dst), "v"(val32));
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
@@ -266,7 +266,7 @@ __device__ __forceinline__ void store_asm(uint8_t* val, uint8_t* dst,
 #endif
 #if defined(__gfx908__)
 #endif
-#if defined(__gfx90a__) || defined(__gfx1100__)
+#if defined(__gfx936__) || defined (__gfx1100__)
       asm volatile("flat_store_dwordx2 %0 %1 glc slc" : : "v"(dst), "v"(val64));
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)

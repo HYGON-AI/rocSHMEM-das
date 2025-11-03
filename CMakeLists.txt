@@ -92,7 +92,9 @@ message(STATUS "rocSHMEM Version: " "${VERSION_STRING}")
 
 project(rocshmem VERSION ${VERSION_STRING} LANGUAGES CXX)
 
-find_package(ROCmCMakeBuildTools PATHS /opt/rocm)
+find_package(ROCM PATHS ${ROCM_PATH})
+set(ROCMCHECKS_WARN_TOOLCHAIN_VAR OFF)
+find_package(ROCmCMakeBuildTools)
 include(ROCMCreatePackage)
 include(ROCMInstallTargets)
 include(ROCMCheckTargetIds)
@@ -106,11 +108,8 @@ rocm_setup_version(VERSION ${VERSION_STRING})
 include(cmake/rocm_local_targets.cmake)
 
 set(DEFAULT_GPUS
-    gfx90a:xnack-;
-    gfx90a:xnack+;
-    gfx1100;
-    gfx1201;
-    gfx942)
+    gfx936;
+    gfx938)
 
 if(${ROCM_MAJOR_VERSION} GREATER 6)
   list(APPEND DEFAULT_GPUS gfx950)

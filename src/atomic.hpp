@@ -91,7 +91,8 @@ T fetch_add(T* obj, U arg, rocshmem_memory_orders o) {
 template <class T, class U, rocshmem_memory_scope s>
 __host__ __device__
 T fetch_sub(T* obj, U arg, rocshmem_memory_orders o) {
-  return __hip_atomic_fetch_sub(obj, arg, o.atomic, s);
+  // return __hip_atomic_fetch_sub(obj, arg, o.atomic, s);
+  return atomicSub(obj, arg);
 }
 
 template <class T, class U, rocshmem_memory_scope s>

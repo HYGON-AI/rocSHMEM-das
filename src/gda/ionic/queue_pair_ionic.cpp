@@ -50,7 +50,7 @@ __device__ uint32_t QueuePair::reserve_sq(uint64_t activemask, uint32_t num_wqes
 
   // reserve space for wqes in sq
   if (is_first_active_lane(activemask)) {
-    my_sq_prod = __hip_atomic_fetch_add(&sq_prod, num_wqes, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    my_sq_prod = __hip_atomic_fetch_add((uint32_t*)&sq_prod, num_wqes, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
   }
   my_sq_prod = __shfl(my_sq_prod, get_first_active_lane_id(activemask));
 

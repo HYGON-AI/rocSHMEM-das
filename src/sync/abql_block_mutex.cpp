@@ -40,7 +40,7 @@ __device__ void ABQLBlockMutex::unlock(TicketT my_ticket) {
 }
 
 __device__ ABQLBlockMutex::TicketT ABQLBlockMutex::grab_ticket_() {
-  TicketT ticket{atomicAdd(&ticket_, 1)};
+  TicketT ticket{atomicAdd((uint64_t*)&ticket_, 1)};
   return ticket;
 }
 

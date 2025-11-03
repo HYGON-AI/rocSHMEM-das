@@ -253,8 +253,9 @@ class AtomicWFQueue {
   }
 
   __device__ void atomic_sub(int* address, const int val) {
-    __hip_atomic_fetch_sub(address, val, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_AGENT);
+    // __hip_atomic_fetch_sub(address, val, __ATOMIC_SEQ_CST,
+    //                        __HIP_MEMORY_SCOPE_AGENT);
+	atomicSub(address, val);
   }
 
   /**

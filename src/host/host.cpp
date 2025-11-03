@@ -131,8 +131,9 @@ __host__ HostInterface::HostInterface(HdpPolicy* hdp_policy,
 
 #if defined USE_HDP_FLUSH
 __host__ void HostInterface::create_hdp_window() {
+  int size = hdp_policy_->get_hdp_flush_ptr() == nullptr ? 0 : sizeof(unsigned int);
   mpilib_ftable_.Win_create(hdp_policy_->get_hdp_flush_ptr(),
-                            sizeof(unsigned int), /* size of window */
+                            size, /* size of window */
                             sizeof(unsigned int), /* displacement */
                             MPI_INFO_NULL, host_comm_world_, &hdp_win);
   

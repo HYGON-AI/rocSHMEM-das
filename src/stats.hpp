@@ -162,7 +162,7 @@ class Stats {
   }
 
   __device__ void incStat(int index, int value = 1) {
-    atomicAdd(&stats[index], value);
+    atomicAdd((int*)&stats[index], value);
   }
 
   __device__ void accumulateStats(const Stats<I> &otherStats) {
