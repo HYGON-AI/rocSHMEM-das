@@ -381,9 +381,19 @@ namespace rocshmem
   {
     static bool isInitialized = false;
     static vector<IbvDevice> ibvDeviceList = {};
+    static std::set<std::string> allowedDevices;
 
     // Build list on first use
     if (!isInitialized) {
+      // 获取并解析环境变量
+      char* allowedDevicesEnv = std::getenv("ROCSHMEM_ALLOWED_IBV_DEVICES");
+      if (allowedDevicesEnv) {
+          std::stringstream ss(allowedDevicesEnv);
+          std::string device;
+          while (std::getline(ss, device, ',')) {
+              allowedDevices.insert(device);
+          }
+      }
 
       // Query the number of IBV devices
       int numIbvDevices = 0;
@@ -397,6 +407,13 @@ namespace rocshmem
           ibvDevice.devicePtr = deviceList[i];
           ibvDevice.name = deviceList[i]->name;
           ibvDevice.hasActivePort = false;
+
+          // 检查设备是否在允许列表中
+          if (!allowedDevices.empty() && allowedDevices.find(ibvDevice.name) == allowedDevices.end()) {
+              continue; // 跳过不在允许列表中的设备
+          }
+          DPRINTF("allowed device : %s\n", ibvDevice.name.c_str());
+
           {
             struct ibv_context *context = ibv.open_device(ibvDevice.devicePtr);
             if (context) {
@@ -673,6 +690,7 @@ namespace rocshmem
 
   int GetClosestCpuNumaToGpu(int gpuIndex)
   {
+#if 0
     hsa_agent_t gpuAgent;
     ERR_CHECK(GetHsaAgent({EXE_GPU, gpuIndex}, gpuAgent));
 
@@ -686,6 +704,7 @@ namespace rocshmem
         if (cpuAgent.handle == closestCpuAgent.handle) return i;
       }
     }
+#endif
     return -1;
   }
 
