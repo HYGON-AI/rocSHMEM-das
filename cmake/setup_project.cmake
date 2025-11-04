@@ -36,7 +36,7 @@ set(CMAKE_BUILD_TYPE "Release" CACHE STRING
 #==================================================================================================
 if(NOT DEFINED ROCM_PATH)
   # Guess default location
-  set(ROCM_PATH "/opt/rocm")
+  set(ROCM_PATH "/opt/dtk")
   message(WARNING "Unable to find ROCM_PATH: Falling back to ${ROCM_PATH}")
 else()
   message(STATUS "ROCM_PATH found: ${ROCM_PATH}")
@@ -45,22 +45,26 @@ set(ENV{ROCM_PATH} ${ROCM_PATH})
 
 ## Check for ROCm version
 
-if(ROCM_PATH)
-  message(STATUS "Reading ROCM version from ${ROCM_PATH}/.info/version")
-  file(READ "${ROCM_PATH}/.info/version" rocm_version_string)
-else()
-  message(FATAL_ERROR "Could not determine ROCM version (set EXPLICIT_ROCM_VERSION or set ROCM_PATH to a valid installation)")
-endif()
-string(REGEX MATCH "([0-9]+)\\.([0-9]+)\\.([0-9]+)" rocm_version_matches ${rocm_version_string})
-if (rocm_version_matches)
-  set(ROCM_MAJOR_VERSION ${CMAKE_MATCH_1})
-  set(ROCM_MINOR_VERSION ${CMAKE_MATCH_2})
-  set(ROCM_PATCH_VERSION ${CMAKE_MATCH_3})
-
-  message(STATUS "ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}")
-else()
-  message(WARNING "Failed to extract ROCm version.")
-endif()
+#if(ROCM_PATH)
+#  message(STATUS "Reading ROCM version from ${ROCM_PATH}/.info/version")
+#  file(READ "${ROCM_PATH}/.info/version" rocm_version_string)
+#else()
+#  message(FATAL_ERROR "Could not determine ROCM version (set EXPLICIT_ROCM_VERSION or set ROCM_PATH to a valid installation)")
+#endif()
+#string(REGEX MATCH "([0-9]+)\\.([0-9]+)\\.([0-9]+)" rocm_version_matches ${rocm_version_string})
+#if (rocm_version_matches)
+#  set(ROCM_MAJOR_VERSION ${CMAKE_MATCH_1})
+#  set(ROCM_MINOR_VERSION ${CMAKE_MATCH_2})
+#  set(ROCM_PATCH_VERSION ${CMAKE_MATCH_3})
+#
+#  message(STATUS "ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}")
+#else()
+#  message(WARNING "Failed to extract ROCm version.")
+#endif()
+set(ROCM_MAJOR_VERSION "6")
+set(ROCM_MINOR_VERSION "1")
+set(ROCM_PATCH_VERSION "25085")
+message(STATUS "ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}")
 
 foreach (root ${hip_ROOT} $ENV{hip_ROOT} ${ROCM_ROOT} $ENV{ROCM_ROOT} ${ROCM_PATH} $ENV{ROCM_PATH})
   if (IS_DIRECTORY ${root})
@@ -68,7 +72,7 @@ foreach (root ${hip_ROOT} $ENV{hip_ROOT} ${ROCM_ROOT} $ENV{ROCM_ROOT} ${ROCM_PAT
   endif()
 endforeach()
 if (NOT DEFINED CMAKE_CXX_COMPILER)
-  find_program(CMAKE_CXX_COMPILER hipcc PATHS /opt/rocm)
+  find_program(CMAKE_CXX_COMPILER hipcc PATHS /opt/dtk/bin/)
 endif()
 
 ###############################################################################
