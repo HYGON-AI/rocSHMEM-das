@@ -385,7 +385,6 @@ namespace rocshmem
 
     // Build list on first use
     if (!isInitialized) {
-      // 获取并解析环境变量
       char* allowedDevicesEnv = std::getenv("ROCSHMEM_ALLOWED_IBV_DEVICES");
       if (allowedDevicesEnv) {
           std::stringstream ss(allowedDevicesEnv);
@@ -408,10 +407,8 @@ namespace rocshmem
           ibvDevice.name = deviceList[i]->name;
           ibvDevice.hasActivePort = false;
 
-          // 检查设备是否在允许列表中
-          if (!allowedDevices.empty() && allowedDevices.find(ibvDevice.name) == allowedDevices.end()) {
-              continue; // 跳过不在允许列表中的设备
-          }
+          if (!allowedDevices.empty() && allowedDevices.find(ibvDevice.name) == allowedDevices.end())
+              continue;
           DPRINTF("allowed device : %s\n", ibvDevice.name.c_str());
 
           {
@@ -715,6 +712,30 @@ namespace rocshmem
     return GetIbvDeviceList()[nicIndex].numaNode;
   }
 
+  struct NICInfo {
+    std::string nicName;
+    int index;
+  };
+  typedef std::unordered_map<std::string, NICInfo> GPU2NIC;
+  bool readBusToNic(const std::string& file, GPU2NIC &mOut) {
+    std::ifstream fin(file);
+    if (!fin) {
+        std::cout << "rocshmem : can't find " << file << "\n";
+        return false;
+    }
+
+    std::string line;
+    while (std::getline(fin, line)) {
+        std::istringstream iss(line);
+        std::string busId, nic;
+        int thirdColumn;
+        
+        if (iss >> busId >> nic >> thirdColumn) {
+            mOut[busId] = {nic, thirdColumn};
+        }
+    }
+    return true;
+  }
 
   int GetClosestNicToGpu(int gpuIndex, const char** dev_name)
   {
@@ -792,6 +813,30 @@ namespace rocshmem
         if (closestIdx != -1) assignedCount[closestIdx]++;
       }
       isInitialized = true;
+    }
+    const char* userTopo = std::getenv("ROCSHMEM_TOPO_FILE_FORCE");
+    if (userTopo){
+      int deviceId = -1;
+      std::string nicName;
+      hipGetDevice(&deviceId);
+      GPU2NIC map;
+      std::string busStr;
+      char busId[64] = {0};
+      hipDeviceGetPCIBusId(busId, sizeof(busId), deviceId);
+      busStr = std::string(busId);
+      readBusToNic(userTopo, map);
+      auto it = map.find(busStr);
+      if (it != map.end()) {
+        nicName = it->second.nicName;
+        closestNicId[gpuIndex] = it->second.index;
+      } else {
+        printf("GPU: %s not found NIC\n", busStr.c_str());
+      }
+      printf("GPU Device id: %d closest NIC id : %d name: %s\n", gpuIndex, closestNicId[gpuIndex], nicName.c_str());
+      if (dev_name != nullptr) {
+        *dev_name = strdup(nicName.c_str());
+      }
+      return closestNicId[gpuIndex];
     }
 
     DPRINTF("GPU Device id: %d closest NIC id : %d name: %s\n", gpuIndex, closestNicId[gpuIndex],
