@@ -70,7 +70,11 @@ QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider) {
     fetching_atomic_freelist->push_back(fetching_atomic + i);
   }
 
-  hipDeviceGetAttribute((int*)&gpuHdpReg, hipDeviceAttributeHdpMemFlushCntl, deviceId);
+  // 控制是否需要刷新hdp
+  const char* hdpDisableFlushEnv = getenv("ROCSHMEM_DISABLE_HDP_FLUSH");
+  if (hdpDisableFlushEnv == NULL || strcmp(hdpDisableFlushEnv, "1") != 0) {
+    hipDeviceGetAttribute((int*)&gpuHdpReg, hipDeviceAttributeHdpMemFlushCntl, deviceId);
+  }
 
   /* Set Correct opcodes for each NIC */
   switch (gda_provider) {
