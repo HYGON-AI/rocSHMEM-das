@@ -42,6 +42,9 @@ __device__ void swap_endian_store(T *dst, const T val) {
 
 template <>
 __device__ void swap_endian_store(uint64_t *dst, const uint64_t val) {
+#if defined(__gfx936__)
+  *dst = __builtin_bswap64(val);
+#else
   uint64_t new_val = ((val << 8) & 0xFF00FF00FF00FF00ULL) |
                      ((val >> 8) & 0x00FF00FF00FF00FFULL);
 
@@ -49,6 +52,7 @@ __device__ void swap_endian_store(uint64_t *dst, const uint64_t val) {
             ((new_val >> 16) & 0x0000FFFF0000FFFFULL);
 
   *dst = (new_val << 32) | (new_val >> 32);
+#endif
 }
 
 template <>
@@ -58,9 +62,13 @@ __device__ void swap_endian_store(int64_t *dst, const int64_t val) {
 
 template <>
 __device__ void swap_endian_store(uint32_t *dst, const uint32_t val) {
+#if defined(__gfx936__)
+  *dst = __builtin_bswap32(val);
+#else
   uint32_t new_val = ((val << 8) & 0xFF00FF00) | ((val >> 8) & 0xFF00FF);
 
   *dst = (new_val << 16) | (new_val >> 16);
+#endif
 }
 
 template <>
@@ -70,7 +78,11 @@ __device__ void swap_endian_store(int32_t *dst, const int32_t val) {
 
 template <>
 __device__ void swap_endian_store(uint16_t *dst, const uint16_t val) {
+#if defined(__gfx936__)
+  *dst = __builtin_bswap16(val);
+#else
   *dst = ((val << 8) & 0xFF00) | ((val >> 8) & 0x00FF);
+#endif
 }
 
 template <>
