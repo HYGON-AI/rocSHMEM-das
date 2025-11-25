@@ -34,7 +34,7 @@
 #include <list>
 #include <mutex>
 #include <ostream>
-#include <source_location>
+// #include <source_location>
 #include <sstream>
 #include <string>
 #include <type_traits>
@@ -264,8 +264,9 @@ namespace envvar {
           std::istringstream iss{std::string(env_value)};
           std::invoke(parse, iss, value);
           if (iss.fail()) {
-            std::cerr << std::source_location::current().function_name() << ": invalid argument "
-                      << name << "='" << env_value << "'" << std::endl;
+            // std::cerr << std::source_location::current().function_name() << ": invalid argument "
+            //           << name << "='" << env_value << "'" << std::endl;
+            std::cerr << __func__ << ": invalid argument " << name << "='" << env_value << "'" << std::endl;
             value = default_value;
           } else {
             value_set = true;
