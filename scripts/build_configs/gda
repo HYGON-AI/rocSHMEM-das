@@ -30,7 +30,7 @@ src_path=$(dirname "$(realpath $0)")/../../
 cmake \
     -DBUILD_CODE_COVERAGE=${CODE_COV:-OFF} \
     -DCMAKE_BUILD_TYPE=${BUILD_TYPE:-Release} \
-    -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX:-$src_path/../../rocshmem_dir/} \
+    -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX:-$src_path/../rocshmem_dir/} \
     -DCMAKE_VERBOSE_MAKEFILE=OFF \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
     -DBUILD_FUNCTIONAL_TESTS=ON \
