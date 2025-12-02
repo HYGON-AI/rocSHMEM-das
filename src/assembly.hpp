@@ -220,6 +220,10 @@ __device__ __forceinline__ void __roc_flush() {
 __device__ __forceinline__ void store_asm(uint8_t* val, uint8_t* dst,
                                           int size) {
   switch (size) {
+    case 1: {
+      *dst = *val;
+      break;
+    }
     case 2: {
 #if defined(__gfx906__)
 #endif
@@ -274,6 +278,38 @@ __device__ __forceinline__ void store_asm(uint8_t* val, uint8_t* dst,
 #endif
 #if defined(__gfx1201__)
       asm volatile("flat_store_b64 %0 %1 scope:SCOPE_SYS" : : "v"(dst), "v"(val64));
+#endif
+      break;
+    }
+    case 12: {
+      int3 val96{*(reinterpret_cast<int3*>(val))};
+#if defined(__gfx906__)
+#endif
+#if defined(__gfx908__)
+#endif
+#if defined(__gfx936__) || defined (__gfx1100__)
+      auto dst96 = reinterpret_cast<int3*>(dst);
+      *dst96 = val96;
+      // asm volatile("flat_store_dwordx3 %0 %1 glc slc" : : "v"(dst), "v"(val96));
+#endif
+#if defined(__gfx942__) || defined(__gfx950__)
+      asm volatile("flat_store_dwordx3 %0 %1 sc0 sc1" : : "v"(dst), "v"(val96));
+#endif
+      break;
+    }
+    case 16: {
+      int4 val128{*(reinterpret_cast<int4*>(val))};
+#if defined(__gfx906__)
+#endif
+#if defined(__gfx908__)
+#endif
+#if defined(__gfx936__) || defined (__gfx1100__)
+      auto dst128 = reinterpret_cast<int4*>(dst);
+      *dst128 = val128;
+      // asm volatile("flat_store_dwordx4 %0 %1 glc slc" : : "v"(dst), "v"(val128));
+#endif
+#if defined(__gfx942__) || defined(__gfx950__)
+      asm volatile("flat_store_dwordx4 %0 %1 sc0 sc1" : : "v"(dst), "v"(val128));
 #endif
       break;
     }
