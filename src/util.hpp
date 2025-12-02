@@ -396,7 +396,7 @@ __device__ __forceinline__ void memcpy_lane(void* dst, void* src, size_t size) {
   uint8_t* dst_bytes{static_cast<uint8_t*>(dst)};
   uint8_t* src_bytes{static_cast<uint8_t*>(src)};
 
-  for (size_t i = 8; i > 1; i >>= 1) {
+  for (size_t i = 16; i > 1; i >>= 1) {
     while (size >= i) {
       store_asm(src_bytes, dst_bytes, i);
       src_bytes += i;
@@ -425,7 +425,7 @@ __device__ __forceinline__ void memcpy_wg(void* dst, void* src, size_t size) {
   dst_bytes = dst_def;
   src_bytes = src_def;
 
-  for (int j{8}; j > 1; j >>= 1) {
+  for (int j{16}; j > 1; j >>= 1) {
     cpy_size = size / j;
     for (int i{thread_id}; i < cpy_size; i += block_size) {
       dst_bytes = dst_def;
@@ -463,7 +463,7 @@ __device__ __forceinline__ void memcpy_wave(void* dst, void* src, size_t size) {
   dst_bytes = dst_def;
   src_bytes = src_def;
 
-  for (int j{8}; j > 1; j >>= 1) {
+  for (int j{16}; j > 1; j >>= 1) {
     cpy_size = size / j;
     for (int i{wave_tid}; i < cpy_size; i += wave_size) {
       dst_bytes = dst_def;
