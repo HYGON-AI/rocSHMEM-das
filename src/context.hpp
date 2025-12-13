@@ -170,6 +170,9 @@ class Context {
   __device__ void amo_add(void* dst, T value, int pe);
 
   template <typename T>
+  __device__ void amo_add_dp(void* dst, T value, int qp_idx, int pe);
+  
+  template <typename T>
   __device__ void amo_set(void* dst, T value, int pe);
 
   template <typename T>
@@ -286,6 +289,10 @@ class Context {
 
   template <typename T>
   __device__ void put_nbi_wave(T* dest, const T* source, size_t nelems, int pe);
+
+  // add multiqp func
+  template <typename T>
+  __device__ void put_nbi_wave_dp(T* dest, const T* source, size_t nelems, int qp_idx, int pe);
 
   template <typename T>
   __device__ void get_wave(T* dest, const T* source, size_t nelems, int pe);

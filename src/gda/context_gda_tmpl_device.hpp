@@ -108,6 +108,23 @@ __device__ void GDAContext::amo_add(void *dst, T value, int pe) {
 }
 
 template <typename T>
+__device__ void GDAContext::amo_add_dp(void *dst, T value, int qp_idx, int pe) {
+  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_add not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  bool need_turn {true};
+  uint64_t turns = __ballot(need_turn);
+  while (turns) {
+    uint8_t lane = __ffsll((unsigned long long)turns) - 1;  // 返回 x 中最低位 1 的位置（从 1 开始计数）。
+    int pe_turn = __shfl(pe, lane);  // 广播到整个 warp 
+    if (pe_turn == pe) {
+      qps[qp_idx].atomic_nofetch(base_heap[pe] + L_offset, value, 0, pe);
+      need_turn = false;
+    }
+    turns = __ballot(need_turn);
+  }
+}
+
+template <typename T>
 __device__ void GDAContext::amo_set(void *dst, T value, int pe) {
   amo_swap(dst, value, pe);
 }
@@ -735,6 +752,12 @@ template <typename T>
 __device__ void GDAContext::put_nbi_wave(T *dest, const T *source, size_t nelems, int pe) {
   putmem_nbi_wave(dest, source, nelems * sizeof(T), pe);
 }
+
+template <typename T>
+__device__ void GDAContext::put_nbi_wave_dp(T *dest, const T *source, size_t nelems, int qp_idx, int pe) {
+  putmem_nbi_wave_dp(dest, source, nelems * sizeof(T), qp_idx, pe);
+}
+
 
 template <typename T>
 __device__ void GDAContext::get_wg(T *dest, const T *source, size_t nelems, int pe) {

@@ -569,6 +569,10 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_schar_put_nbi_wave(
 __device__ ATTR_NO_INLINE void rocshmem_schar_put_nbi_wave(
     signed char *dest, const signed char *source, size_t nelems, int pe);
 
+// add deepep dispatch 
+__device__ ATTR_NO_INLINE void rocshmem_schar_put_nbi_wave_dp(
+    signed char *dest, const signed char *source, size_t nelems, int qp_idx, int pe);
+
 __device__ ATTR_NO_INLINE void rocshmem_ctx_short_put_nbi_wave(
     rocshmem_ctx_t ctx, short *dest, const short *source,
     size_t nelems, int pe);

@@ -230,6 +230,11 @@ __device__ void rocshmem_atomic_add(T *dest, T val, int pe) {
 }
 
 template <typename T>
+__device__ void rocshmem_atomic_add_dp(T *dest, T val, int qp_idx, int pe) {
+  rocshmem_atomic_add_dp(ROCSHMEM_CTX_DEFAULT, dest, val, qp_idx, pe);
+}
+
+template <typename T>
 __device__ void rocshmem_atomic_inc(T *dest, int pe) {
   rocshmem_atomic_inc(ROCSHMEM_CTX_DEFAULT, dest, pe);
 }
@@ -902,6 +907,15 @@ __device__ void rocshmem_atomic_add(rocshmem_ctx_t ctx, T *dest, T val,
 }
 
 template <typename T>
+__device__ void rocshmem_atomic_add_dp(rocshmem_ctx_t ctx, T *dest, T val,
+                                       int qp_idx, int pe) {
+  GPU_DPRINTF("Function: rocshmem_atomic_add (ctx=%zd, dest=%p, val=%g, pe=%d w%d)\n",
+    ctx.ctx_opaque, dest, (double)val, pe, translate_pe(ctx, pe));
+
+  get_internal_ctx(ctx)->amo_add_dp<T>(dest, val, qp_idx, pe);
+}
+
+template <typename T>
 __device__ void rocshmem_atomic_inc(rocshmem_ctx_t ctx, T *dest, int pe) {
   GPU_DPRINTF("Function: rocshmem_atomic_inc (ctx=%zd, dest=%p, pe=%d w%d)\n",
     ctx.ctx_opaque, dest, pe, translate_pe(ctx, pe));
@@ -1046,6 +1060,16 @@ __device__ void rocshmem_put_nbi_wave(rocshmem_ctx_t ctx, T *dest,
     ctx.ctx_opaque, dest, source, nelems, pe, translate_pe(ctx, pe));
 
   get_internal_ctx(ctx)->put_nbi_wave(dest, source, nelems, pe);
+}
+
+// add multi qp func
+template <typename T>
+__device__ void rocshmem_put_nbi_wave_dp(rocshmem_ctx_t ctx, T *dest,
+                                         const T *source, size_t nelems, int qp_idx, int pe) {
+  GPU_DPRINTF("Function: rocshmem_put_nbi_wave_dp (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)\n",
+    ctx.ctx_opaque, dest, source, nelems, pe, translate_pe(ctx, pe));
+
+  get_internal_ctx(ctx)->put_nbi_wave_dp(dest, source, nelems, qp_idx, pe);
 }
 
 template <typename T>
@@ -1253,6 +1277,10 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team,
       T * dest, const T *source, size_t nelems, int pe);                       \
   template __device__ void rocshmem_put_nbi_wg<T>(T * dest, const T *source,   \
                                                    size_t nelems, int pe);     \
+  template __device__ void rocshmem_put_nbi_wave_dp<T>(rocshmem_ctx_t ctx,     \
+      T * dest, const T *source, size_t nelems, int qp_idx, int pe);           \
+  template __device__ void rocshmem_put_nbi_wave_dp<T>(                        \
+      T * dest, const T *source, size_t nelems, int qp_idx, int pe);           \
   template __device__ void rocshmem_get_wave<T>(                               \
       rocshmem_ctx_t ctx, T * dest, const T *source, size_t nelems, int pe);   \
   template __device__ void rocshmem_get_wg<T>(                                 \
@@ -1290,7 +1318,11 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team,
                                                       int pe);                 \
   template __device__ void rocshmem_atomic_add<T>(rocshmem_ctx_t ctx,          \
                                                    T * dest, T value, int pe); \
-  template __device__ void rocshmem_atomic_add<T>(T * dest, T value, int pe);
+  template __device__ void rocshmem_atomic_add<T>(T * dest, T value, int pe);  \
+  template __device__ void rocshmem_atomic_add_dp<T>(rocshmem_ctx_t ctx,       \
+      T * dest, T value, int qp_idx, int pe);                                  \
+  template __device__ void rocshmem_atomic_add_dp<T>(T * dest, T value,        \
+      int qp_idx, int pe);
 
 /**
  * Declare templates for the extended amo types
@@ -1508,6 +1540,14 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team,
                                                  size_t nelems, int pe) {     \
     rocshmem_put_nbi_wg<T>(dest, source, nelems, pe);                         \
   }                                                                           \
+  __device__ void rocshmem_ctx_##TNAME##_put_nbi_wave_dp(rocshmem_ctx_t ctx,  \
+      T *dest, const T *source, size_t nelems, int qp_idx, int pe) {          \
+    rocshmem_put_nbi_wave_dp<T>(ctx, dest, source, nelems, qp_idx, pe);       \
+  }                                                                           \
+  __device__ void rocshmem_##TNAME##_put_nbi_wave_dp(T *dest,                 \
+      const T *source, size_t nelems, int qp_idx, int pe) {                   \
+    rocshmem_put_nbi_wave_dp<T>(dest, source, nelems, qp_idx, pe);            \
+  }                                                                           \
   __device__ void rocshmem_ctx_##TNAME##_get_wave(                            \
       rocshmem_ctx_t ctx, T *dest, const T *source, size_t nelems, int pe) {  \
     rocshmem_get_wave<T>(ctx, dest, source, nelems, pe);                      \
@@ -1598,6 +1638,14 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team,
   }                                                                           \
   __device__ void rocshmem_##TNAME##_atomic_add(T *dest, T value, int pe) {   \
     rocshmem_atomic_add<T>(dest, value, pe);                                  \
+  }                                                                           \
+  __device__ void rocshmem_ctx_##TNAME##_atomic_add_dp(                       \
+      rocshmem_ctx_t ctx, T *dest, T value, int qp_idx, int pe) {             \
+    rocshmem_atomic_add_dp<T>(ctx, dest, value, qp_idx, pe);                  \
+  }                                                                           \
+  __device__ void rocshmem_##TNAME##_atomic_add_dp(T *dest, T value,          \
+      int qp_idx, int pe) {                                                   \
+    rocshmem_atomic_add_dp<T>(dest, value, qp_idx, pe);                       \
   }
 
 #define AMO_EXTENDED_DEF_GEN(T, TNAME)                                        \

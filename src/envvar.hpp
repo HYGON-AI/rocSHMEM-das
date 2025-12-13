@@ -453,6 +453,16 @@ namespace envvar {
     extern const var<bool> alternate_qp_ports;
     extern const var<uint8_t> traffic_class;
     extern const var<bool> pcie_relaxed_ordering;
+
+    // Number of QPs to create per PE for the default context
+    extern const var<size_t> num_qps_per_pe_default_ctx;
+    // Number of QPs to create per PE for each user context
+    extern const var<size_t> num_qps_per_pe_usr_ctx;
+
+    /**
+     * @brief Sq settings
+     */
+    extern const var<size_t> inline_threshold;
   }  // namespace gda
 }  // namespace envvar
 }  // namespace rocshmem

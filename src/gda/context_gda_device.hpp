@@ -114,6 +114,9 @@ class GDAContext : public Context {
   __device__ void amo_add(void *dst, T value, int pe);
 
   template <typename T>
+  __device__ void amo_add_dp(void *dst, T value, int qp_idx, int pe);
+
+  template <typename T>
   __device__ void amo_set(void *dst, T value, int pe);
 
   template <typename T>
@@ -184,6 +187,9 @@ class GDAContext : public Context {
   __device__ void putmem_nbi_wave(void *dest, const void *source, size_t nelems,
                                   int pe);
 
+  __device__ void putmem_nbi_wave_dp(void *dest, const void *source, size_t nelems,
+                                  int qp_idx, int pe);
+                                  
   __device__ void getmem_nbi_wave(void *dest, const void *source, size_t size,
                                   int pe);
 
@@ -198,6 +204,10 @@ class GDAContext : public Context {
 
   template <typename T>
   __device__ void put_nbi_wave(T *dest, const T *source, size_t nelems, int pe);
+
+  // add multiqp func
+  template <typename T>
+  __device__ void put_nbi_wave_dp(T *dest, const T *source, size_t nelems, int qp_idx, int pe);
 
   template <typename T>
   __device__ void get_wg(T *dest, const T *source, size_t nelems, int pe);
@@ -305,9 +315,27 @@ class GDAContext : public Context {
 
   int gda_provider_{0};
 
+  /**
+   * @brief Number of Queue Pairs allocated per PE
+   */
+  uint32_t num_qps_per_pe {1};
+
+  /**
+   * @brief Total number of Queue Pairs allocated = num_qps_per_pe * num_pes
+   */
+  uint32_t num_qps {1};
+
+  // /**
+  //  * @brief Device pointer to the qp_counter variable to pcick next qp index
+  //  */
+  // uint32_t *qp_counter {nullptr};
+
  public:
   QueuePair *qps{nullptr};
 
+  /**
+   * @brief Base heap pointers for all PEs
+   */
   char *const *base_heap{nullptr};
 
   //TODO(Avinash):
