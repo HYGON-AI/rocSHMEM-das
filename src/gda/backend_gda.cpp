@@ -78,6 +78,13 @@ void GDABackend::init() {
 
   select_nic();
 
+  // Determine number of QPs to create per PE
+  total_num_qps_per_pe = envvar::gda::num_qps_per_pe_default_ctx.get_value() +
+                         envvar::gda::num_qps_per_pe_usr_ctx.get_value() * envvar::max_num_contexts;
+
+  // Total number of QPs created
+  total_num_qps = total_num_qps_per_pe * num_pes;
+
   //TODO setup_host_interface();
   /* Initialize the host interface */
   if (MPI_COMM_NULL != backend_comm)
@@ -850,7 +857,7 @@ void GDABackend::exchange_qp_dest_info() {
     dest_info[i].gid = gid;
   }
 
-  for (size_t i = 0; i < envvar::max_num_contexts + 1; i++) {
+  for (size_t i = 0; i < total_num_qps_per_pe; i++) {
     if (backend_comm != MPI_COMM_NULL) {
       mpilib_ftable_.Alltoall(MPI_IN_PLACE, sizeof(dest_info_t), MPI_CHAR, dest_info.data() + i * num_pes, sizeof(dest_info_t), MPI_CHAR, backend_comm);
     } else {
@@ -904,7 +911,7 @@ void GDABackend::setup_gpu_qps() {
   size_t qp_objs_count;
   size_t qp_objs_mem_size;
 
-  qp_objs_count    = (envvar::max_num_contexts + 1) * num_pes;
+  qp_objs_count    = total_num_qps;
   qp_objs_mem_size = sizeof(QueuePair) * qp_objs_count;
 
   CHECK_HIP(hipMalloc(&gpu_qps, qp_objs_mem_size));
@@ -923,7 +930,7 @@ void GDABackend::setup_gpu_qps() {
 void GDABackend::cleanup_gpu_qps() {
   size_t qp_objs_count;
 
-  qp_objs_count = (envvar::max_num_contexts + 1) * num_pes;
+  qp_objs_count = total_num_qps;
 
   for (size_t i = 0; i < qp_objs_count; i++) {
     host_qps[i].~QueuePair();
@@ -1148,8 +1155,7 @@ void GDABackend::create_queues() {
     ncqes = envvar::sq_size;
   }
 
-  resize_length = (envvar::max_num_contexts + 1) * num_pes;
-
+  resize_length = total_num_qps;
   dest_info.resize(resize_length);
   cqs.resize(resize_length);
   qps.resize(resize_length);
@@ -1166,7 +1172,7 @@ void GDABackend::create_queues() {
     create_qps(envvar::sq_size);
   }
 
-  alternate_qp_ports();
+  // alternate_qp_ports();
 }
 
 void GDABackend::alternate_qp_ports() {
@@ -1201,7 +1207,7 @@ void GDABackend::alternate_qp_ports() {
      */
 
     /* Re-Map each context */
-    for (size_t i = 1; i < (envvar::max_num_contexts + 1); i += 2) {
+    for (size_t i = 1; i < total_num_qps_per_pe; i += 2) {
       for (size_t p = 0; p < num_pes; p += 2) {
         cur_qp_idx = (i * num_pes) + p;
         new_qp_idx = cur_qp_idx + 1;
@@ -1305,6 +1311,10 @@ void GDABackend::initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
 }
 
 void GDABackend::create_qps(int sq_length) {
+  if (envvar::gda::inline_threshold > inline_threshold) {
+    inline_threshold = min(8 * 64, envvar::gda::inline_threshold);
+  }
+  
   struct ibv_qp_init_attr_ex attr;
 
   memset(&attr, 0, sizeof(struct ibv_qp_init_attr_ex));

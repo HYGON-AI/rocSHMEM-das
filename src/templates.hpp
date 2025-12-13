@@ -326,6 +326,12 @@ __device__ void rocshmem_atomic_add(rocshmem_ctx_t ctx, T *dest, T val,
 template <typename T>
 __device__ void rocshmem_atomic_add(T *dest, T val, int pe);
 
+template <typename T>
+__device__ void rocshmem_atomic_add_dp(rocshmem_ctx_t ctx, T *dest, T val, int qp_idx, int pe);
+
+template <typename T>
+__device__ void rocshmem_atomic_add_dp(T *dest, T val, int qp_idx, int pe);
+
 /**
  * @brief Atomically add 1 to \p dest on \p pe.
  *
@@ -607,6 +613,15 @@ template <typename T>
 __device__ void rocshmem_put_nbi_wave(T *dest, const T *src, size_t nelems,
                                         int pe);
 
+
+template <typename T>
+__device__ void rocshmem_put_nbi_wave_dp(rocshmem_ctx_t ctx, T *dest,
+                                         const T *src, size_t nelems, int qp_idx, int pe);
+
+template <typename T>
+__device__ void rocshmem_put_nbi_wave_dp(T *dest, const T *src, size_t nelems,
+                                         int qp_idx, int pe);
+
 /**
  * @brief Writes contiguous data of \p nelems elements from \p source on the
  * calling PE to \p dest on \p pe. The operation is not blocking. The caller
@@ -756,6 +771,12 @@ template <typename T>
 __device__ void rocshmem_put_nbi_wave(T *dest, const T *source, size_t nelems,
                                         int pe) {
   rocshmem_put_nbi_wave(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
+}
+
+template <typename T>
+__device__ void rocshmem_put_nbi_wave_dp(T *dest, const T *source, size_t nelems,
+                                         int qp_idx, int pe) {
+  rocshmem_put_nbi_wave_dp(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, qp_idx, pe);
 }
 
 __device__ void rocshmem_getmem_nbi_wg(void *dest, const void *source,

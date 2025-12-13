@@ -453,6 +453,18 @@ __device__ void Context::put_nbi_wave(T *dest, const T *source, size_t nelems,
 }
 
 template <typename T>
+__device__ void Context::put_nbi_wave_dp(T *dest, const T *source, size_t nelems,
+                                         int qp_idx, int pe) {
+  if (nelems == 0) {
+    return;
+  }
+
+  ctxStats.incStat(NUM_PUT_NBI_WAVE);
+
+  DISPATCH(put_nbi_wave_dp(dest, source, nelems, qp_idx, pe));
+}
+
+template <typename T>
 __device__ void Context::get_wave(T *dest, const T *source, size_t nelems,
                                   int pe) {
   if (nelems == 0) {
@@ -488,6 +500,13 @@ __device__ void Context::amo_add(void *dst, T value, int pe) {
   ctxStats.incStat(NUM_ATOMIC_ADD);
 
   DISPATCH(amo_add(dst, value, pe));
+}
+
+template <typename T>
+__device__ void Context::amo_add_dp(void *dst, T value, int qp_idx, int pe) {
+  ctxStats.incStat(NUM_ATOMIC_ADD);
+
+  DISPATCH(amo_add_dp(dst, value, qp_idx, pe));
 }
 
 template <typename T>

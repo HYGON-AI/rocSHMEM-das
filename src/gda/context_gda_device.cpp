@@ -42,11 +42,21 @@ __host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id, int gda_provide
   barrier_sync = backend->barrier_sync;
   wrk_sync_pool_bases_ = backend->get_wrk_sync_bases();
 
-  CHECK_HIP(hipMalloc(&qps, sizeof(QueuePair) * num_pes));
-  CHECK_HIP(hipMemset(qps, 0, sizeof(QueuePair) * num_pes));
-  for (int i = 0; i < num_pes; i++) {
-    int offset = num_pes * ctx_id + i;
-    CHECK_HIP(hipMemcpy(&qps[i], &backend->gpu_qps[offset], sizeof(QueuePair), hipMemcpyDefault));
+  num_qps_per_pe = ctx_id?
+        envvar::gda::num_qps_per_pe_usr_ctx.get_value() :
+        envvar::gda::num_qps_per_pe_default_ctx.get_value();
+  num_qps = num_qps_per_pe * num_pes;
+
+  CHECK_HIP(hipMalloc(&qps, sizeof(QueuePair) * num_qps));
+  CHECK_HIP(hipMemset(qps, 0, sizeof(QueuePair) * num_qps));
+  
+  // Calculate offset into the backend's GPU QP array
+  int offset = num_pes * (ctx_id > 0) *
+    (envvar::gda::num_qps_per_pe_default_ctx.get_value() +
+     envvar::gda::num_qps_per_pe_usr_ctx.get_value() * (ctx_id - 1));
+  CHECK_HIP(hipMemcpy(qps, &backend->gpu_qps[offset], num_qps * sizeof(QueuePair), hipMemcpyDefault));
+
+  for (int i = 0; i < num_qps; i++) {
     qps[i].base_heap = base_heap;
   }
 
@@ -260,6 +270,20 @@ __device__ void GDAContext::putmem_nbi_wave(void *dest, const void *source,
   }
   uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[my_pe];
   qps[pe].put_nbi(base_heap[pe] + L_offset, source, nelems, pe, QueuePair::WAVE);
+}
+
+__device__ void GDAContext::putmem_nbi_wave_dp(void *dest, const void *source,
+                                            size_t nelems, int qp_idx, int pe) {
+  int local_pe{-1};
+  if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
+    uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
+    ipcImpl_.ipcCopy_wave(ipcImpl_.ipc_bases[local_pe] + L_offset, const_cast<void *>(source), nelems);
+    return;
+  }
+   uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[my_pe];
+  if (is_thread_zero_in_wave()) {
+     qps[qp_idx].put_nbi(base_heap[pe] + L_offset, source, nelems, pe);
+  }
 }
 
 __device__ void GDAContext::getmem_nbi_wave(void *dest, const void *source,
