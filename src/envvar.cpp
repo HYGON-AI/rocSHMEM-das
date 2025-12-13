@@ -69,7 +69,7 @@ namespace envvar {
     const var<bool> alternate_qp_ports("ALTERNATE_QP_PORTS", "", true);
     const var<uint8_t> traffic_class("TRAFFIC_CLASS", "", 0);
     const var<bool> pcie_relaxed_ordering("PCIE_RELAXED_ORDERING", "", false);
-    const var<size_t> num_qps_per_pe_default_ctx("NUM_QPS_PER_PE_DEFAULT_CTX", "", 1);
+    const var<size_t> num_qps_default_ctx("NUM_QPS_DEFAULT_CTX", "", 1);
     const var<size_t> num_qps_per_pe_usr_ctx("NUM_QPS_PER_PE_USR_CTX", "", 1);
     const var<size_t> inline_threshold("RDMA_INLINE_THRESHOLD", "", 8);
   }  // namespace gda
