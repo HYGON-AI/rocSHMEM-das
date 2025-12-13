@@ -79,8 +79,8 @@ void GDABackend::init() {
   select_nic();
 
   // Determine number of QPs to create per PE
-  total_num_qps_per_pe = envvar::gda::num_qps_per_pe_default_ctx.get_value() +
-                         envvar::gda::num_qps_per_pe_usr_ctx.get_value() * envvar::max_num_contexts;
+  total_num_qps_per_pe = max(1, 1 + envvar::gda::num_qps_default_ctx.get_value() / num_pes) +
+                         max(1, envvar::gda::num_qps_per_pe_usr_ctx.get_value()) * envvar::max_num_contexts;
 
   // Total number of QPs created
   total_num_qps = total_num_qps_per_pe * num_pes;
@@ -1172,7 +1172,7 @@ void GDABackend::create_queues() {
     create_qps(envvar::sq_size);
   }
 
-  // alternate_qp_ports();
+   alternate_qp_ports();
 }
 
 void GDABackend::alternate_qp_ports() {

@@ -42,18 +42,16 @@ __host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id, int gda_provide
   barrier_sync = backend->barrier_sync;
   wrk_sync_pool_bases_ = backend->get_wrk_sync_bases();
 
-  num_qps_per_pe = ctx_id?
-        envvar::gda::num_qps_per_pe_usr_ctx.get_value() :
-        envvar::gda::num_qps_per_pe_default_ctx.get_value();
+  uint32_t num_qps_per_pe_default_ctx = max(1, 1 + envvar::gda::num_qps_default_ctx.get_value() / num_pes);
+  uint32_t num_qps_per_pe_usr_ctx = max(1, envvar::gda::num_qps_per_pe_usr_ctx.get_value());
+  num_qps_per_pe = ctx_id ? num_qps_per_pe_usr_ctx : num_qps_per_pe_default_ctx;
   num_qps = num_qps_per_pe * num_pes;
 
   CHECK_HIP(hipMalloc(&qps, sizeof(QueuePair) * num_qps));
   CHECK_HIP(hipMemset(qps, 0, sizeof(QueuePair) * num_qps));
-  
+
   // Calculate offset into the backend's GPU QP array
-  int offset = num_pes * (ctx_id > 0) *
-    (envvar::gda::num_qps_per_pe_default_ctx.get_value() +
-     envvar::gda::num_qps_per_pe_usr_ctx.get_value() * (ctx_id - 1));
+  int offset = num_pes * (ctx_id > 0) * (num_qps_per_pe_default_ctx + num_qps_per_pe_usr_ctx * (ctx_id - 1));
   CHECK_HIP(hipMemcpy(qps, &backend->gpu_qps[offset], num_qps * sizeof(QueuePair), hipMemcpyDefault));
 
   for (int i = 0; i < num_qps; i++) {

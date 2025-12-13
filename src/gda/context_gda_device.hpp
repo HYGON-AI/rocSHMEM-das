@@ -325,11 +325,6 @@ class GDAContext : public Context {
    */
   uint32_t num_qps {1};
 
-  // /**
-  //  * @brief Device pointer to the qp_counter variable to pcick next qp index
-  //  */
-  // uint32_t *qp_counter {nullptr};
-
  public:
   QueuePair *qps{nullptr};
 
