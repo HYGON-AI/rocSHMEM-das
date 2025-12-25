@@ -298,6 +298,11 @@ class GDAContext : public Context {
                                           int nelems, GDATeam *team_obj,
                                           int n_seg, int seg_size, int chunk_size);
 
+  /**
+   * @brief Get the destination pointer for a given PE
+   */
+  __device__ char* get_remote_ptr(const void* addr, int pe);
+  __device__ char* get_local_ptr(const void* addr, int pe);
 
   //Temporary scratchpad memory used by internal barrier algorithms.
   int64_t *barrier_sync{nullptr};

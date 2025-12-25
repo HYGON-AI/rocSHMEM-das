@@ -45,8 +45,7 @@ template <typename T>
 __device__ void GDAContext::p(T *dest, T value, int pe) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
-    long L_offset{reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank]};
-    ipcImpl_.ipcCopy(ipcImpl_.ipc_bases[local_pe] + L_offset, reinterpret_cast<void *>(&value), sizeof(T));
+    ipcImpl_.ipcCopy(get_remote_ptr(dest, local_pe), reinterpret_cast<void *>(&value), sizeof(T));
     return;
   }
   putmem_nbi(dest, &value, sizeof(T), pe);
@@ -67,9 +66,7 @@ __device__ T GDAContext::g(const T *source, int pe) {
   T ret;
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
-    const char *src_typed{reinterpret_cast<const char *>(source)};
-    long L_offset{const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank]};
-    ipcImpl_.ipcCopy(&ret, ipcImpl_.ipc_bases[local_pe] + L_offset, sizeof(T));
+    ipcImpl_.ipcCopy(&ret, get_remote_ptr(source, local_pe), sizeof(T));
     return ret;
   }
   printf("rocshmem::gda:g not implemented\n");
@@ -93,14 +90,13 @@ __device__ void GDAContext::get_nbi(T *dest, const T *source, size_t nelems, int
 template <typename T>
 __device__ void GDAContext::amo_add(void *dst, T value, int pe) {
   if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_add not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   while (turns) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      qps[pe].atomic_nofetch(base_heap[pe] + L_offset, value, 0, pe);
+      qps[pe].atomic_nofetch(get_remote_ptr(dst, pe), value, 0, pe);
       need_turn = false;
     }
     turns = __ballot(need_turn);
@@ -109,15 +105,14 @@ __device__ void GDAContext::amo_add(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ void GDAContext::amo_add_dp(void *dst, T value, int qp_idx, int pe) {
-  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_add not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_add_dp not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   while (turns) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;  // 返回 x 中最低位 1 的位置（从 1 开始计数）。
     int pe_turn = __shfl(pe, lane);  // 广播到整个 warp 
     if (pe_turn == pe) {
-      qps[qp_idx].atomic_nofetch(base_heap[pe] + L_offset, value, 0, pe);
+      qps[qp_idx].atomic_nofetch(get_remote_ptr(dst, pe), value, 0, pe);
       need_turn = false;
     }
     turns = __ballot(need_turn);
@@ -132,7 +127,6 @@ __device__ void GDAContext::amo_set(void *dst, T value, int pe) {
 template <typename T>
 __device__ T GDAContext::amo_swap(void *dst, T value, int pe) {
   if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_set not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   T ret_val;
@@ -146,7 +140,7 @@ __device__ T GDAContext::amo_swap(void *dst, T value, int pe) {
        * The compare-and-swap loop will execute at least twice if wrong.
        * It may run additional times if contention on memory location.
        */
-      while ((ret_val = qps[pe].atomic_cas(base_heap[pe] + L_offset, value,
+      while ((ret_val = qps[pe].atomic_cas(get_remote_ptr(dst, pe), value,
                          cond, pe)) != cond) {
         cond = ret_val;
       }
@@ -160,7 +154,6 @@ __device__ T GDAContext::amo_swap(void *dst, T value, int pe) {
 template <typename T>
 __device__ T GDAContext::amo_fetch_and(void *dst, T value, int pe) {
   if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_fetch_and not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   T ret_val;
@@ -170,7 +163,7 @@ __device__ T GDAContext::amo_fetch_and(void *dst, T value, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      while ((ret_val = qps[pe].atomic_cas(base_heap[pe] + L_offset,
+      while ((ret_val = qps[pe].atomic_cas(get_remote_ptr(dst, pe),
                          desired_val, cond, pe)) != cond) {
         cond = ret_val;
         desired_val = ret_val & value;
@@ -190,7 +183,6 @@ __device__ void GDAContext::amo_and(void *dst, T value, int pe) {
 template <typename T>
 __device__ T GDAContext::amo_fetch_or(void *dst, T value, int pe) {
   if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_fetch_or not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   T ret_val;
@@ -200,7 +192,7 @@ __device__ T GDAContext::amo_fetch_or(void *dst, T value, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      while ((ret_val = qps[pe].atomic_cas(base_heap[pe] + L_offset,
+      while ((ret_val = qps[pe].atomic_cas(get_remote_ptr(dst, pe),
                          desired_val, cond, pe)) != cond) {
         cond = ret_val;
         desired_val = ret_val | value;
@@ -220,7 +212,6 @@ __device__ void GDAContext::amo_or(void *dst, T value, int pe) {
 template <typename T>
 __device__ T GDAContext::amo_fetch_xor(void *dst, T value, int pe) {
   if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_fetch_xor not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   T ret_val;
@@ -230,7 +221,7 @@ __device__ T GDAContext::amo_fetch_xor(void *dst, T value, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      while ((ret_val = qps[pe].atomic_cas(base_heap[pe] + L_offset,
+      while ((ret_val = qps[pe].atomic_cas(get_remote_ptr(dst, pe),
                          desired_val, cond, pe)) != cond) {
         cond = ret_val;
         desired_val = ret_val ^ value;
@@ -250,14 +241,13 @@ __device__ void GDAContext::amo_xor(void *dst, T value, int pe) {
 template <typename T>
 __device__ void GDAContext::amo_cas(void *dst, T value, T cond, int pe) {
   if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_cas not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   while (turns) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      qps[pe].atomic_cas_nofetch(base_heap[pe] + L_offset, value, cond, pe);
+      qps[pe].atomic_cas_nofetch(get_remote_ptr(dst, pe), value, cond, pe);
       need_turn = false;
     }
     turns = __ballot(need_turn);
@@ -267,7 +257,6 @@ __device__ void GDAContext::amo_cas(void *dst, T value, T cond, int pe) {
 template <typename T>
 __device__ T GDAContext::amo_fetch_add(void *dst, T value, int pe) {
   if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_fadd not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   T ret_val = 0;
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
@@ -275,7 +264,7 @@ __device__ T GDAContext::amo_fetch_add(void *dst, T value, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      ret_val =  qps[pe].atomic_fetch(base_heap[pe] + L_offset, value, 0, pe);
+      ret_val =  qps[pe].atomic_fetch(get_remote_ptr(dst, pe), value, 0, pe);
       need_turn = false;
     }
     turns = __ballot(need_turn);
@@ -286,7 +275,6 @@ __device__ T GDAContext::amo_fetch_add(void *dst, T value, int pe) {
 template <typename T>
 __device__ T GDAContext::amo_fetch_cas(void *dst, T value, T cond, int pe) {
   if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_fcas not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   T ret_val;
@@ -294,7 +282,7 @@ __device__ T GDAContext::amo_fetch_cas(void *dst, T value, T cond, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      ret_val = qps[pe].atomic_cas(base_heap[pe] + L_offset, value, cond, pe);
+      ret_val = qps[pe].atomic_cas(get_remote_ptr(dst, pe), value, cond, pe);
       need_turn = false;
     }
     turns = __ballot(need_turn);
