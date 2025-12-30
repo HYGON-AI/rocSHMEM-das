@@ -80,6 +80,8 @@ class QueuePair {
 
   __device__ void put_nbi_single(void *dest, const void *source, size_t nelems, bool ring_db);
 
+  __device__ void put_nbi_dp(void *dest, const void *source, size_t nelems);
+
   /**
    * @brief Create and enqueue a non-blocking get work queue entry (wqe).
    *
@@ -95,6 +97,7 @@ class QueuePair {
    */
   __device__ void quiet(Collectivity cy = THREAD);
   __device__ void quiet_single();
+  __device__ void quiet_dp_single_lane();
 
   /**
    * @brief Create and enqueue an atomic fetch work queue entry (wqe).
@@ -117,6 +120,7 @@ class QueuePair {
    * @param[in] pe Destination processing element of data transmission.
    */
   __device__ void atomic_nofetch(void *dest, int64_t value, int64_t cond, int pe);
+  __device__ void atomic_nofetch_dp(void *dest, int64_t value, int64_t cond, int pe);
 
   __device__ void atomic_nofetch_single(void *dest, int64_t value);
 
@@ -213,6 +217,17 @@ class QueuePair {
 
   __device__ void
   mlx5_quiet();
+
+  ///////////////////////////////////////////////////////////////////////////////////////////////////////
+  __device__ void mlx5_quiet_dp_single_lane();
+
+  __device__ void
+  mlx5_post_wqe_rma_dp_single_lane(int32_t size, uintptr_t laddr,
+      uintptr_t raddr, uint8_t opcode);
+  
+  __device__ void
+  mlx5_post_wqe_amo_dp_single_lane(int32_t size, uintptr_t raddr, uint8_t opcode,
+      int64_t atomic_data, int64_t atomic_cmp, bool fetch);
 
 #endif
 #if defined(GDA_BNXT)
