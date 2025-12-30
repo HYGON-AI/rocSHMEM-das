@@ -610,6 +610,8 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_quiet(rocshmem_ctx_t ctx);
 
 __device__ ATTR_NO_INLINE void rocshmem_quiet();
 
+__device__ void rocshmem_quiet_dp(size_t qp_idx);
+
 /**
  * @brief Completes all previous operations posted to this context for PEs in the
  *        `target_pes` array.
