@@ -148,6 +148,10 @@ __device__ void GDAContext::quiet() {
   }
 }
 
+__device__ void GDAContext::qp_quiet(size_t qp_idx) {
+  qps[qp_idx].quiet_dp_single_lane();
+}
+
 __device__ void GDAContext::quiet_wave() {
   for (int i = 0; i < num_qps; i++) {
     qps[i].quiet(QueuePair::WAVE);
@@ -270,7 +274,7 @@ __device__ void GDAContext::putmem_nbi_wave_dp(void *dest, const void *source,
     return;
   }
   if (is_thread_zero_in_wave()) {
-     qps[qp_idx].put_nbi(get_remote_ptr(dest, pe), source, nelems, pe);
+     qps[qp_idx].put_nbi_dp(get_remote_ptr(dest, pe), source, nelems);
   }
 }
 
