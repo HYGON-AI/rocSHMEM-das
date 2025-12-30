@@ -60,6 +60,8 @@ class GDAContext : public Context {
 
   __device__ void quiet();
 
+  __device__ void qp_quiet(size_t qp_idx);
+
   __device__ void quiet_wave();
 
   __device__ void pe_quiet(size_t pe);

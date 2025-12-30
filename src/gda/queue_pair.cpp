@@ -266,6 +266,15 @@ __device__ void QueuePair::quiet_single() {
   }
 }
 
+__device__ void QueuePair::quiet_dp_single_lane() {
+#if defined(GDA_MLX5)
+  if (is_thread_zero_in_wave()) {
+    mlx5_quiet_dp_single_lane();
+  }
+  return;
+#endif
+}
+
 /******************************************************************************
  ****************************** SHMEM INTERFACE *******************************
  *****************************************************************************/
@@ -279,6 +288,16 @@ __device__ void QueuePair::put_nbi_single(void *dest, const void *source, size_t
   uintptr_t src = reinterpret_cast<uintptr_t>(source);
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
   post_wqe_rma_single(nelems, src, dst, gda_op_rdma_write, ring_db);
+}
+
+__device__ void QueuePair::put_nbi_dp(void *dest, const void *source, size_t nelems) {
+  uintptr_t src = reinterpret_cast<uintptr_t>(source);
+  uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
+#if defined(GDA_MLX5)
+  mlx5_post_wqe_rma_dp_single_lane(nelems, src, dst, gda_op_rdma_write);
+  return;
+#endif
+  assert(false /* invalid nic provider */);
 }
 
 __device__ void QueuePair::get_nbi(void *dest, const void *source, size_t nelems, int pe, Collectivity cy) {
@@ -305,6 +324,14 @@ __device__ int64_t QueuePair::atomic_fetch(void *dest, int64_t atomic_data, int6
 __device__ void QueuePair::atomic_nofetch(void *dest, int64_t atomic_data, int64_t atomic_cmp, int pe) {
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
   post_wqe_amo(pe, sizeof(int64_t), dst, gda_op_atomic_fa, atomic_data, atomic_cmp, false);
+}
+
+__device__ void QueuePair::atomic_nofetch_dp(void *dest, int64_t atomic_data, int64_t atomic_cmp, int pe) {
+#if defined(GDA_MLX5)
+  uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
+  mlx5_post_wqe_amo_dp_single_lane(sizeof(int64_t), dst, gda_op_atomic_fa, atomic_data, atomic_cmp, false);
+  return;
+#endif
 }
 
 __device__ void QueuePair::atomic_nofetch_single(void *dest, int64_t value) {
