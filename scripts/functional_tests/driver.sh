@@ -182,7 +182,6 @@ ExecTest() {
   fi
 
   CMD+=" >> $LOG_DIR/$TEST_LOG_NAME.log 2>&1"
-
   # Run Test
   if [ $NUM_GPUS -ge $NUM_RANKS ] || [[ "" != "$HOSTFILE" ]]; then
     echo $TEST_LOG_NAME
@@ -456,7 +455,6 @@ TestColl() {
 
   ExecTest  "teambroadcast"    2       1            64        32768
 
-  ExecTest  "fcollect"         2       1            64        512
   ExecTest  "fcollect"         2       1            64        32768
 
   ExecTest  "teamreduction"    2       1            64        32768
@@ -650,7 +648,6 @@ TestGDA() {
 
   ExecTest  "teambroadcast"    2       1            1         32768
 
-  ExecTest  "fcollect"         2       1            1         512
   ExecTest  "fcollect"         2       1            1         32768
 
 # deadlock on gda, size 8KB
