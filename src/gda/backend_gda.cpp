@@ -610,6 +610,7 @@ bool GDABackend::has_active_ib_interface(GDAProvider provider) {
   }
 
   for (int i = 0; i < num_devices && !has_active; i++) {
+    DPRINTF("ibv.open device[%d] of %d\n", i, num_devices);
     struct ibv_context *context = ibv.open_device(device_list[i]);
     if (!context) {
       continue;
@@ -666,7 +667,7 @@ int GDABackend::backend_can_run() {
     handle = bnxt_dv_dlopen();
     if (handle) {
       auto ret = has_active_ib_interface(GDAProvider::BNXT);
-      dlclose(handle);
+//      dlclose(handle); //TODO: unloading the lib crashes the next call to ibv_open_device
       if (ret) return ROCSHMEM_SUCCESS;
       DPRINTF("BNXT DV library found but no active InfiniBand interface available\n");
     }
@@ -679,7 +680,7 @@ int GDABackend::backend_can_run() {
     handle = ionic_dv_dlopen();
     if (handle) {
       auto ret = has_active_ib_interface(GDAProvider::IONIC);
-      dlclose(handle);
+//      dlclose(handle); //TODO: unloading the lib crashes the next call to ibv_open_device
       if (ret) return ROCSHMEM_SUCCESS;
       DPRINTF("IONIC DV library found but no active InfiniBand interface available\n");
     }
@@ -692,7 +693,7 @@ int GDABackend::backend_can_run() {
     handle = mlx5_dv_dlopen();
     if (handle) {
       auto ret = has_active_ib_interface(GDAProvider::MLX5);
-      dlclose(handle);
+//      dlclose(handle); //TODO: unloading the lib crashes the next call to ibv_open_device
       if (ret) return ROCSHMEM_SUCCESS;
       DPRINTF("MLX5 DV library found but no active InfiniBand interface available\n");
     }
