@@ -40,6 +40,10 @@ target_sources(
     topology.cpp
 )
 
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  target_compile_options(${PROJECT_NAME} PRIVATE -fvisibility=default)
+endif()
+
 add_subdirectory(mlx5)
 add_subdirectory(bnxt)
 add_subdirectory(ionic)
