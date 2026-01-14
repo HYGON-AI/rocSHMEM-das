@@ -325,7 +325,7 @@ __device__ void IPCContext::internal_ring_allreduce(
 
         wait_val = seg + 100;
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe);
-#if defined(__gfx936__)
+#if defined(__gfx936__) || defined (__gfx938__)
         __threadfence_system();
 #endif /* __gfx936__ */
         wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
@@ -346,7 +346,7 @@ __device__ void IPCContext::internal_ring_allreduce(
         fence();
         wait_val = seg + 100;
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe);
-#if defined(__gfx936__)
+#if defined(__gfx936__) || defined (__gfx938__)
         __threadfence_system();
 #endif /* __gfx936__ */
         wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
