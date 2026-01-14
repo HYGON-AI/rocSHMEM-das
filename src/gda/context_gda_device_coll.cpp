@@ -37,7 +37,7 @@ __device__ void GDAContext::internal_direct_barrier(int pe, int PE_start,
   if (pe == PE_start) {
     // Go through all PE offsets (except current offset = 0)
     // and wait until they all reach
-#if defined(__gfx936__)
+#if defined(__gfx936__) || defined (__gfx938__)
     __threadfence_system();
 #endif /* __gfx936__ */
     for (int i = 1; i < n_pes; i++) {
@@ -50,7 +50,7 @@ __device__ void GDAContext::internal_direct_barrier(int pe, int PE_start,
     for (int i = 1, j = PE_start + stride; i < n_pes; ++i, j += stride) {
       pSync[0] = flag_val;
       put(&pSync[0], &pSync[0], 1, j);
-#if defined(__gfx936__)
+#if defined(__gfx936__) || defined (__gfx938__)
       __threadfence_system();
 #endif /* __gfx936__ */
     }
@@ -60,7 +60,7 @@ __device__ void GDAContext::internal_direct_barrier(int pe, int PE_start,
     size_t pe_offset = (pe - PE_start) / stride;
     pSync[pe_offset] = flag_val;
     put(&pSync[pe_offset], &pSync[pe_offset], 1, PE_start);
-#if defined(__gfx936__)
+#if defined(__gfx936__) || defined (__gfx938__)
     __threadfence_system();
 #endif /* __gfx936__ */
     wait_until(&pSync[0], ROCSHMEM_CMP_EQ, flag_val);
