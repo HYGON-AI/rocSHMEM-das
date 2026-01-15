@@ -7,7 +7,7 @@
 namespace rocshmem {
 
 __device__ void QueuePair::mlx5_ring_doorbell_dp(uint64_t db_val, uint64_t my_sq_counter) {
-  swap_endian_store(const_cast<uint32_t*>(dbrec), (uint32_t)my_sq_counter);
+  *dbrec = byteswap<uint32_t>(my_sq_counter);
   __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
   __hip_atomic_store(db.ptr, db_val, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
