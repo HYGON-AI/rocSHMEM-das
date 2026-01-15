@@ -196,7 +196,9 @@ __device__ void rocshmem_quiet() {
 }
 
 __device__ void rocshmem_quiet_dp(size_t qp_idx) {
+#if defined(GDA_MLX5)
   static_cast<GDAContext*>(ROCSHMEM_CTX_DEFAULT.ctx_opaque)->qp_quiet(qp_idx);  
+#endif
 }
 
 __device__ void rocshmem_pe_quiet(const int *target_pes, size_t npes) {
