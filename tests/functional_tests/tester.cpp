@@ -64,6 +64,7 @@
 #include "workgroup_primitives.hpp"
 #include "amo_dp_standard_tester.hpp"
 #include "wavefront_dp_primitives.hpp"
+#include "flood_tester.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -549,6 +550,29 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case AMO_AddTestType_DP:
       if (rank == 0) std::cout << "AMO Dp Add ###" << std::endl;
       testers.push_back(new AMODpStandardTester<long long>(args));
+    case FloodPutTestType:
+      if (rank == 0) std::cout << "Flood Put (multidirectional) ###" << std::endl;
+      testers.push_back(new FloodTester(args));
+      return testers;
+    case FloodPutNBITestType:
+      if (rank == 0) std::cout << "Flood Non-Blocking Put (multidirectional) ###" << std::endl;
+      testers.push_back(new FloodTester(args));
+      return testers;
+    case FloodPTestType:
+      if (rank == 0) std::cout << "Flood P (multidirectional) ###" << std::endl;
+      testers.push_back(new FloodTester(args));
+      return testers;
+    case FloodGetTestType:
+      if (rank == 0) std::cout << "Flood Get (multidirectional) ###" << std::endl;
+      testers.push_back(new FloodTester(args));
+      return testers;
+    case FloodGetNBITestType:
+      if (rank == 0) std::cout << "Flood Non-Blocking Get (multidirectional) ###" << std::endl;
+      testers.push_back(new FloodTester(args));
+      return testers;
+    case FloodGTestType:
+      if (rank == 0) std::cout << "Flood G (multidirectional) ###" << std::endl;
+      testers.push_back(new FloodTester(args));
       return testers;
     default:
       if (rank == 0) std::cout << "Empty Test ###" << std::endl;
@@ -668,6 +692,12 @@ bool Tester::peLaunchesKernel() {
     case WAVEPutNBITestType_DP:
     case DefaultCtx_AMO_AddTestType_DP:
     case AMO_AddTestType_DP:
+    case FloodPutTestType:
+    case FloodPutNBITestType:
+    case FloodPTestType:
+    case FloodGetTestType:
+    case FloodGetNBITestType:
+    case FloodGTestType:
       is_launcher = true;
       break;
     default:

@@ -32,6 +32,7 @@ else
 fi
 
 # This names/values should match the TestType enum in rocSHMEM/tests/functional_tests/tester.hpp
+# Self-developed test cases start from 200 to avoid community conflicts.
 declare -A TEST_NUMBERS=(
   ["get"]="0"
   ["getnbi"]="1"
@@ -116,10 +117,16 @@ declare -A TEST_NUMBERS=(
   ["putmem_on_stream"]="80"
   ["putmem_signal_on_stream"]="81"
   ["signal_wait_until_on_stream"]="82"
-  ["defaultctx_waveputnbi_dp"]="83"
-  ["defaultctx_amo_add_dp"]="84"
-  ["waveputnbi_dp"]="85"
-  ["amo_add_dp"]="86"
+  ["flood_put"]="83"
+  ["flood_putnbi"]="84"
+  ["flood_p"]="85"
+  ["flood_get"]="86"
+  ["flood_getnbi"]="87"
+  ["flood_g"]="88"
+  ["defaultctx_waveputnbi_dp"]="200"
+  ["defaultctx_amo_add_dp"]="201"
+  ["waveputnbi_dp"]="202"
+  ["amo_add_dp"]="203"
 )
 
 ExecTest() {
@@ -478,6 +485,16 @@ TestOther() {
   ExecTest  "pingall"          2       8            1
   ExecTest  "pingall"          2       32           1
 
+  ExecTest  "flood_put"        2       64           1024
+  ExecTest  "flood_get"        2       64           1024
+
+  ExecTest  "flood_put"        8       64           1024
+  ExecTest  "flood_putnbi"     8       64           1024
+  ExecTest  "flood_p"          8       64           1024
+  ExecTest  "flood_get"        8       64           1024
+  ExecTest  "flood_getnbi"     8       64           1024
+  ExecTest  "flood_g"          8       64           1024
+
   # This test requires more contexts than workgroups
   export ROCSHMEM_MAX_NUM_CONTEXTS=1024
   ExecTest  "teamctxinfra"        2       1            1
@@ -663,9 +680,19 @@ TestGDA() {
   ExecTest  "pingpong"         2       8            1
   ExecTest  "pingpong"         2       32           1
 
+  ExecTest  "flood_put"        2       64           1024
+  ExecTest  "flood_get"        2       64           1024
+
+  ExecTest  "flood_put"        8       64           1024
+  ExecTest  "flood_putnbi"     8       64           1024
+  ExecTest  "flood_p"          8       64           1024
+  ExecTest  "flood_get"        8       64           1024
+  ExecTest  "flood_getnbi"     8       64           1024
+#  ExecTest  "flood_g"          8       64           1024 # _g not implemented
+
   # This test requires more contexts than workgroups
   export ROCSHMEM_MAX_NUM_CONTEXTS=1024
-  ExecTest  "teamctxinfra"     2       1            1
+  ExecTest  "teamctxinfra"        2       1            1
   ExecTest  "teamctxsingleinfra"  2       1            1
   ExecTest  "teamctxblockinfra"   4       1            1
   ExecTest  "teamctxblockinfra"   5       1            1
