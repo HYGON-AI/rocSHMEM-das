@@ -120,10 +120,18 @@ enum TestType {
   PutmemOnStreamTestType = 80,
   PutmemSignalOnStreamTestType = 81,
   SignalWaitUntilOnStreamTestType = 82,
-  DefaultCtx_WAVEPutNBITestType_DP = 83,
-  DefaultCtx_AMO_AddTestType_DP = 84,
-  WAVEPutNBITestType_DP = 85,
-  AMO_AddTestType_DP = 86,
+  FloodPutTestType = 83,
+  FloodPutNBITestType = 84,
+  FloodPTestType = 85,
+  FloodGetTestType = 86,
+  FloodGetNBITestType = 87,
+  FloodGTestType = 88,
+
+  // Self-developed test cases start from 200 to avoid community conflicts.
+  DefaultCtx_WAVEPutNBITestType_DP = 200,
+  DefaultCtx_AMO_AddTestType_DP = 201,
+  WAVEPutNBITestType_DP = 202,
+  AMO_AddTestType_DP = 203,
 };
 
 enum OpType { PutType = 0, GetType = 1 };
