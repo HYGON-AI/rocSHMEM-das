@@ -1400,6 +1400,11 @@ void GDABackend::select_gid_index() {
 
   gid_index = selected_gid_index;
   gid       = selected_gid;
+  const char* userGid = std::getenv("ROCSHMEM_IB_GID_INDEX");
+  if (userGid) {
+      gid_index = atoi(userGid);
+      ibv.query_gid(context, port, gid_index, &gid);
+  }
 
   free(gid_entries);
 }
