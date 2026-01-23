@@ -675,6 +675,8 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_threadfence_system(
 
 __device__ ATTR_NO_INLINE void rocshmem_threadfence_system();
 
+__device__ ATTR_NO_INLINE uint64_t rocshmem_get_p2p_ptr(void *dest, int rank, int dst_rank);
+
 }  // namespace rocshmem
 
 #endif  // LIBRARY_INCLUDE_ROCSHMEM_HPP

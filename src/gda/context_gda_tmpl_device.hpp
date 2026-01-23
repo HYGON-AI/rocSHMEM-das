@@ -111,12 +111,12 @@ __device__ void GDAContext::amo_add(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ void GDAContext::amo_add_dp(void *dst, T value, int qp_idx, int pe) {
-  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_add_dp not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
-  int local_pe{-1};
-  if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
-    ipcImpl_.ipcAMOAdd(reinterpret_cast<T *>(get_local_ptr(dst, local_pe)), value);
-    return;
-  }
+  // if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_add_dp not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
+  // int local_pe{-1};
+  // if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
+  //   ipcImpl_.ipcAMOAdd(reinterpret_cast<T *>(get_local_ptr(dst, local_pe)), value);
+  //   return;
+  // }
 
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
