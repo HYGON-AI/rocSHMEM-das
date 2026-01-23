@@ -79,6 +79,23 @@ __device__ char* GDAContext::get_local_ptr(const void* addr, int pe) {
   return ipcImpl_.ipc_bases[pe] + L_offset;
 }
 
+__device__ uint64_t GDAContext::get_p2p_ptr(void *dest, int rank, int dst_rank){
+  if (rank == dst_rank) // 相同 GPU 的地址可以直接返回
+    return reinterpret_cast<uint64_t>(dest);
+
+  int local_ranks = ipcImpl_.shm_size; // 获取本节点的rank数量
+  int node_src = rank / local_ranks;
+  int node_dst = dst_rank / local_ranks;
+
+  if (node_src != node_dst) { // 先将 RDMA 的请求返回
+    return 0;
+  } else {  // 同一计算节点上的 不同 GPU 需要 IPC 映射后将指针返回
+    uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[rank % local_ranks];
+    char* dst_ptr = ipcImpl_.ipc_bases[dst_rank % local_ranks] + L_offset;
+    return reinterpret_cast<uint64_t>(dst_ptr);
+  }
+}
+
 __host__ GDAContext::~GDAContext() {
   CHECK_HIP(hipFree(qps));
 }
@@ -268,11 +285,11 @@ __device__ void GDAContext::putmem_nbi_wave(void *dest, const void *source,
 
 __device__ void GDAContext::putmem_nbi_wave_dp(void *dest, const void *source,
                                             size_t nelems, int qp_idx, int pe) {
-  int local_pe{-1};
-  if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
-    ipcImpl_.ipcCopy_wave(get_local_ptr(dest, local_pe), const_cast<void *>(source), nelems);
-    return;
-  }
+  // int local_pe{-1};
+  // if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
+  //   ipcImpl_.ipcCopy_wave(get_local_ptr(dest, local_pe), const_cast<void *>(source), nelems);
+  //   return;
+  // }
   if (is_thread_zero_in_wave()) {
      qps[qp_idx].put_nbi_dp(get_remote_ptr(dest, pe), source, nelems);
   }
