@@ -33,5 +33,6 @@ target_sources(
   PRIVATE
     queue_pair_mlx5.cpp
     segment_builder.cpp
+    queue_pair_mlx5_multiqp.cpp
 )
 endif()
