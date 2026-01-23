@@ -219,6 +219,8 @@ class QueuePair {
   mlx5_quiet();
 
   ///////////////////////////////////////////////////////////////////////////////////////////////////////
+  __device__ void mlx5_ring_doorbell_dp(uint64_t db_val, uint64_t my_sq_counter);
+  
   __device__ void mlx5_quiet_dp_single_lane();
 
   __device__ void
@@ -334,6 +336,7 @@ class QueuePair {
   uint64_t sq_posted{0};
   uint64_t sq_db_touched{0};
   uint64_t sq_sunk{0};
+  uint64_t sq_wqe_writed{0}; // 记录已经 写入 SQ 队列的 wqe 数
 
   static constexpr size_t OUTSTANDING_TABLE_SIZE = 65536;
   uint64_t outstanding_wqes[OUTSTANDING_TABLE_SIZE]{0};
