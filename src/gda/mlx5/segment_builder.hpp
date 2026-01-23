@@ -55,7 +55,7 @@ class SegmentBuilder {
       mlx5_wqe_data_seg data_seg;
       mlx5_wqe_inl_data_seg inl_data_seg;
       mlx5_wqe_atomic_seg atomic_seg;
-    };
+    }__attribute__((__aligned__(16)));
 
     mlx5_segment *segp;
 };
