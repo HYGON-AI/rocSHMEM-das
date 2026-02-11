@@ -463,6 +463,7 @@ namespace envvar {
      * @brief Sq settings
      */
     extern const var<size_t> inline_threshold;
+    extern const var<bool> enable_dmabuf;
   }  // namespace gda
 }  // namespace envvar
 }  // namespace rocshmem
