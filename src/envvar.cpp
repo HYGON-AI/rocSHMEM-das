@@ -72,6 +72,7 @@ namespace envvar {
     const var<size_t> num_qps_default_ctx("NUM_QPS_DEFAULT_CTX", "", 1);
     const var<size_t> num_qps_per_pe_usr_ctx("NUM_QPS_PER_PE_USR_CTX", "", 1);
     const var<size_t> inline_threshold("RDMA_INLINE_THRESHOLD", "", 8);
+    const var<bool> enable_dmabuf("ENABLE_DMABUF", "", false);
   }  // namespace gda
 
   namespace _detail {
