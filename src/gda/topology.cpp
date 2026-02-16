@@ -712,6 +712,18 @@ namespace rocshmem
     return GetIbvDeviceList()[nicIndex].numaNode;
   }
 
+  static bool hasExactMatch(const std::string& namesList, const std::string& name) {
+    std::stringstream ss(namesList);
+    std::string token;
+
+    while (std::getline(ss, token, ',')) {
+      if (token == name) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   struct NICInfo {
     std::string nicName;
     int index;
@@ -736,8 +748,7 @@ namespace rocshmem
     }
     return true;
   }
-
-  int GetClosestNicToGpu(int gpuIndex, const char** dev_name)
+  int GetClosestNicToGpu(int gpuIndex, const char* hca_list, const char** dev_name)
   {
     static bool isInitialized = false;
     static std::vector<int> closestNicId;
@@ -752,8 +763,13 @@ namespace rocshmem
 
       // Build up list of NIC bus addresses
       std::vector<std::string> ibvAddressList;
-      for (auto const& ibvDevice : ibvDeviceList)
-        ibvAddressList.push_back(ibvDevice.hasActivePort ? ibvDevice.busId : "");
+      std::string excludeList((nullptr != hca_list && hca_list[0] == '^')? &hca_list[1]: "");
+      std::string includeList((nullptr != hca_list && hca_list[0] != '^')? hca_list: "");
+      for (auto const& ibvDevice : ibvDeviceList) {
+        auto is_excluded = hasExactMatch(excludeList, ibvDevice.name)
+                        || (includeList.length() && !hasExactMatch(includeList, ibvDevice.name));
+        ibvAddressList.push_back((ibvDevice.hasActivePort && !is_excluded) ? ibvDevice.busId : "");
+      }
 
       // Track how many times a device has been assigned as "closest"
       // This allows distributed work across devices using multiple ports (sharing the same busID)
@@ -799,9 +815,9 @@ namespace rocshmem
 #endif
 
           int minDistance = std::numeric_limits<int>::max();
-          for (int j = 0; j < ibvDeviceList.size(); j++) {
-            if (ibvDeviceList[j].busId != "") {
-              int distance = GetBusIdDistance(hipPciBusId, ibvDeviceList[j].busId);
+          for (int j = 0; j < ibvAddressList.size(); j++) {
+            if (ibvAddressList[j] != "") {
+              int distance = GetBusIdDistance(hipPciBusId, ibvAddressList[j]);
               if (distance < minDistance && distance >= 0) {
                 minDistance = distance;
                 closestIdx = j;
@@ -814,6 +830,7 @@ namespace rocshmem
       }
       isInitialized = true;
     }
+
     const char* userTopo = std::getenv("ROCSHMEM_TOPO_FILE_FORCE");
     if (userTopo){
       int deviceId = -1;
@@ -839,10 +856,11 @@ namespace rocshmem
       return closestNicId[gpuIndex];
     }
 
-    DPRINTF("GPU Device id: %d closest NIC id : %d name: %s\n", gpuIndex, closestNicId[gpuIndex],
-           ibvDeviceList[closestNicId[gpuIndex]].name.c_str());
-    if (dev_name != nullptr) {
-      *dev_name = strdup(ibvDeviceList[closestNicId[gpuIndex]].name.c_str());
+    int closestIdx = closestNicId[gpuIndex];
+    DPRINTF("GPU Device id: %d closest NIC id : %d name: %s\n", gpuIndex, closestIdx,
+           (-1 != closestIdx)? ibvDeviceList[closestIdx].name.c_str(): "none-found");
+    if (dev_name != nullptr && closestIdx != -1) {
+      *dev_name = strdup(ibvDeviceList[closestIdx].name.c_str());
     }
 
     return closestNicId[gpuIndex];
@@ -874,7 +892,7 @@ namespace rocshmem
 
       std::string closestGpusStr = "";
       for (int j = 0; j < numGpus; j++) {
-        if (rocshmem::GetClosestNicToGpu(j, nullptr) == i) {
+        if (rocshmem::GetClosestNicToGpu(j, nullptr, nullptr) == i) {
           if (closestGpusStr != "") closestGpusStr += ",";
           closestGpusStr += std::to_string(j);
         }
@@ -912,6 +930,9 @@ namespace rocshmem
       printf("  %d Supported NIC device(s)\n", numNics);
     }
 
+    // Print out detected NIC topology
+    PrintNicToGPUTopo(outputToCsv);
+
     // Print out detected CPU topology
     printf("\n            %c", sep);
     for (int j = 0; j < numCpus; j++)
@@ -947,8 +968,5 @@ namespace rocshmem
       printf("\n");
     }
     printf("\n");
-
-    // Print out detected NIC topology
-    PrintNicToGPUTopo(outputToCsv);
   }
 }
