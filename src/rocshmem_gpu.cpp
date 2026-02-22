@@ -901,6 +901,24 @@ __device__ uint32_t rocshmem_ctx_num_qps_per_pe() {
   return 0;
 }
 
+__device__ int rocshmem_team_n_pes(rocshmem_team_t team) {
+  GPU_DPRINTF("Function: rocshmem_team_n_pes (team=%zd)\n", team);
+  if (team == ROCSHMEM_TEAM_INVALID) {
+    return -1;
+  } else {
+    return get_internal_team(team)->num_pes;
+  }
+}
+
+__device__ int rocshmem_team_my_pe(rocshmem_team_t team) {
+  GPU_DPRINTF("Function: rocshmem_team_my_pe (team=%zd)\n", team);
+  if (team == ROCSHMEM_TEAM_INVALID) {
+    return -1;
+  } else {
+    return get_internal_team(team)->my_pe;
+  }
+}
+
 template <typename T>
 __device__ T rocshmem_atomic_fetch_add(rocshmem_ctx_t ctx, T *dest, T val,
                                         int pe) {
