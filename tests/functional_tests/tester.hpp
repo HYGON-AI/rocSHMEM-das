@@ -126,6 +126,7 @@ enum TestType {
   FloodGetTestType = 86,
   FloodGetNBITestType = 87,
   FloodGTestType = 88,
+  HipModuleInitTestType = 89,
 
   // Self-developed test cases start from 200 to avoid community conflicts.
   DefaultCtx_WAVEPutNBITestType_DP = 200,
