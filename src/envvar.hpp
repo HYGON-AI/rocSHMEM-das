@@ -526,6 +526,7 @@ namespace envvar {
      */
     extern const var<size_t> inline_threshold;
     extern const var<bool> enable_dmabuf;
+    extern const var<std::string> alltoallv_wg_algo;
   }  // namespace gda
 }  // namespace envvar
 }  // namespace rocshmem
