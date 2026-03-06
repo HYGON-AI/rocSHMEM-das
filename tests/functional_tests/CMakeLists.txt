@@ -69,6 +69,7 @@ target_sources(
     wavefront_dp_primitives.cpp
     amo_dp_standard_tester.cpp
     flood_tester.cpp
+    flood_amo_tester.cpp
 )
 
 ###############################################################################
