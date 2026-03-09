@@ -118,6 +118,8 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     case WGSyncAllTestType:
     case TeamSyncTestType:
     case SignalWaitUntilOnStreamTestType:
+    case DefaultCtx_AMO_AddTestType_DP:
+    case AMO_AddTestType_DP:
       min_msg_size = 8;
       max_msg_size = 8;
       break;

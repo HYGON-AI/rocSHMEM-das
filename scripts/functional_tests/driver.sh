@@ -116,6 +116,10 @@ declare -A TEST_NUMBERS=(
   ["putmem_on_stream"]="80"
   ["putmem_signal_on_stream"]="81"
   ["signal_wait_until_on_stream"]="82"
+  ["defaultctx_waveputnbi_dp"]="83"
+  ["defaultctx_amo_add_dp"]="84"
+  ["waveputnbi_dp"]="85"
+  ["amo_add_dp"]="86"
 )
 
 ExecTest() {
@@ -579,6 +583,8 @@ TestGDA() {
   ExecTest  "defaultctxgetnbi" 2       4            128       1024
   ExecTest  "teamctxgetnbi"    2       4            128       1024
   ExecTest  "teamctxgetnbi"    2       16           256       1024
+  ExecTest  "defaultctx_waveputnbi_dp"    2       1            64        1048576
+  ExecTest  "waveputnbi_dp"    2       1            64        1048576
 
 #TestAMO() {
   ##############################################################################
@@ -622,6 +628,9 @@ TestGDA() {
   ExecTest  "amo_and"          2       1            1
 
   ExecTest  "amo_xor"          2       1            1
+
+  ExecTest  "defaultctx_amo_add_dp"   2       1            1
+  ExecTest  "amo_add_dp"       2       1            1
 
 #TestColl() {
   ##############################################################################
