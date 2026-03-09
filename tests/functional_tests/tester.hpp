@@ -120,6 +120,10 @@ enum TestType {
   PutmemOnStreamTestType = 80,
   PutmemSignalOnStreamTestType = 81,
   SignalWaitUntilOnStreamTestType = 82,
+  DefaultCtx_WAVEPutNBITestType_DP = 83,
+  DefaultCtx_AMO_AddTestType_DP = 84,
+  WAVEPutNBITestType_DP = 85,
+  AMO_AddTestType_DP = 86,
 };
 
 enum OpType { PutType = 0, GetType = 1 };

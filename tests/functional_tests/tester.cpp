@@ -62,6 +62,8 @@
 #include "team_reduction_tester.hpp"
 #include "wavefront_primitives.hpp"
 #include "workgroup_primitives.hpp"
+#include "amo_dp_standard_tester.hpp"
+#include "wavefront_dp_primitives.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -84,6 +86,8 @@ Tester::Tester(TesterArguments args) : args(args) {
     case WAVEGetNBITestType:
     case WAVEPutTestType:
     case WAVEPutNBITestType:
+    case DefaultCtx_WAVEPutNBITestType_DP:
+    case WAVEPutNBITestType_DP:
       num_timers = args.num_wgs * num_warps;
       break;
     default:
@@ -530,6 +534,22 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (rank == 0) std::cout << "Wave Signal Fetch ###" << std::endl;
       testers.push_back(new SignalingOperationsTester(args));
       return testers;
+    case DefaultCtx_WAVEPutNBITestType_DP:
+      if (rank == 0) std::cout << "Default CTX Non-Blocking Wave Dp Put ###" << std::endl;
+      testers.push_back(new WaveDpPrimitiveTester<signed char>(args));
+      return testers;
+    case WAVEPutNBITestType_DP:
+      if (rank == 0) std::cout << "Non-Blocking Wave Dp Put ###" << std::endl;
+      testers.push_back(new WaveDpPrimitiveTester<signed char>(args));
+      return testers;
+    case DefaultCtx_AMO_AddTestType_DP:
+      if (rank == 0) std::cout << "Default CTX AMO Dp Add ###" << std::endl;
+      testers.push_back(new AMODpStandardTester<long long>(args));
+      return testers;
+    case AMO_AddTestType_DP:
+      if (rank == 0) std::cout << "AMO Dp Add ###" << std::endl;
+      testers.push_back(new AMODpStandardTester<long long>(args));
+      return testers;
     default:
       if (rank == 0) std::cout << "Empty Test ###" << std::endl;
       return testers;
@@ -644,6 +664,10 @@ bool Tester::peLaunchesKernel() {
     case PutmemOnStreamTestType:
     case PutmemSignalOnStreamTestType:
     case SignalWaitUntilOnStreamTestType:
+    case DefaultCtx_WAVEPutNBITestType_DP:
+    case WAVEPutNBITestType_DP:
+    case DefaultCtx_AMO_AddTestType_DP:
+    case AMO_AddTestType_DP:
       is_launcher = true;
       break;
     default:
