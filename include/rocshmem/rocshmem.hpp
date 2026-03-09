@@ -655,6 +655,10 @@ __device__ int rocshmem_ctx_my_pe(rocshmem_ctx_t ctx);
 
 __device__ int rocshmem_my_pe();
 
+__device__ uint32_t rocshmem_ctx_num_qps_per_pe(rocshmem_ctx_t ctx);
+
+__device__ uint32_t rocshmem_ctx_num_qps_per_pe();
+
 /**
  * @brief Translate the PE in src_team to that in dest_team.
  *

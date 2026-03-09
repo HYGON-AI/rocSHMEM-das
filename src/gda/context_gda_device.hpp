@@ -351,6 +351,8 @@ class GDAContext : public Context {
 
   //Team information for the team associated with the context
   TeamInfo *tinfo{nullptr};
+
+  __device__ uint32_t get_num_qps_per_pe() { return num_qps_per_pe; }
 };
 
 }  // namespace rocshmem

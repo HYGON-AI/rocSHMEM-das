@@ -557,8 +557,8 @@ __device__ void rocshmem_ctx_alltoall_wg(rocshmem_ctx_t ctx,
 template <typename T>
 __device__ void rocshmem_alltoall_wg(rocshmem_team_t team, T *dest,
                                      const T *source, int nelem) {
-  GPU_DPRINTF("Function: rocshmem_alltoall_wg (ctx=%zd, team=%zd, dest=%p, source=%p, nelem=%d\n",
-              ctx.ctx_opaque, team, dest, source, nelem);
+  GPU_DPRINTF("Function: rocshmem_alltoall_wg (team=%zd, dest=%p, source=%p, nelem=%d\n",
+               team, dest, source, nelem);
 
   get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->alltoall<T>(team, dest, source, nelem);
 }
@@ -867,6 +867,24 @@ __device__ int rocshmem_ctx_my_pe(rocshmem_ctx_t ctx) {
 
 __device__ int rocshmem_my_pe() {
   return get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->my_pe;
+}
+
+__device__ uint32_t rocshmem_ctx_num_qps_per_pe(rocshmem_ctx_t ctx) {
+#if defined(GDA_MLX5)
+  return static_cast<GDAContext*>(ctx.ctx_opaque)->get_num_qps_per_pe();
+#endif
+
+  GPU_DPRINTF("[WARNING] not implemented for GDA_MLX5\n");
+  return 0;
+}
+
+__device__ uint32_t rocshmem_ctx_num_qps_per_pe() {
+#if defined(GDA_MLX5)
+  return static_cast<GDAContext*>(ROCSHMEM_CTX_DEFAULT.ctx_opaque)->get_num_qps_per_pe(); 
+#endif
+
+  GPU_DPRINTF("[WARNING] not implemented for GDA_MLX5\n");
+  return 0;
 }
 
 template <typename T>
@@ -1993,7 +2011,11 @@ WAIT_DEF_GEN(uint64_t, uint64)
 // clang-format on
 
 __device__ ATTR_NO_INLINE uint64_t rocshmem_get_p2p_ptr(void *dest, int rank, int dst_rank){
+#if defined(GDA_MLX5)
   return static_cast<GDAContext*>(ROCSHMEM_CTX_DEFAULT.ctx_opaque)->get_p2p_ptr(dest, rank, dst_rank);
+#else
+  return 0;
+#endif
 }
 
 }  // namespace rocshmem
