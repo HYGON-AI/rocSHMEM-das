@@ -54,10 +54,70 @@ class HIPAllocator : public MemoryAllocator {
 };
 
 class HIPAllocatorFinegrained : public MemoryAllocator {
- public:
+public:
   HIPAllocatorFinegrained()
-      : MemoryAllocator(hipExtMallocWithFlags, hipFree,
-                        hipDeviceMallocFinegrained) {}
+      : MemoryAllocator(
+           malloc_with_flags,  // 静态函数指针，可以被转换
+           hipFree,
+           get_malloc_flags()
+      ) {
+}
+
+private:
+ static bool is_xdp_enabled() {
+   // 检查环境变量 ROCSHMEM_GDR_DISABLE_XDP
+   char* env_disable_xdp = getenv("ROCSHMEM_GDR_DISABLE_XDP");
+   if (env_disable_xdp != NULL) {
+     // 如果环境变量设置为"1"、"true"、"on"、"yes"等，则禁用XDP
+     char disable_value[16];
+     strncpy(disable_value, env_disable_xdp, sizeof(disable_value) - 1);
+     disable_value[sizeof(disable_value) - 1] = '\0';
+
+     // 转换为小写比较
+     for (char* p = disable_value; *p; ++p) {
+       *p = tolower(*p);
+     }
+
+     if (strcmp(disable_value, "1") == 0 ||
+         strcmp(disable_value, "true") == 0 ||
+         strcmp(disable_value, "on") == 0 ||
+         strcmp(disable_value, "yes") == 0) {
+       return false;  // 环境变量强制禁用XDP
+     }
+   }
+
+   // 读取系统参数
+   FILE* fp = fopen("/sys/module/hycu/parameters/xdp_size", "r");
+   if (!fp) {
+     return false;  // 文件不存在，默认为普通细粒度内存
+   }
+
+   unsigned long xdp_size;
+   int result = fscanf(fp, "%lu", &xdp_size);
+   fclose(fp);
+
+   if (result != 1) {
+     return false;  // 读取失败
+   }
+
+   // 根据 xdp_size 判断是否启用 XDP
+   // 假设规则：如果 xdp_size > 0，则使用 XDP 内存
+   return xdp_size > 0;
+ }
+
+ static unsigned int get_malloc_flags() {
+   if (is_xdp_enabled()) {
+     return hipDeviceMallocUncachedXdp;
+   } else {
+     return hipDeviceMallocFinegrained;
+   }
+ }
+
+ // 静态函数替代 lambda
+ static hipError_t malloc_with_flags(void** ptr, size_t size, unsigned int /*flags*/) {
+   // 这里的 flags 参数被忽略，因为我们使用静态标志
+   return hipExtMallocWithFlags(ptr, size, get_malloc_flags());
+ }
 };
 
 #if defined HIP_SUPPORTS_MALLOC_UNCACHED
