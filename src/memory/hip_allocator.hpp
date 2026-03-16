@@ -46,6 +46,12 @@
 #elif defined USE_HEAP_DEVICE_UNCACHED
 #error "USE_HEAP_DEVICE_UNCACHED unsupported in this HIP version"
 #endif
+
+// 安全检查：确保宏已定义
+#ifndef HIP_VERSION_PATCH
+    #error "HIP_VERSION_PATCH not defined! Check your HIP installation."
+#endif
+
 namespace rocshmem {
 
 class HIPAllocator : public MemoryAllocator {
@@ -106,11 +112,15 @@ private:
  }
 
  static unsigned int get_malloc_flags() {
+#if defined(HIP_VERSION_PATCH) && (HIP_VERSION_PATCH >= 25521)
    if (is_xdp_enabled()) {
      return hipDeviceMallocUncachedXdp;
    } else {
      return hipDeviceMallocFinegrained;
    }
+#else
+   return hipDeviceMallocFinegrained;
+#endif
  }
 
  // 静态函数替代 lambda
