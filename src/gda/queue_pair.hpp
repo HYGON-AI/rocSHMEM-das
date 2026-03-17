@@ -183,8 +183,6 @@ class QueuePair {
   __device__ __attribute__((noinline)) void post_wqe_rma_single(int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, bool ring_db);
 
 #if defined(GDA_MLX5)
-  __device__ void mlx5_ring_doorbell_dp(uint64_t db_val, uint64_t my_sq_counter);
-  
   __device__ void mlx5_quiet_dp_single_lane();
 
   __device__ void
