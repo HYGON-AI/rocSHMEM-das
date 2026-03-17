@@ -509,6 +509,12 @@ TestOther() {
   ExecTest  "flood_get"        2       64           1024
   ExecTest  "flood_get"        8       64           1024
   ExecTest  "flood_getnbi"     8       64           1024
+  
+  ExecTest  "defaultctx_waveputnbi_dp"    2       1            64        1048576
+  ExecTest  "waveputnbi_dp"    2       1            64        1048576
+  ExecTest  "defaultctx_amo_add_dp"   2       1            1
+  ExecTest  "amo_add_dp"       2       1            1
+
   if [[ $TEST != gda* ]]; then #AIROCSHMEM-162
   ExecTest  "flood_g"          8       64           1024
   else echo "Skip:   flood_g (AIROCSHMEM-162: GDA _g not implemented)"; fi
