@@ -37,7 +37,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma_dp_single_lane(int32_t size, uintpt
   } while (wqe_writed != (mlx5_sq.post - 1));
 
   // ring doorbell for this WQE
-  mlx5_ring_doorbell(mlx5_sq.tail, wqe);
+  mlx5_ring_doorbell(mlx5_sq.tail, wqe, false);
 
   __hip_atomic_store(&sq_wqe_writed, mlx5_sq.post, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
 
@@ -81,7 +81,7 @@ __device__ void QueuePair::mlx5_post_wqe_amo_dp_single_lane(int32_t size, uintpt
   } while (wqe_writed != (mlx5_sq.post - 1));
 
   // ring doorbell for this WQE (note: need to check this for correctness)
-  mlx5_ring_doorbell(mlx5_sq.tail, wqe);
+  mlx5_ring_doorbell(mlx5_sq.tail, wqe, false);
 
   __hip_atomic_store(&sq_wqe_writed, mlx5_sq.post, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
 
