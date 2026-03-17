@@ -125,7 +125,9 @@ Tester::Tester(TesterArguments args) : args(args) {
       case WAVEPutNBITestType:
       case WAVEPutSignalTestType:
       case WAVEPutSignalNBITestType:
-        max_msg_size = args.max_volume_size / args.num_wgs / num_warps;
+      case DefaultCtx_WAVEPutNBITestType_DP:
+      case WAVEPutNBITestType_DP:
+	max_msg_size = args.max_volume_size / args.num_wgs / num_warps;
         break;
       case WGGetTestType:
       case WGGetNBITestType:

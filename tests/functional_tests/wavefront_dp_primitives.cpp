@@ -50,7 +50,7 @@ template <typename T>
 template <typename T>
 WaveDpPrimitiveTester<T>::WaveDpPrimitiveTester(TesterArguments args)
     : Tester(args) {
-  buff_size = args.max_msg_size * sizeof(T) * args.num_wgs * num_warps;
+  buff_size = max_msg_size * sizeof(T) * args.num_wgs * num_warps;
   source = (T *)rocshmem_malloc(buff_size);
   dest = (T *)rocshmem_malloc(buff_size);
   src_flags = (signed char *)rocshmem_malloc(sizeof(signed char) * args.num_wgs * num_warps);
