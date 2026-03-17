@@ -61,7 +61,7 @@ static void device_properties_init(void) {
                   hipprop.gcnArchName);
     device_properties.push_back(prop);
 
-    CHECK_HIP(hipDeviceGetAttribute (&has_large_bar, hipDeviceAttributeIsLargeBar, i));
+    CHECK_HIP(hipDeviceGetAttribute_v2 (&has_large_bar, hipDeviceAttributeIsLargeBar, i));
     if (has_large_bar == 0) {
       // Large BAR required for IPC operations
       printf("Warning: Large BAR support is not enabled on device %d. "
