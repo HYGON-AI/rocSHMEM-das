@@ -33,7 +33,11 @@ __device__ static inline uint16_t mlx5_wqe_idx(const gda_mlx5_device_sq& sq, uin
   return sq.tail + lane_id;
 }
 
-__device__ void QueuePair::mlx5_ring_doorbell(uint16_t sq_wqebb_counter, const gda_mlx5_wqe& wqe) {
+__device__ void QueuePair::mlx5_ring_doorbell(uint16_t sq_wqebb_counter, const gda_mlx5_wqe& wqe, bool flush_hdp) {
+  if (flush_hdp && (gpuHdpReg != nullptr)) {
+    __hip_atomic_store(reinterpret_cast<uint32_t*>(gpuHdpReg), (uint32_t)0x1, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
+  }
+
   // gda_mlx5_db_register constructor extracts first 8 bytes of WQE
   gda_mlx5_db_register db_val{wqe};
   __be32 be_sq_wqebb_counter = endian::to_be<uint32_t>(sq_wqebb_counter);
