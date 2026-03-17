@@ -127,6 +127,8 @@ declare -A TEST_NUMBERS=(
   ["flood_add"]="90"
   ["flood_fadd"]="91"
   ["flood_waitadd"]="92"
+  ["device_bitcode"]="93"
+
   ["defaultctx_waveputnbi_dp"]="200"
   ["defaultctx_amo_add_dp"]="201"
   ["waveputnbi_dp"]="202"
@@ -497,6 +499,10 @@ TestOther() {
   ##############################################################################
   ExecTest  "init"             2       1            1
   ExecTest  "hipmodule_init"   2       1            1
+  ExecTest  "device_bitcode"   2       1            1
+  ExecTest  "device_bitcode"   2       32           1024
+  ExecTest  "device_bitcode"   4       16           256
+  ExecTest  "device_bitcode"   8       16           128
 
   ExecTest  "pingpong"         2       1            1
   ExecTest  "pingpong"         2       8            1

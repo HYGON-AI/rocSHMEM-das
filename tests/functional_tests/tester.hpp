@@ -130,6 +130,7 @@ enum TestType {
   FloodAddTestType = 90,
   FloodFAddTestType = 91,
   FloodWaitAmoTestType = 92,
+  DeviceBitcodeTestType = 93,
 
 
   // Self-developed test cases start from 200 to avoid community conflicts.
@@ -151,7 +152,7 @@ class Tester {
   explicit Tester(TesterArguments args);
   virtual ~Tester();
 
-  void execute();
+  virtual void execute();
 
   static std::vector<Tester *> create(TesterArguments args);
 
