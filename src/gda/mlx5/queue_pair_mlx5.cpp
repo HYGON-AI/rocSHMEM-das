@@ -29,44 +29,6 @@
 
 namespace rocshmem {
 
-#define MLX5_LOCK_USE_S_SLEEP  1
-#define MLX5_LOCK_USE_S_WAKEUP (0 && MLX5_LOCK_USE_S_SLEEP)
-// sleep for up to 64 * MLX5_LOCK_S_SLEEP_DELAY clock cycles
-static constexpr int MLX5_LOCK_S_SLEEP_DELAY = 2;
-
-#if MLX5_LOCK_USE_S_WAKEUP
-__device__ static inline void amdgcn_s_wakeup() {
-  /* why doesn't __builtin_amdgcn_s_wakeup() exist?
-   * signals other wavefronts in the same workgroup to exit early from s_sleep */
-  asm volatile("s_wakeup");
-}
-#endif
-
-__device__ static inline void acquire_lock(uint32_t *lock) {
-  /* acquire lock when new value 1 (locked) is exchanged with prior value 0 (unlocked)
-   *
-   * the __ATOMIC_ACQUIRE load synchronizes with the __ATOMIC_RELEASE store in release_lock(),
-   * but not with the (implicit) __ATOMIC_RELAXED store part of the exchange
-   * this is fine, since we only need to ensure happens-before between the threads
-   * that released and acquired the lock, not between the different threads contending on the lock
-   * when they (eventually) acquire the lock, *then* they will synchronize */
-  while (__hip_atomic_exchange(lock, 1, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT)) {
-#if MLX5_LOCK_USE_S_SLEEP
-    // sleep so we don't hammer the memory
-    __builtin_amdgcn_s_sleep(MLX5_LOCK_S_SLEEP_DELAY);
-#endif
-  }
-}
-
-__device__ static inline void release_lock(uint32_t *lock) {
-  // release lock by storing 0 (unlocked)
-  __hip_atomic_store(lock, 0, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
-#if MLX5_LOCK_USE_S_WAKEUP
-  // wake up any other sleeping waves (in the same workgroup)
-  amdgcn_s_wakeup();
-#endif
-}
-
 __device__ static inline uint16_t mlx5_wqe_idx(const gda_mlx5_device_sq& sq, uint8_t lane_id) {
   return sq.tail + lane_id;
 }
@@ -193,7 +155,9 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
 
   uint16_t sq_depth = mlx5_sq.depth;
 
+  uint64_t sq_wqe_writed = __hip_atomic_load(&sq_wqe_writed, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
   uint64_t sq_post = __hip_atomic_load(&mlx5_sq.post, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
+  sq_post = sq_post - sq_wqe_writed; // only consider WQEs that have CQEs associated with them
   // don't need to check CQEs if we haven't ever filled SQ and there's enough space left
   if (sq_post <= static_cast<uint64_t>((sq_depth - requested_available_slots))) {
     return;
@@ -228,7 +192,9 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
       printf("CQ: invalid completion (%x)\n", opcode);
 #endif
       // reload sq_post, we might need to look at the other CQE
+      sq_wqe_writed = __hip_atomic_load(&sq_wqe_writed, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
       sq_post = __hip_atomic_load(&mlx5_sq.post, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
+      sq_post = sq_post - sq_wqe_writed; // only consider WQEs that have CQEs associated with them
       continue;
     }
 
