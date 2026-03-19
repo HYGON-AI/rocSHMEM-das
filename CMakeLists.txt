@@ -225,7 +225,7 @@ if (NOT BUILD_TESTS_ONLY)
   #############################################################################
   # DEVICE BITCODE COMPILATION
   #############################################################################
-  include(${CMAKE_SOURCE_DIR}/cmake/DeviceBitcode.cmake)
+  #include(${CMAKE_SOURCE_DIR}/cmake/DeviceBitcode.cmake)
 
   #############################################################################
   # INSTALL

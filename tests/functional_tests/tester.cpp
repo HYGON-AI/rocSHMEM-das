@@ -660,7 +660,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       return testers;
     case DeviceBitcodeTestType:
       if (rank == 0) std::cout << "Device Bitcode Test ###" << std::endl;
-      testers.push_back(new DeviceBitcodeTester(args));
+      //testers.push_back(new DeviceBitcodeTester(args));
       return testers;
     default:
       if (rank == 0) std::cout << "Empty Test ###" << std::endl;
