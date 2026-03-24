@@ -79,6 +79,7 @@ class GDABackend : public Backend {
   union ibv_gid gid;
   int port = 1;
   int gid_index = 0;
+  uint32_t gid_type;
 
   uint32_t *heap_rkey = nullptr;
   struct ibv_mr *heap_mr = nullptr;
@@ -122,6 +123,10 @@ class GDABackend : public Backend {
    * total_num_qps_per_pe * num_pes;
    */
   uint32_t total_num_qps {1};
+
+  /* GDA_MLX5 START */
+  std::vector<mlx5_devx_qp> mlx5_qps;
+  /* GDA_MLX5 END */
 
  /**
    * @brief Choose nic device according to locality/user preferences
@@ -403,6 +408,7 @@ class GDABackend : public Backend {
    */
   void create_qps(int sq_length);
   void bnxt_create_qps(int sq_length);
+  void mlx5_create_qps(int sq_length);
 
   /**
    * @brief Reorders QPs to that we map rocSHMEM contexts to the correct QPs
