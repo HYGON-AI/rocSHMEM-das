@@ -230,7 +230,7 @@ class QueuePair {
    * @param[in] db_val Doorbell value is written by method.
    */
 #if defined(GDA_MLX5)
-  __device__ void mlx5_ring_doorbell(uint16_t sq_wqebb_counter, const gda_mlx5_wqe& wqe, bool flush_hdp = true);
+  __device__ void mlx5_ring_doorbell(uint16_t sq_wqebb_counter, const gda_mlx5_wqe& wqe);
 #endif
 #if defined(GDA_BNXT)
   __device__ void bnxt_ring_doorbell(uint32_t slot_idx);
@@ -253,8 +253,6 @@ class QueuePair {
   /* GDAProvider::BNXT END */
 
   /* GDAProvider::MLX5 START */
-
-  uint64_t sq_wqe_writed{0}; // 记录已经 写入 SQ 队列的 wqe 数
 
   gda_mlx5_device_cq mlx5_cq;
   gda_mlx5_device_sq mlx5_sq;

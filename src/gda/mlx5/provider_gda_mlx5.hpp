@@ -260,7 +260,7 @@ union gda_mlx5_db_register {
   __device__ constexpr inline gda_mlx5_db_register(const gda_mlx5_wqe_header& wqe_header)
     : wqe_header{wqe_header} { }
   __device__ constexpr inline gda_mlx5_db_register(__be32 opmod_idx_opcode, __be32 qpn_ds)
-    : val{(static_cast<uint64_t>(qpn_ds) << 32) | static_cast<uint64_t>(opmod_idx_opcode)} { }
+    : val{(static_cast<uint64_t>(opmod_idx_opcode) << 32) | static_cast<uint64_t>(qpn_ds)} { }
   __device__ constexpr inline gda_mlx5_db_register(const gda_mlx5_wqe_ctrl& ctrl)
     : gda_mlx5_db_register{gda_mlx5_wqe_header{ctrl.opmod_idx_opcode, ctrl.qpn_ds}} { }
   __device__ constexpr inline gda_mlx5_db_register(const gda_mlx5_wqe& wqe)

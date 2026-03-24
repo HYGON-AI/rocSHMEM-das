@@ -33,8 +33,8 @@ __device__ static inline uint16_t mlx5_wqe_idx(const gda_mlx5_device_sq& sq, uin
   return sq.tail + lane_id;
 }
 
-__device__ void QueuePair::mlx5_ring_doorbell(uint16_t sq_wqebb_counter, const gda_mlx5_wqe& wqe, bool flush_hdp) {
-  if (flush_hdp && (gpuHdpReg != nullptr)) {
+__device__ void QueuePair::mlx5_ring_doorbell(uint16_t sq_wqebb_counter, const gda_mlx5_wqe& wqe) {
+  if (gpuHdpReg != nullptr) {
     __hip_atomic_store(reinterpret_cast<uint32_t*>(gpuHdpReg), (uint32_t)0x1, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
   }
 
@@ -159,9 +159,7 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
 
   uint16_t sq_depth = mlx5_sq.depth;
 
-  uint64_t sq_wqe_writed = __hip_atomic_load(&sq_wqe_writed, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
   uint64_t sq_post = __hip_atomic_load(&mlx5_sq.post, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
-  sq_post = sq_post - sq_wqe_writed; // only consider WQEs that have CQEs associated with them
   // don't need to check CQEs if we haven't ever filled SQ and there's enough space left
   if (sq_post <= static_cast<uint64_t>((sq_depth - requested_available_slots))) {
     return;
@@ -196,9 +194,7 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
       printf("CQ: invalid completion (%x)\n", opcode);
 #endif
       // reload sq_post, we might need to look at the other CQE
-      sq_wqe_writed = __hip_atomic_load(&sq_wqe_writed, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
       sq_post = __hip_atomic_load(&mlx5_sq.post, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
-      sq_post = sq_post - sq_wqe_writed; // only consider WQEs that have CQEs associated with them
       continue;
     }
 
