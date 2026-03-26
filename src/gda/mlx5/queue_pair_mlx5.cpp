@@ -276,7 +276,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int pe, int32_t length, uintptr_t l
     mlx5_sq.tail += qp_lane_count;
     mlx5_sq.post += qp_lane_count;
     // we are the last thread in the wavefront, so we have the last WQE posted
-    mlx5_ring_doorbell(mlx5_sq.tail, wqe);
+    mlx5_ring_doorbell(mlx5_sq.tail, mlx5_sq.buf[sq_idx]);
     // release SQ lock
     release_lock(&mlx5_sq.lock);
   }
@@ -310,7 +310,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma_single(int pe, int32_t length, uint
 
   if (ring_db) {
     // ring doorbell for this WQE
-    mlx5_ring_doorbell(mlx5_sq.tail, wqe);
+    mlx5_ring_doorbell(mlx5_sq.tail, mlx5_sq.buf[sq_idx]);
   }
 
   // release SQ lock
@@ -368,7 +368,7 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo(int pe, int32_t length, uintptr
       fetching_atomic_idx += qp_lane_count;
     }
     // we are the last thread in the wavefront, so we have the last WQE posted
-    mlx5_ring_doorbell(mlx5_sq.tail, wqe);
+    mlx5_ring_doorbell(mlx5_sq.tail, mlx5_sq.buf[sq_idx]);
     // release SQ lock
     release_lock(&mlx5_sq.lock);
   }
@@ -416,7 +416,7 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo_single(int pe, int32_t length, 
     fetching_atomic_idx += 1;
   }
   // ring doorbell for this WQE (note: need to check this for correctness)
-  mlx5_ring_doorbell(mlx5_sq.tail, wqe);
+  mlx5_ring_doorbell(mlx5_sq.tail, mlx5_sq.buf[sq_idx]);
   // release SQ lock
   release_lock(&mlx5_sq.lock);
 
