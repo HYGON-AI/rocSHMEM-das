@@ -592,6 +592,43 @@ TestHeatMapColl() {
   ExecTest  "alltoall"         64      1            256        v1073741824
 }
 
+TestPerformance() {
+  NOTIMEOUT=1
+  NOVERIF=1
+  ##############################################################################
+  #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
+  ##############################################################################
+  ExecTest  "put"                     $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  ExecTest  "wgput"                   $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  ExecTest  "waveput"                 $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  
+  ExecTest  "putnbi"                  $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  ExecTest  "wgputnbi"                $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  ExecTest  "waveputnbi"              $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  
+  ExecTest  "get"                     $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  ExecTest  "wgget"                   $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  ExecTest  "waveget"                 $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  
+  ExecTest  "getnbi"                  $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  ExecTest  "wggetnbi"                $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  ExecTest  "wavegetnbi"              $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  
+  ExecTest  "alltoall"                $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  ExecTest  "teambroadcast"           $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  ExecTest  "teamreduction"           $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  
+  ExecTest  "putmem_on_stream"        $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  ExecTest  "getmem_on_stream"        $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  ExecTest  "alltoallmem_on_stream"   $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  ExecTest  "broadcastmem_on_stream"  $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE 
+  
+  if [[ $TEST == gda-mlx5* ]]; then  
+  ExecTest  "defaultctx_waveputnbi_dp"  $RANKS_NUM     $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  ExecTest  "waveputnbi_dp"           $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  else echo "Skip:   *_dp (AIROCSHMEM: GDA *_dp not implemented)"; fi
+}
+
 ValidateInput() {
   INPUT_COUNT=$1
   if [ $INPUT_COUNT -lt 3 ] ; then
@@ -622,6 +659,36 @@ DRIVER_RETURN_STATUS=0
 
 ValidateInput $#
 ValidateLogDir $LOG_DIR
+
+RANKS_NUM=2
+WGS_NUM=32
+THREADS_NUM=256
+MSG_MAX_SIZE=8388608
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -n)
+      RANKS_NUM="$2"
+      shift 2
+      ;;
+    -w)
+      WGS_NUM="$2"
+      shift 2
+      ;;
+    -z)
+      THREADS_NUM="$2"
+      shift 2
+      ;;
+    -s)
+      MSG_MAX_SIZE="$2"
+      shift 2
+      ;;
+    *)
+      # skip
+      shift
+      ;;
+  esac
+done
 
 case $TEST in
   "heatmaprma")
@@ -663,6 +730,9 @@ case $TEST in
     ;;
   *"stream")
     TestOnStream
+    ;;
+  *"perf")
+    TestPerformance
     ;;
   *"other")
     TestOther
