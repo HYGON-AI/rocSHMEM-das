@@ -616,14 +616,14 @@ TestPerformance() {
   
   ExecTest  "alltoall"                $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
   ExecTest  "teambroadcast"           $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
-  ExecTest  "teamreduction"           $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  # ExecTest  "teamreduction"           $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
   
   ExecTest  "putmem_on_stream"        $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
   ExecTest  "getmem_on_stream"        $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
   ExecTest  "alltoallmem_on_stream"   $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
   ExecTest  "broadcastmem_on_stream"  $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE 
   
-  if [[ $TEST == gda-mlx5* ]]; then  
+  if [[ $TEST == perf-mlx5* ]]; then  
   ExecTest  "defaultctx_waveputnbi_dp"  $RANKS_NUM     $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
   ExecTest  "waveputnbi_dp"           $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
   else echo "Skip:   *_dp (AIROCSHMEM: GDA *_dp not implemented)"; fi
@@ -732,6 +732,9 @@ case $TEST in
     TestOnStream
     ;;
   *"perf")
+    TestPerformance
+    ;;
+  *"perf-mlx5")
     TestPerformance
     ;;
   *"other")

@@ -26,12 +26,16 @@ if len(sys.argv) <= 1:
 
 files_in_dir = {}
 files = 0
-mode = "--Both"  # 默认 Both
+mode = "--both"  # 默认 both
 out_file = "rocshmem_test" # 默认输出文件
+show_mode = "--s" # 默认按msgsize显示, --v按volume显示
 
 for arg in sys.argv[1:]:
-    if arg in ["--Lat", "--Bw", "--Both"]:
+    if arg in ["--lat", "--bw", "--both"]:
         mode = arg
+        continue
+    elif arg in ["--s", "--v"]:
+        show_mode = arg
         continue
     elif arg.startswith("-o="):
         out_file = arg.split("=")[1]
@@ -47,7 +51,13 @@ for arg in sys.argv[1:]:
     files = files + len(file_names)
 
 if not files_in_dir:
-    print("用法: python heatmap-parse-rocshmem-general.py [--Lat/--Bw/--Both] [-o=out_file] 目录1 目录2...")
+    print("用法: python heatmap-parse-rocshmem-general.py [--lat/--bw/--both] [--s/--v] [-o=out_file] 目录1 目录2...\n" \
+         "--lat: 只显示延迟,可选\n" \
+         "--bw: 只显示带宽,可选\n" \
+         "--both: 同时显示延迟和带宽(默认),可选\n" \
+         "--s: 按消息大小显示(默认),可选\n" \
+         "--v: 按Rank级消息总大小显示(volume=并发消息数*size),可选\n" \
+         "-o=out_file: 指定输出Excel文件名(默认rocshmem_test),可选\n")
     sys.exit()
 
 unique="rocSHMEM_MI300_Thor2_Heatmap"
@@ -201,9 +211,11 @@ for dir, file_names in files_in_dir.items():
 
     prev_op = ""
     op_count = 1
+    show_mode_info = f" Show Mode: {'Message Size' if show_mode=='--s' else 'Volume Size'}"
     worksheet.merge_range(1, 2, 1, 10, f"Data directory: {dir}", yellow_format)
     worksheet.write(1, 12, f"Lat: us\nBw: GB/s", yellow_format)
-    worksheet.merge_range(3, 2, 3, 12, f"Note: For OnStream operations, the actual value of w is 1. The actual z varies with size. When it is greater than 256, use 256.", yellow_format)
+    worksheet.merge_range(1, 14, 1, 15, f"{show_mode_info}", yellow_format)
+    worksheet.merge_range(3, 2, 3, 15, f"Note: For OnStream operations, the actual value of w is 1. The actual z varies with size. When it is greater than 256, use 256.", yellow_format)
 
     dataset_count = 0
     pre_pad_top = 0
@@ -230,9 +242,9 @@ for dir, file_names in files_in_dir.items():
             worksheet.write(pad_top, pad_left+2, f"num-threads", cell_format)
 
             for i in range(rows):
-                if mode == "--Lat":
+                if mode == "--lat":
                     header = f"{x_str[i]}\nLat"
-                elif mode == "--Bw":
+                elif mode == "--bw":
                     header = f"{x_str[i]}\nBw"
                 else:
                     header = f"{x_str[i]}\nLat/Bw"
@@ -257,16 +269,16 @@ for dir, file_names in files_in_dir.items():
             lat = None
             bw = None
             for pt in data_series.data:
-                if pt.volume == msg_size:
+                if (show_mode == "--s" and pt.msgsize == msg_size) or (show_mode == "--v" and pt.volume == msg_size):
                     lat = pt.avg_time
                     bw = pt.avg_bw
                     break
 
             # ====================== 最终显示格式 ======================
-            if mode == "--Lat":
+            if mode == "--lat":
                 val = f"{lat:.2f}" if lat is not None else ""
                 worksheet.write(top_start, i+pad_left+3, val, wrap_format)
-            elif mode == "--Bw":
+            elif mode == "--bw":
                 val = f"{bw:.2f}" if bw is not None else ""
                 worksheet.write(top_start, i+pad_left+3, val, wrap_format)
             else:
@@ -286,4 +298,4 @@ for dir, file_names in files_in_dir.items():
 
 workbook.close()
 print(f"\n✅ 生成成功：{out_file}.xlsx")
-print(f"✅ 模式：{mode}")
+print(f"✅ 输出模式：{'Message Size' if show_mode=='--s' else 'Volume Size'}, {'Latency' if mode=='--lat' else 'Bandwidth' if mode=='--bw' else 'Latency and Bandwidth'}")
