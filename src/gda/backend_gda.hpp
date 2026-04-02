@@ -111,22 +111,22 @@ class GDABackend : public Backend {
   uint64_t *gpu_db_sq = nullptr;
   /* GDA_IONIC END */
 
+  /* GDA_MLX5 START */
+  std::vector<mlx5_devx_qp> mlx5_qps;
+  /* GDA_MLX5 END */
+
   /**
    * Determine number of QPs to create per PE =
    * ROCSHMEM_GDA_NUM_QPS_PER_PE_DEFAULT_CTX +
    * ROCSHMEM_GDA_NUM_QPS_PER_PE_USR_CTX * ROCSHMEM_MAX_NUM_CONTEXTS
    */
-  size_t total_num_qps_per_pe {1};
+  size_t num_qps_per_pe {1};
 
   /**
    * Total number of QPs created =
-   * total_num_qps_per_pe * num_pes;
+   * num_qps_per_pe * num_pes;
    */
-  uint32_t total_num_qps {1};
-
-  /* GDA_MLX5 START */
-  std::vector<mlx5_devx_qp> mlx5_qps;
-  /* GDA_MLX5 END */
+  uint32_t num_qps {1};
 
  /**
    * @brief Choose nic device according to locality/user preferences

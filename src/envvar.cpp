@@ -69,13 +69,14 @@ namespace envvar {
     const var<bool> alternate_qp_ports("ALTERNATE_QP_PORTS", "", true);
     const var<uint8_t> traffic_class("TRAFFIC_CLASS", "", 0);
     const var<bool> pcie_relaxed_ordering("PCIE_RELAXED_ORDERING", "", false);
-    const var<size_t> num_qps_default_ctx("NUM_QPS_DEFAULT_CTX", "", 1);
-    const var<size_t> num_qps_per_pe_usr_ctx("NUM_QPS_PER_PE_USR_CTX", "", 1);
     const var<size_t> inline_threshold("RDMA_INLINE_THRESHOLD", "", 8);
     const var<bool> enable_dmabuf("ENABLE_DMABUF", "", false);
     const var<bool> override_nic_firmware_check("OVERRIDE_NIC_FIRMWARE_CHECK", "", false);
     const var<std::string> alltoallv_wg_algo("ALLTOALLV_WG_ALGO", "");
     const var<uint32_t> sq_size("SQ_SIZE", "", 4096);
+    const var<size_t> num_qps_default_ctx("NUM_QPS_DEFAULT_CTX", "", 1);
+    const var<size_t> num_qps_per_pe_default_ctx("NUM_QPS_PER_PE_DEFAULT_CTX", "", 1);
+    const var<size_t> num_qps_per_pe_usr_ctx("NUM_QPS_PER_PE_USR_CTX", "", 1);
   }  // namespace gda
 
   namespace _detail {
