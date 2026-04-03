@@ -44,6 +44,7 @@
 #include "gda/ionic/provider_gda_ionic.hpp"
 #include "gda/mlx5/provider_gda_mlx5.hpp"
 #include "gda/bnxt/provider_gda_bnxt.hpp"
+#include "gda/shca/provider_gda_shca.hpp"
 
 #include "containers/free_list.hpp"
 #include "memory/hip_allocator.hpp"
@@ -232,6 +233,41 @@ class QueuePair {
       int64_t atomic_data, int64_t atomic_cmp, bool fetch);
 
 #endif
+#if defined(GDA_SHCA)
+  __device__ __forceinline__ void
+  shca_wait_for_free_sq_slots(uint64_t wave_sq_counter,
+      uint8_t num_active_lanes);
+  __device__ __forceinline__ void
+  shca_wait_for_db_touched_eq(uint64_t target_sq_counter);
+  __device__ __forceinline__ void
+  shca_build_rma_wqe(uint64_t my_sq_counter, uint64_t my_sq_index,
+      uintptr_t laddr, uintptr_t raddr, int32_t size, uint8_t opcode);
+  __device__ __forceinline__ void
+  shca_build_amo_wqe(uint64_t my_sq_counter, uint64_t my_sq_index,
+      uintptr_t raddr, uint8_t opcode, int64_t atomic_data,
+      int64_t atomic_cmp, bool fetching, uint64_t *wave_fetch_atomic);
+  __device__ __forceinline__ uint64_t*
+  shca_allocate_wave_fetching_atomic_buffer(uint64_t wave_sq_counter,
+      bool is_leader, uint64_t leader_phys_lane_id);
+  __device__ __forceinline__ void
+  shca_ring_doorbell(uint64_t wave_sq_counter, uint8_t num_wqes);
+  __device__ uint64_t
+  shca_post_wqe_amo(int32_t size, uintptr_t raddr, uint8_t opcode,
+      int64_t atomic_data, int64_t atomic_cmp, bool fetch);
+  __device__ void
+  shca_post_wqe_rma(int32_t size, uintptr_t laddr,
+      uintptr_t raddr, uint8_t opcode);
+  __device__ void
+  shca_quiet();
+  __device__ void shca_ring_doorbell_dp(uint64_t db_val, uint64_t my_sq_counter);
+  __device__ void shca_quiet_dp_single_lane();
+  __device__ void
+  shca_post_wqe_rma_dp_single_lane(int32_t size, uintptr_t laddr,
+      uintptr_t raddr, uint8_t opcode);
+  __device__ void
+  shca_post_wqe_amo_dp_single_lane(int32_t size, uintptr_t raddr, uint8_t opcode,
+      int64_t atomic_data, int64_t atomic_cmp, bool fetch);  
+#endif
 #if defined(GDA_BNXT)
 
   __device__ void bnxt_write_rma_wqe(uintptr_t raddr, uintptr_t laddr, int32_t length, uint8_t opcode);
@@ -259,6 +295,9 @@ class QueuePair {
    */
 #if defined(GDA_MLX5)
   __device__ void mlx5_ring_doorbell(uint64_t db_val, uint64_t my_sq_counter);
+#endif
+#if defined(GDA_SHCA)
+  __device__ void shca_ring_doorbell(uint64_t db_val, uint64_t my_sq_counter);
 #endif
 #if defined(GDA_BNXT)
   __device__ void bnxt_ring_doorbell(uint32_t slot_idx);
@@ -300,9 +339,9 @@ class QueuePair {
    * };
   */
   mlx5_cqe64 *cq_buf{nullptr};
-  volatile uint32_t *cq_dbrec{nullptr};
-  uint32_t cq_cnt{0};
-  uint32_t cq_log_cnt{0};
+  volatile uint32_t *cq_dbrec{nullptr}; // shac no
+  uint32_t cq_cnt{0}; // shac no
+  uint32_t cq_log_cnt{0}; // shac no
 
   /*
    * struct mlx5dv_qp {
@@ -330,9 +369,9 @@ class QueuePair {
    *   uint64_t tir_icm_addr;
    * };
    */
-  volatile uint32_t *dbrec{nullptr};
-  uint64_t *sq_buf{nullptr};
-  uint16_t sq_wqe_cnt{0};
+  volatile uint32_t *dbrec{nullptr}; // shac no
+  uint64_t *sq_buf{nullptr}; // shac no
+  uint16_t sq_wqe_cnt{0}; // shac no
   uint64_t sq_posted{0};
   uint64_t sq_db_touched{0};
   uint64_t sq_sunk{0};
@@ -342,6 +381,15 @@ class QueuePair {
   uint64_t outstanding_wqes[OUTSTANDING_TABLE_SIZE]{0};
 
   /* GDAProvider::MLX5 END */
+  shca_db_reg_t shca_db{};
+  shca_cqe64 *shca_cq_buf{nullptr};
+  uint32_t shca_fwb_bufsize;
+  volatile uint32_t *dbrec{nullptr};
+  uint64_t *sq_buf{nullptr};
+  uint16_t sq_wqe_cnt{0};
+  volatile uint32_t *cq_dbrec{nullptr};
+  uint32_t cq_cnt{0};
+  uint32_t cq_log_cnt{0};
 
   /* GDAProvider::IONIC START */
 

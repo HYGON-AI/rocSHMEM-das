@@ -1,3 +1,4 @@
+#!/bin/bash
 ###############################################################################
 # Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
 #
@@ -22,25 +23,8 @@
 # IN THE SOFTWARE.
 ###############################################################################
 
-###############################################################################
-# ADD ROCSHMEM TARGET FOR FILES IN CURRENT DIRECTORY
-###############################################################################
-target_sources(
-  ${PROJECT_NAME}
-  PRIVATE
-    context_gda_device.cpp
-    context_gda_device_coll.cpp
-    context_gda_host.cpp
-    backend_gda.cpp
-    ibv_wrapper.cpp
-    gda_team.cpp
-    queue_pair.cpp
-    numa_wrapper.cpp
-    endian.cpp
-    topology.cpp
-)
+set -e
 
-add_subdirectory(mlx5)
-add_subdirectory(bnxt)
-add_subdirectory(ionic)
-add_subdirectory(shca)
+script_path=$(dirname "$(realpath $0)")
+
+source $script_path/gda -DGDA_SHCA=ON $*

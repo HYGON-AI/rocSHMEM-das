@@ -551,6 +551,9 @@ GDAProvider GDABackend::requested_provider() {
     if (envstr.find("mlx5") != std::string::npos) {
       return GDAProvider::MLX5;
     }
+    if (envstr.find("shca") != std::string::npos) {
+      return GDAProvider::SHCA;
+    }
   }
   return GDAProvider::UNSET;
 }
@@ -576,6 +579,10 @@ bool GDABackend::device_matches_provider_vendor(GDAProvider provider,
     case GDAProvider::MLX5:
       expected_vendor_id = GDA_MLX5_VENDOR_ID;
       vendor_name = "MLX5/Mellanox";
+      break;
+    case GDAProvider::SHCA:
+      expected_vendor_id = GDA_SHCA_VENDOR_ID;
+      vendor_name = "SHCA/Dawning";
       break;
     case GDAProvider::UNSET:
       // UNSET accepts any vendor
@@ -699,6 +706,17 @@ int GDABackend::backend_can_run() {
   }
 #endif //defined(GDA_MLX5)
 
+#if defined(GDA_SHCA)
+  if (requested == GDAProvider::UNSET || requested == GDAProvider::SHCA) {
+    handle = shca_dv_dlopen();
+    if (handle) {
+      auto ret = has_active_ib_interface(GDAProvider::SHCA);
+      dlclose(handle);
+      if (ret) return ROCSHMEM_SUCCESS;
+      DPRINTF("SHCA DV library found but no active InfiniBand interface available\n");
+    }
+  }
+#endif //defined(GDA_SHCA)
   return ROCSHMEM_ERROR;
 }
 
@@ -830,6 +848,17 @@ void GDABackend::open_dv_libs() {
   }
 #endif // defined(GDA_MLX5)
 
+#if defined(GDA_SHCA)
+  if (gda_provider == GDAProvider::UNSET
+  && (requested == GDAProvider::UNSET || requested == GDAProvider::SHCA)) {
+    ret = shca_dv_dl_init();
+    if (ret == ROCSHMEM_SUCCESS) {
+      gda_provider = GDAProvider::SHCA;
+    } else {
+      DPRINTF("Initializing rocSHMEM SHCA GDA support failed\n");
+    }
+  }
+#endif // defined(GDA_SHCA)
   if (gda_provider == GDAProvider::UNSET) {
     printf("rocshmem::gda:open_dv_libs: no DV library could dlopen for IONIC, BNXT, or MLX5 GDA support\n");
     exit(1);
@@ -846,12 +875,18 @@ void GDABackend::close_dv_libs() {
   if (mlx5dv_handle_ != nullptr)
     dlclose(mlx5dv_handle_);
 
+  if (shcadv_handle_ != nullptr)
+    dlclose(shcadv_handle_);
   gda_provider = GDAProvider::UNSET;
 }
 
 void GDABackend::exchange_qp_dest_info() {
   for (int i = 0; i < qps.size(); i++) {
+#if defined(GDA_SHCA)
+    dest_info[i].shca_lid = portinfo.lid;
+#else
     dest_info[i].lid = portinfo.lid;
+#endif
     dest_info[i].qpn = qps[i]->qp_num;
     dest_info[i].psn = 0;
     dest_info[i].gid = gid;
@@ -976,7 +1011,7 @@ void GDABackend::open_ib_device() {
   CHECK_NNULL(pd_orig, "ib allocate pd");
   dump_ibv_pd(pd_orig);
 
-  if (gda_provider == GDAProvider::IONIC || gda_provider == GDAProvider::MLX5) {
+  if (gda_provider == GDAProvider::IONIC || gda_provider == GDAProvider::MLX5 || gda_provider == GDAProvider::SHCA) {
     create_parent_domain();
   }
 
@@ -1097,7 +1132,11 @@ void GDABackend::modify_qps_init_to_rtr() {
     if (portinfo.link_layer == IBV_LINK_LAYER_ETHERNET) {
       memcpy(&attr.ah_attr.grh.dgid, &dest_info[i].gid, 16);
     } else {
+#if defined(GDA_SHCA)
+      attr.ah_attr.dlid = dest_info[i].shca_lid;
+#else
       attr.ah_attr.dlid = dest_info[i].lid;
+#endif
     }
 
     if (gda_provider == GDAProvider::BNXT) {
@@ -1304,6 +1343,9 @@ void GDABackend::initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
     break;
   case GDAProvider::MLX5:
     mlx5_initialize_gpu_qp(gpu_qp, conn_num);
+    break;
+  case GDAProvider::SHCA:
+    shca_initialize_gpu_qp(gpu_qp, conn_num);
     break;
   default:
     assert(false /* GDAProvider initialize_gpu_qp */);

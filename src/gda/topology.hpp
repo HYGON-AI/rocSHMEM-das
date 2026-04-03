@@ -47,6 +47,8 @@
 #include <unistd.h>
 #include <filesystem>
 #include <fstream>
+#include <unordered_map>
+#include <string> 
 
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>

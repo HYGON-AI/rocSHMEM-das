@@ -1,4 +1,4 @@
-/******************************************************************************
+﻿/******************************************************************************
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
  * SPDX-License-Identifier: MIT
@@ -22,28 +22,20 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#cmakedefine DEBUG
-#cmakedefine PROFILE
-#cmakedefine USE_RO
-#cmakedefine USE_IPC
-#cmakedefine USE_GDA
-#cmakedefine USE_THREADS
-#cmakedefine USE_SHARED_CTX
-#cmakedefine USE_WF_COAL
-#cmakedefine USE_HEAP_DEVICE_FINEGRAIN
-#cmakedefine USE_HEAP_DEVICE_UNCACHED
-#cmakedefine USE_HEAP_DEVICE_COARSEGRAIN
-#cmakedefine USE_HEAP_MANAGED
-#cmakedefine USE_HEAP_HOST_HIP
-#cmakedefine USE_HEAP_HOST
-#cmakedefine USE_ALLOC_DLMALLOC
-#cmakedefine USE_ALLOC_POW2BINS
-#cmakedefine USE_FUNC_CALL
-#cmakedefine USE_SINGLE_NODE
-#cmakedefine USE_HDP_FLUSH
-#cmakedefine USE_HDP_FLUSH_HOST_SIDE
-#cmakedefine GDA_IONIC
-#cmakedefine GDA_BNXT
-#cmakedefine GDA_MLX5
-#cmakedefine GDA_SHCA
-#cmakedefine HAVE_EXTERNAL_MPI
+#ifndef LIBRARY_SRC_GDA_SHCA_GDA_PROVIDER_HPP_
+#define LIBRARY_SRC_GDA_SHCA_GDA_PROVIDER_HPP_
+
+extern "C" {
+#include <infiniband/shca_dv.h>
+}
+
+typedef union shca_db_reg {
+  uint64_t *ptr;
+  uintptr_t uint;
+} shca_db_reg_t;
+
+struct shcadv_funcs_t {
+  int (*init_obj)(struct shca_dv_obj *obj, uint64_t obj_type);
+};
+
+#endif  //LIBRARY_SRC_GDA_SHCA_GDA_PROVIDER_HPP_

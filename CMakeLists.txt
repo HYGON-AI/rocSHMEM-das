@@ -72,6 +72,7 @@ option(BUILD_CODE_COVERAGE "Build with code coverage flags (gcc only)" OFF)
 option(GDA_IONIC "Build for AMD Pensando IONIC RDMA provider" OFF)
 option(GDA_BNXT "Build for Broadcom RDMA provider" OFF)
 option(GDA_MLX5 "Build for Mellanox MLX5 RDMA provider" OFF)
+option(GDA_SHCA "Build for Dawning SHCA RDMA provider" OFF)
 
 set(USE_EXTERNAL_MPI AUTO CACHE STRING "Link with an external MPI (required if used MPI is ABI incompatible with Open MPI v5)")
 set_property(CACHE USE_EXTERNAL_MPI PROPERTY STRINGS AUTO ON OFF)

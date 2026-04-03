@@ -163,6 +163,7 @@ To build and install rocSHMEM with the GDA backends, run:
   ../scripts/build_configs/gda_bnxt  # Broadcom
   ../scripts/build_configs/gda_ionic # AMD Pollara
   ../scripts/build_configs/gda_mlx5  # Mellanox
+  ../scripts/build_configs/gda_shca  # SHCA
 
 
 The build script passes configuration options to CMake to set up a canonical build.

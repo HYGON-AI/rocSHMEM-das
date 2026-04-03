@@ -693,43 +693,56 @@ void Socket::startConnect() {
 
 void Socket::pollConnect() {
   struct pollfd pfd;
-  int timeout = 1, ret;
-  socklen_t rlen = sizeof(int);
+  int timeout = 1;
+  int ret;
+  int err;
+  socklen_t rlen = sizeof(err);
 
   memset(&pfd, 0, sizeof(struct pollfd));
   pfd.fd = fd_;
   pfd.events = POLLOUT;
+
   ret = ::poll(&pfd, 1, timeout);
   if (ret == -1) {
     ERROR("poll failed errno %d\n", errno);
     return;
   }
-  if (ret == 0) return;
 
-  /* check socket status */
-  if ((ret == 1 && (pfd.revents & POLLOUT)) == 0) {
-    ERROR("poll failed\n");
+  if (ret == 0) {
+    // timeout, continue polling
     return;
   }
-  if (getsockopt(fd_, SOL_SOCKET, SO_ERROR, (void*)&ret, &rlen) == -1) {
+
+  /* check socket status */
+  if (!(pfd.revents & (POLLOUT | POLLERR | POLLHUP))) {
+    ERROR("poll returned unexpected events: %x\n", pfd.revents);
+    return;
+  }
+
+  if (getsockopt(fd_, SOL_SOCKET, SO_ERROR, (void*)&err, &rlen) == -1) {
     ERROR("getsockopt failed, errno %d\n", errno);
     return;
   }
 
-  if (ret == 0) {
+  if (err == 0) {
+    // connect success
     state_ = SocketStateConnected;
-  } else if (ret == ECONNREFUSED || ret == ETIMEDOUT) {
+  } else if (err == ECONNREFUSED || err == ETIMEDOUT) {
     if (++connectRetries_ % 1000 == 0) {
-      DPRINTF("Call to connect returned %s, retrying", strerror(errno));
+      DPRINTF("Call to connect returned %s, retrying", strerror(err));
     }
+
     usleep(SLEEP_INT);
 
     ::close(fd_);
     fd_ = ::socket(addr_.sa.sa_family, SOCK_STREAM, 0);
     state_ = SocketStateConnecting;
-  } else if (ret != EINPROGRESS) {
+  } else if (err == EINPROGRESS) {
+    // still in progress
+    return;
+  } else {
     state_ = SocketStateError;
-    ERROR("connect failed \n");
+    ERROR("connect failed, err=%d (%s)\n", err, strerror(err));
     return;
   }
 }

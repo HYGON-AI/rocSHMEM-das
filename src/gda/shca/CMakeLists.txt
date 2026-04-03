@@ -21,26 +21,18 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 # IN THE SOFTWARE.
 ###############################################################################
-
-###############################################################################
-# ADD ROCSHMEM TARGET FOR FILES IN CURRENT DIRECTORY
-###############################################################################
 target_sources(
   ${PROJECT_NAME}
   PRIVATE
-    context_gda_device.cpp
-    context_gda_device_coll.cpp
-    context_gda_host.cpp
-    backend_gda.cpp
-    ibv_wrapper.cpp
-    gda_team.cpp
-    queue_pair.cpp
-    numa_wrapper.cpp
-    endian.cpp
-    topology.cpp
+    backend_gda_shca.cpp
 )
 
-add_subdirectory(mlx5)
-add_subdirectory(bnxt)
-add_subdirectory(ionic)
-add_subdirectory(shca)
+if(GDA_SHCA)
+target_sources(
+  ${PROJECT_NAME}
+  PRIVATE
+    queue_pair_shca.cpp
+    segment_builder.cpp
+    queue_pair_shca_multiqp.cpp
+)
+endif()

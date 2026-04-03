@@ -32,7 +32,8 @@ static void dump_ibv_port_attr(struct ibv_port_attr *x);
 static void dump_ibv_qp(struct ibv_qp *qp, int conn_num);
 static void dump_mlx5dv_qp(struct mlx5dv_qp *qp_dv, int conn_num);
 static void dump_mlx5dv_cq(struct mlx5dv_cq *cq_dv, int conn_num);
-
+static void dump_shcadv_qp(struct shca_dv_qp *qp_dv, int conn_num);
+static void dump_shcadv_cq(struct shca_dv_cq *cq_dv, int conn_num);
 static void dump_ibv_context(struct ibv_context* x) {
   /*
    * struct ibv_context {
@@ -125,6 +126,38 @@ static void dump_ibv_port_attr(struct ibv_port_attr* x) {
    *   uint16_t                port_cap_flags2;
    * };
    */
+#if defined(GDA_SHCA)
+  DPRINTF("\n"
+         "===============================================\n"
+         "               IBV_PORT_ATTR\n"
+         "===============================================\n"
+         "  (enum ibv_port_state) state           = %u\n"
+         "  (enum ibv_mtu)        max_mtu         = %u\n"
+         "  (enum ibv_mtu)        active_mtu      = %u\n"
+         "  (int)                 gid_tbl_len     = %u\n"
+         "  (uint32_t)            port_cap_flags  = 0x%x\n"
+         "  (uint32_t)            max_msg_sz      = %u\n"
+         "  (uint32_t)            bad_pkey_cntr   = %u\n"
+         "  (uint32_t)            qkey_viol_cntr  = %u\n"
+         "  (uint16_t)            pkey_tbl_len    = %u\n"
+         "  (u32)                 lid             = 0x%x\n"
+         "  (uint16_t)            sm_lid          = 0x%x\n"
+         "  (uint8_t)             lmc             = 0x%x\n"
+         "  (uint8_t)             max_vl_num      = 0x%x\n"
+         "  (uint8_t)             sm_sl           = 0x%x\n"
+         "  (uint8_t)             subnet_timeout  = 0x%x\n"
+         "  (uint8_t)             init_type_reply = 0x%x\n"
+         "  (uint8_t)             active_width    = 0x%x\n"
+         "  (uint8_t)             active_speed    = 0x%x\n"
+         "  (uint8_t)             phys_state      = 0x%x\n"
+         "  (uint8_t)             link_layer      = 0x%x\n"
+         "  (uint8_t)             flags           = 0x%x\n"
+         "  (uint16_t)            port_cap_flags2 = 0x%x\n",
+         x->state, x->max_mtu, x->active_mtu, x->gid_tbl_len, x->port_cap_flags, x->max_msg_sz,
+         x->bad_pkey_cntr, x->qkey_viol_cntr, x->pkey_tbl_len, u17_to_32(x->lid), x->sm_lid, x->lmc, x->max_vl_num,
+         x->sm_sl, x->subnet_timeout, x->init_type_reply, x->active_width, x->active_speed, x->phys_state,
+         x->link_layer, x->flags, x->port_cap_flags2);
+#else
   DPRINTF("\n"
          "===============================================\n"
          "               IBV_PORT_ATTR\n"
@@ -155,6 +188,7 @@ static void dump_ibv_port_attr(struct ibv_port_attr* x) {
          x->bad_pkey_cntr, x->qkey_viol_cntr, x->pkey_tbl_len, x->lid, x->sm_lid, x->lmc, x->max_vl_num,
          x->sm_sl, x->subnet_timeout, x->init_type_reply, x->active_width, x->active_speed, x->phys_state,
          x->link_layer, x->flags, x->port_cap_flags2);
+#endif
 }
 
 void dump_ibv_qp(struct ibv_qp *qp, int conn_num) {
@@ -232,4 +266,38 @@ void dump_mlx5dv_cq(struct mlx5dv_cq *cq_dv, int conn_num) {
   DPRINTF("================== CQ_DUMP_END ================\n");
 }
 
+void dump_shcadv_qp(struct shca_dv_qp *qp_dv, int conn_num) {
+  DPRINTF("\n");
+  DPRINTF("===============================================\n");
+  DPRINTF("     INITIALIZED SHCADV_QP FOR CONNECTION#%d\n", conn_num);
+  DPRINTF("===============================================\n");
+  DPRINTF("=================== QP_DUMP ===================\n");
+  DPRINTF("  (__be32*)  dbrec           = %p\n",     qp_dv->dbrec);
+  DPRINTF("  (void*)    sq.buf          = %p\n",     qp_dv->sq.buf);
+  DPRINTF("  (uint32_t) sq.wqe_cnt      = %u\n",     qp_dv->sq.wqe_cnt);
+  DPRINTF("  (uint32_t) sq.stride       = %u\n",     qp_dv->sq.stride);
+  DPRINTF("  (void*)    rq.buf          = %p\n",     qp_dv->rq.buf);
+  DPRINTF("  (uint32_t) rq.wqe_cnt      = %u\n",     qp_dv->rq.wqe_cnt);
+  DPRINTF("  (uint32_t) rq.stride       = %u\n",     qp_dv->rq.stride);
+  DPRINTF("  (void*)    fwb.reg          = %p\n",     qp_dv->fwb.reg);
+  DPRINTF("  (uint32_t) fwb.size         = 0x%x\n",   qp_dv->fwb.size);
+  DPRINTF("  (uint64_t) comp_mask       = 0x%lx\n",  qp_dv->comp_mask);
+  DPRINTF("  (off_t)    uar_mmap_offset = 0x%lx\n",  qp_dv->uar_mmap_offset);
+  DPRINTF("================== QP_DUMP_END ================\n");
+}
+void dump_shcadv_cq(struct shca_dv_cq *cq_dv, int conn_num) {
+  DPRINTF("\n");
+  DPRINTF("===============================================\n");
+  DPRINTF("     INITIALIZED SHCADV_CQ FOR CONNECTION#%d\n", conn_num);
+  DPRINTF("===============================================\n");
+  DPRINTF("=================== CQ_DUMP ===================\n");
+  DPRINTF("  (void*)    buf             = %p\n",     cq_dv->buf);
+  DPRINTF("  (__be32*)  dbrec           = %p\n",     cq_dv->dbrec);
+  DPRINTF("  (uint32_t) cqe_cnt         = %u\n",     cq_dv->cqe_cnt);
+  DPRINTF("  (uint32_t) cqe_size        = %u\n",     cq_dv->cqe_size);
+  DPRINTF("  (void*)    cq_uar          = %p\n",     cq_dv->cq_uar);
+  DPRINTF("  (uint32_t) cqn             = 0x%x\n",   cq_dv->cqn);
+  DPRINTF("  (uint64_t) comp_mask       = 0x%lx\n",  cq_dv->comp_mask);
+  DPRINTF("================== CQ_DUMP_END ================\n");
+}
 #endif /* LIBRARY_SRC_GDA_DEBUG_GDA_HPP_ */

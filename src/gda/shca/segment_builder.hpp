@@ -22,28 +22,44 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#cmakedefine DEBUG
-#cmakedefine PROFILE
-#cmakedefine USE_RO
-#cmakedefine USE_IPC
-#cmakedefine USE_GDA
-#cmakedefine USE_THREADS
-#cmakedefine USE_SHARED_CTX
-#cmakedefine USE_WF_COAL
-#cmakedefine USE_HEAP_DEVICE_FINEGRAIN
-#cmakedefine USE_HEAP_DEVICE_UNCACHED
-#cmakedefine USE_HEAP_DEVICE_COARSEGRAIN
-#cmakedefine USE_HEAP_MANAGED
-#cmakedefine USE_HEAP_HOST_HIP
-#cmakedefine USE_HEAP_HOST
-#cmakedefine USE_ALLOC_DLMALLOC
-#cmakedefine USE_ALLOC_POW2BINS
-#cmakedefine USE_FUNC_CALL
-#cmakedefine USE_SINGLE_NODE
-#cmakedefine USE_HDP_FLUSH
-#cmakedefine USE_HDP_FLUSH_HOST_SIDE
-#cmakedefine GDA_IONIC
-#cmakedefine GDA_BNXT
-#cmakedefine GDA_MLX5
-#cmakedefine GDA_SHCA
-#cmakedefine HAVE_EXTERNAL_MPI
+#ifndef LIBRARY_SRC_GDA_SHCA_SEGMENT_BUILDER_HPP_
+#define LIBRARY_SRC_GDA_SHCA_SEGMENT_BUILDER_HPP_
+
+#include "gda/shca/provider_gda_shca.hpp"
+
+#include "util.hpp"
+
+namespace rocshmem {
+
+class SegmentBuilder {
+  public:
+    __device__ SegmentBuilder(uint64_t wqe_idx, void *base);
+
+    __device__ void update_ctrl_seg(uint16_t pi, uint8_t opcode, uint8_t opmod, uint32_t qp_num,
+                                    uint8_t fm_ce_se, uint8_t ds, uint8_t signature, uint32_t imm);
+
+    __device__ void update_raddr_seg(uint64_t raddr, uint32_t rkey);
+
+    __device__ void update_data_seg(uint64_t laddr, uint32_t size, uint32_t lkey);
+
+    __device__ void update_inl_data_seg(const void* laddr, int32_t size);
+
+    __device__ void update_atomic_seg(uint64_t atomic_data, uint64_t atomic_cmp);
+
+  private:
+    const int SEGMENTS_PER_WQE = 4;
+
+    union shca_segment {
+      shca_wqe_ctrl_seg ctrl_seg;
+      shca_wqe_raddr_seg raddr_seg;
+      shca_wqe_data_seg data_seg;
+      shca_wqe_inline_data_seg inl_data_seg;
+      shca_wqe_atomic_seg atomic_seg;
+    }__attribute__((__aligned__(16)));
+
+    shca_segment *segp;
+};
+
+}  // namespace rocshmem
+
+#endif  // LIBRARY_SRC_GDA_SHCA_SEGMENT_BUILDER_HPP_
