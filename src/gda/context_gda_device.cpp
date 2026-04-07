@@ -42,20 +42,17 @@ __host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id, int gda_provide
   barrier_sync = backend->barrier_sync;
   wrk_sync_pool_bases_ = backend->get_wrk_sync_bases();
 
-  size_t num_qps_per_pe_default_ctx = max(envvar::gda::num_qps_per_pe_default_ctx.get_value(),
-                                          1 + envvar::gda::num_qps_default_ctx.get_value() / num_pes);
-
   ctx_id_ = ctx_id;
   num_qps_per_pe = ctx_id_?
-      envvar::gda::num_qps_per_pe_usr_ctx.get_value() :
-      num_qps_per_pe_default_ctx;
+      backend->qps_per_pe_usr_ctx_ :
+      backend->qps_per_pe_default_ctx_;
 
   num_qps = num_qps_per_pe * num_pes;
 
   // Calculate offset into the backend's GPU QP array
   int offset = (ctx_id_ > 0) *
-    (num_qps_per_pe_default_ctx +
-     envvar::gda::num_qps_per_pe_usr_ctx.get_value() * (ctx_id_ - 1));
+    (backend->qps_per_pe_default_ctx_ +
+     backend->qps_per_pe_usr_ctx_ * (ctx_id_ - 1));
   offset *= num_pes;
 
   CHECK_HIP(hipMalloc(&qp_counter, sizeof(uint32_t) * num_pes));
