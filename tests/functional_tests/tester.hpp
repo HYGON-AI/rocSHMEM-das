@@ -132,6 +132,7 @@ enum TestType {
   FloodFAddTestType = 91,
   FloodWaitAmoTestType = 92,
   DeviceBitcodeTestType = 93,
+  MultiCtxPutTestType = 94,
 
 
   // Self-developed test cases start from 200 to avoid community conflicts.
