@@ -86,7 +86,7 @@ class IpcOnImpl {
   template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
             detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
   __device__ __forceinline__ void ipcFence() {
-    detail::atomic::fence<scope, order>();
+    detail::atomic::threadfence<scope, order>();
   }
 
   template <typename T>
