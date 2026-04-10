@@ -512,9 +512,9 @@ template <typename... Args>
   dst_bytes = dst_def;
   src_bytes = src_def;
 
-  for (int j= 16; j > 1; j >>= 1) {
+  for (int j = 16; j > 1; j >>= 1) {
     cpy_size = size / j;
-    for (int i= wave_tid; i < cpy_size; i += wave_size) {
+    for (int i = wave_tid; i < cpy_size; i += wave_size) {
       dst_bytes = dst_def;
       src_bytes = src_def;
 
