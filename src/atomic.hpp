@@ -137,6 +137,57 @@ void threadfence() {
   }
 }
 
+template <rocshmem_memory_order order>
+__device__ __forceinline__ void fence_workgroup() {
+  if constexpr (order == memory_order_acquire)
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
+  else if constexpr (order == memory_order_release)
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+  else if constexpr (order == memory_order_acq_rel)
+    __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "workgroup");
+  else
+    __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "workgroup");
+}
+
+template <rocshmem_memory_order order>
+__device__ __forceinline__ void fence_agent() {
+  if constexpr (order == memory_order_acquire)
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+  else if constexpr (order == memory_order_release)
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
+  else if constexpr (order == memory_order_acq_rel)
+    __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "agent");
+  else
+    __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "agent");
+}
+
+template <rocshmem_memory_order order>
+__device__ __forceinline__ void fence_system() {
+  if constexpr (order == memory_order_acquire)
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "");
+  else if constexpr (order == memory_order_release)
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "");
+  else if constexpr (order == memory_order_acq_rel)
+    __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "");
+  else
+    __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "");
+}
+
+template <rocshmem_memory_scope scope = memory_scope_system,
+          rocshmem_memory_order order = memory_order_seq_cst>
+__device__ __forceinline__
+void fence() {
+  if constexpr (scope == memory_scope_thread   ||
+                scope == memory_scope_wavefront ||
+                scope == memory_scope_workgroup) {
+    fence_workgroup<order>();
+  } else if constexpr (scope == memory_scope_agent) {
+    fence_agent<order>();
+  } else {
+    fence_system<order>();
+  }
+}
+
 } // namespace atomic
 } // namespace detail
 } // namespace rocshmem
