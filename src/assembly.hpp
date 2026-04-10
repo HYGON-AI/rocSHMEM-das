@@ -42,10 +42,6 @@ namespace rocshmem {
 
 __device__ __forceinline__ int uncached_load_ubyte([[maybe_unused]] uint8_t* src) {
   int ret = 0;
-#if defined(__gfx906__)
-#endif
-#if defined(__gfx908__)
-#endif
 #if defined(__gfx936__) || defined (__gfx938__) || defined (__gfx1100__)
   asm volatile(
       "global_load_ubyte %0 %1 off glc slc \n"
@@ -72,10 +68,6 @@ __device__ __forceinline__ int uncached_load_ubyte([[maybe_unused]] uint8_t* src
 
 __device__ __forceinline__ void refresh_volatile_sbyte([[maybe_unused]] volatile int *assigned_value,
                                                        [[maybe_unused]] volatile char *read_value) {
-#if defined(__gfx906__)
-#endif
-#if defined(__gfx908__)
-#endif
 #if defined(__gfx936__) || defined (__gfx938__) || defined (__gfx1100__)
   asm volatile(
     "global_load_sbyte %0 %1 off glc slc\n "
@@ -101,10 +93,6 @@ __device__ __forceinline__ void refresh_volatile_sbyte([[maybe_unused]] volatile
 
 __device__ __forceinline__ void refresh_volatile_dwordx2([[maybe_unused]] volatile uint64_t *assigned_value,
                                                          [[maybe_unused]] volatile uint64_t *read_value) {
-#if defined(__gfx906__)
-#endif
-#if defined(__gfx908__)
-#endif
 #if defined(__gfx936__) || defined (__gfx938__) || defined (__gfx1100__)
   asm volatile(
     "global_load_dwordx2 %0 %1 off glc slc\n "
@@ -139,10 +127,6 @@ NOWARN(-Wdeprecated-volatile,
     T ret{};
     switch (sizeof(T)) {
       case 4:
-#if defined(__gfx906__)
-#endif
-#if defined(__gfx908__)
-#endif
 #if defined(__gfx936__) || defined (__gfx938__) || defined (__gfx1100__)
         asm volatile(
             "global_load_dword %0 %1 off glc slc \n"
@@ -166,10 +150,6 @@ NOWARN(-Wdeprecated-volatile,
 #endif
         break;
       case 8:
-#if defined(__gfx906__)
-#endif
-#if defined(__gfx908__)
-#endif
 #if defined(__gfx936__) || defined (__gfx938__) || defined (__gfx1100__)
         asm volatile(
             "global_load_dwordx2 %0 %1 off glc slc \n"
@@ -225,10 +205,6 @@ __device__ __forceinline__ void store_asm(uint8_t* val, [[maybe_unused]] uint8_t
       break;
     }
     case 2: {
-#if defined(__gfx906__)
-#endif
-#if defined(__gfx908__)
-#endif
 #if defined(__gfx936__) || defined (__gfx938__)
       int16_t val16{*(reinterpret_cast<int16_t*>(val))};
       asm volatile("flat_store_short %0 %1 glc slc" : : "v"(dst), "v"(val16));
@@ -249,10 +225,6 @@ __device__ __forceinline__ void store_asm(uint8_t* val, [[maybe_unused]] uint8_t
     }
     case 4: {
       [[maybe_unused]] int32_t val32{*(reinterpret_cast<int32_t*>(val))};
-#if defined(__gfx906__)
-#endif
-#if defined(__gfx908__)
-#endif
 #if defined(__gfx936__) || defined (__gfx938__) || defined (__gfx1100__)
       asm volatile("flat_store_dword %0 %1 glc slc" : : "v"(dst), "v"(val32));
 #endif
@@ -266,10 +238,6 @@ __device__ __forceinline__ void store_asm(uint8_t* val, [[maybe_unused]] uint8_t
     }
     case 8: {
       [[maybe_unused]] int64_t val64{*(reinterpret_cast<int64_t*>(val))};
-#if defined(__gfx906__)
-#endif
-#if defined(__gfx908__)
-#endif
 #if defined(__gfx936__) || defined (__gfx938__) || defined (__gfx1100__)
       asm volatile("flat_store_dwordx2 %0 %1 glc slc" : : "v"(dst), "v"(val64));
 #endif
@@ -283,10 +251,6 @@ __device__ __forceinline__ void store_asm(uint8_t* val, [[maybe_unused]] uint8_t
     }
     case 12: {
       int3 val96{*(reinterpret_cast<int3*>(val))};
-#if defined(__gfx906__)
-#endif
-#if defined(__gfx908__)
-#endif
 #if defined(__gfx936__) || defined (__gfx938__) || defined (__gfx1100__)
       auto dst96 = reinterpret_cast<int3*>(dst);
       *dst96 = val96;
@@ -299,10 +263,6 @@ __device__ __forceinline__ void store_asm(uint8_t* val, [[maybe_unused]] uint8_t
     }
     case 16: {
       int4 val128{*(reinterpret_cast<int4*>(val))};
-#if defined(__gfx906__)
-#endif
-#if defined(__gfx908__)
-#endif
 #if defined(__gfx936__) || defined (__gfx938__) || defined (__gfx1100__)
       auto dst128 = reinterpret_cast<int4*>(dst);
       *dst128 = val128;
