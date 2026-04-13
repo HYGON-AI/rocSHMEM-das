@@ -798,6 +798,7 @@ bool Tester::peLaunchesKernel() {
     case FloodFAddTestType:
     case FloodWaitAmoTestType:
     case DeviceBitcodeTestType:
+    case MultiCtxPutTestType:
       is_launcher = true;
       break;
     default:
