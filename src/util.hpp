@@ -180,17 +180,17 @@ typedef struct device_prop {
 extern std::vector<device_prop_t> device_properties;
 
 [[maybe_unused]] static int get_threads_per_block(int device_id) {
-  assert(device_properties.size() > device_id);
+  assert(static_cast<int>(device_properties.size()) > device_id);
   return device_properties[device_id].maxThreadsPerBlock;
 }
 
 [[maybe_unused]] static int get_wf_size(int device_id) {
-  assert(device_properties.size() > device_id);
+  assert(static_cast<int>(device_properties.size()) > device_id);
   return device_properties[device_id].warpSize;
 }
 
 [[maybe_unused]] static const char* get_arch_name(int device_id) {
-  assert(device_properties.size() > device_id);
+  assert(static_cast<int>(device_properties.size()) > device_id);
   return device_properties[device_id].gcnArchName;
 }
 
