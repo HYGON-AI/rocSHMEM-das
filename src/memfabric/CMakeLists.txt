@@ -28,25 +28,6 @@
 target_sources(
   ${PROJECT_NAME}
   PRIVATE
-    single_heap.cpp
-    memory_allocator.cpp
-    dlmalloc.cpp
+    amdsmi_loader.cpp
+    pod_detection.cpp
 )
-
-# Add VMM POSIX allocator for ROCm 7.0+
-if(USE_HEAP_DEVICE_VMM_POSIX)
-  target_sources(
-    ${PROJECT_NAME}
-    PRIVATE
-      hip_allocator_vmm_posix.cpp
-  )
-endif()
-
-# Add VMM Fabric allocator for ROCm 7.0+
-if(USE_HEAP_DEVICE_VMM_FABRIC)
-  target_sources(
-    ${PROJECT_NAME}
-    PRIVATE
-      hip_allocator_vmm_fabric.cpp
-  )
-endif()

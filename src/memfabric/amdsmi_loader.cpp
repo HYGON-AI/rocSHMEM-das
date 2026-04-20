@@ -22,33 +22,52 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#cmakedefine PROFILE
-#cmakedefine BUILD_DEBUG_TRACE_HOST
-#cmakedefine BUILD_DEBUG_TRACE_DEVICE
-#cmakedefine BUILD_DEBUG_DEVICE
-#cmakedefine USE_RO
-#cmakedefine USE_IPC
-#cmakedefine USE_GDA
-#cmakedefine USE_THREADS
-#cmakedefine USE_SHARED_CTX
-#cmakedefine USE_WF_COAL
-#cmakedefine USE_HEAP_DEVICE_FINEGRAIN
-#cmakedefine USE_HEAP_DEVICE_UNCACHED
-#cmakedefine USE_HEAP_DEVICE_COARSEGRAIN
-#cmakedefine USE_HEAP_DEVICE_VMM_POSIX
-#cmakedefine USE_HEAP_DEVICE_VMM_FABRIC
-#cmakedefine HAVE_AMDSMI_GPU_FABRIC_INFO
-#cmakedefine USE_FUNC_CALL
-#cmakedefine USE_SINGLE_NODE
-#cmakedefine USE_HDP_FLUSH
-#cmakedefine USE_HDP_FLUSH_HOST_SIDE
-#cmakedefine GDA_IONIC
-#cmakedefine GDA_BNXT
-#cmakedefine GDA_MLX5
-#cmakedefine HAVE_EXTERNAL_MPI
-#cmakedefine HAVE_DEVICE_MALLOC_UNCACHED
+#include "amdsmi_loader.hpp"
+#include "util.hpp"
+#include "rocshmem/rocshmem.hpp"
 
-#define ROCSHMEM_GIT_HASH        "@ROCSHMEM_GIT_HASH@"
-#define ROCSHMEM_INSTALL_PREFIX  "@CMAKE_INSTALL_PREFIX@"
-#define ROCSHMEM_OFFLOAD_TARGETS "@ROCSHMEM_OFFLOAD_TARGETS@"
-#define ROCSHMEM_BUILD_TYPE      "@CMAKE_BUILD_TYPE@"
+#include <dlfcn.h>
+
+namespace rocshmem {
+
+AmdsmiLoader amdsmi;
+
+AmdsmiLoader::AmdsmiLoader()
+    : amdsmi_handle(nullptr),
+      init(nullptr),
+      shut_down(nullptr),
+      get_processor_handle_from_bdf(nullptr),
+      get_gpu_fabric_info(nullptr) {
+
+  // Try to load the AMD SMI library
+  amdsmi_handle = dlopen("libamd_smi.so", RTLD_LAZY);
+  if (!amdsmi_handle) {
+    LOG_TRACE("Failed to load libamd_smi.so: %s", dlerror());
+    return;
+  }
+
+  int err = init_function_table();
+  if (err != ROCSHMEM_SUCCESS) {
+    LOG_TRACE("Could not construct AMD SMI function table");
+  }
+}
+
+AmdsmiLoader::~AmdsmiLoader() {
+  if (amdsmi_handle) {
+    dlclose(amdsmi_handle);
+  }
+}
+
+int AmdsmiLoader::init_function_table() {
+  DLSYM_HELPER(amdsmi, amdsmi_, amdsmi_handle, init);
+  DLSYM_HELPER(amdsmi, amdsmi_, amdsmi_handle, shut_down);
+  DLSYM_HELPER(amdsmi, amdsmi_, amdsmi_handle, get_processor_handle_from_bdf);
+  DLSYM_HELPER(amdsmi, amdsmi_, amdsmi_handle, get_gpu_fabric_info);
+  return ROCSHMEM_SUCCESS;
+}
+
+bool AmdsmiLoader::isLoaded() const {
+  return amdsmi_handle != nullptr;
+}
+
+}  // namespace rocshmem
