@@ -22,8 +22,8 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#ifndef _BARRIER_ALL_ON_STREAM_TESTER_HPP_
-#define _BARRIER_ALL_ON_STREAM_TESTER_HPP_
+#ifndef _QUIET_ON_STREAM_TESTER_HPP_
+#define _QUIET_ON_STREAM_TESTER_HPP_
 
 #include "tester.hpp"
 #include <vector>
@@ -34,13 +34,10 @@ using namespace rocshmem;
 /******************************************************************************
  * HOST TESTER CLASS
  *****************************************************************************/
-enum CollectiveOnStreamOp { BARRIER_ALL_OP, SYNC_ALL_OP };
-
-class BarrierAllOnStreamTester : public Tester {
+class QuietOnStreamTester : public Tester {
  public:
-  explicit BarrierAllOnStreamTester(TesterArguments args,
-                                    CollectiveOnStreamOp op = BARRIER_ALL_OP);
-  virtual ~BarrierAllOnStreamTester();
+  explicit QuietOnStreamTester(TesterArguments args);
+  virtual ~QuietOnStreamTester();
 
  protected:
   virtual void resetBuffers(size_t size) override;
@@ -57,15 +54,15 @@ class BarrierAllOnStreamTester : public Tester {
  private:
   int my_pe;
   int n_pes;
-  int num_streams = 1;
-  bool use_default_stream = false;
+  int num_streams{1};
+  bool use_default_stream{false};
   std::vector<hipStream_t> streams;
-  std::vector<hipEvent_t> start_events_timed;
-  std::vector<hipEvent_t> stop_events_timed;
-  CollectiveOnStreamOp collective_op;
+
+  // Simple test buffers
+  int *source_buf{nullptr};
+  int *dest_buf{nullptr};
 };
 
-#include "barrier_all_on_stream_tester.cpp"
+#include "quiet_on_stream_tester.cpp"
 
 #endif
-
