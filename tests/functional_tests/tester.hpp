@@ -132,6 +132,8 @@ enum TestType {
   FloodFAddTestType = 91,
   FloodWaitAmoTestType = 92,
   DeviceBitcodeTestType = 93,
+  QuietOnStreamTestType = 96,
+  SyncAllOnStreamTestType = 97,
 
   // Self-developed test cases start from 200 to avoid community conflicts.
   DefaultCtx_WAVEPutNBITestType_DP = 200,
