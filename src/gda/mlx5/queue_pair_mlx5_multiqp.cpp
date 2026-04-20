@@ -10,7 +10,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma_dp_single_lane(int32_t size, uintpt
   acquire_lock(&mlx5_sq.lock);
 
   // wqe_idx is the logical WQE id that wraps at 0xFFFF, sq_idx is the index into the actual SQ
-  uint16_t wqe_idx = mlx5_sq.tail;
+  uint16_t wqe_idx = mlx5_sq.post;
   uint16_t sq_idx = wqe_idx & (mlx5_sq.depth - 1);
 
   // construct the WQE on the stack
@@ -20,12 +20,11 @@ __device__ void QueuePair::mlx5_post_wqe_rma_dp_single_lane(int32_t size, uintpt
   // copy to SQ
   mlx5_sq.buf[sq_idx] = wqe;
   
-  // increment tail counter
-  mlx5_sq.tail += 1;
+  // increment post counter
   mlx5_sq.post += 1;
 
   // ring doorbell for this WQE
-  mlx5_ring_doorbell(mlx5_sq.tail, mlx5_sq.buf[sq_idx]);
+  mlx5_ring_doorbell(mlx5_sq.post, mlx5_sq.buf[sq_idx]);
 
   // release SQ lock
   release_lock(&mlx5_sq.lock);
@@ -40,7 +39,7 @@ __device__ void QueuePair::mlx5_post_wqe_amo_dp_single_lane(int32_t size, uintpt
   uint32_t atomic_lkey = nonfetching_atomic_lkey;
 
   // wqe_idx is the logical WQE id that wraps at 0xFFFF, sq_idx is the index into the actual SQ
-  uint16_t wqe_idx = mlx5_sq.tail;
+  uint16_t wqe_idx = mlx5_sq.post;
   uint16_t sq_idx = wqe_idx & (mlx5_sq.depth - 1);
 
   // construct the WQE on the stack
@@ -52,12 +51,11 @@ __device__ void QueuePair::mlx5_post_wqe_amo_dp_single_lane(int32_t size, uintpt
   // copy to SQ
   mlx5_sq.buf[sq_idx] = wqe;
 
-  // increment tail counter
-  mlx5_sq.tail += 1;
+  // increment post counter
   mlx5_sq.post += 1;
 
   // ring doorbell for this WQE
-  mlx5_ring_doorbell(mlx5_sq.tail, mlx5_sq.buf[sq_idx]);
+  mlx5_ring_doorbell(mlx5_sq.post, mlx5_sq.buf[sq_idx]);
 
   // release SQ lock
   release_lock(&mlx5_sq.lock);
