@@ -248,6 +248,7 @@ void TesterArguments::get_arguments() {
     case FloodFAddTestType:
     case FloodWaitAmoTestType:
     case DeviceBitcodeTestType:
+    case TeamCtxSharedInfraTestType:
       requires_two_pes = false;
       break;
     default:
