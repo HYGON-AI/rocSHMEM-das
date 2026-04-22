@@ -22,8 +22,8 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#include <hip/amd_detail/amd_device_functions.h>
 #include <hip/hip_runtime.h>
+#include <hip/amd_detail/amd_device_functions.h>
 
 #include "backend_ipc.hpp"
 #include "context_ipc_device.hpp"
