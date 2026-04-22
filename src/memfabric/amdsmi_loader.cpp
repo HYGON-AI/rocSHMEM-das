@@ -30,8 +30,6 @@
 
 namespace rocshmem {
 
-AmdsmiLoader amdsmi;
-
 AmdsmiLoader::AmdsmiLoader()
     : amdsmi_handle(nullptr),
       init(nullptr),
@@ -60,10 +58,10 @@ AmdsmiLoader::~AmdsmiLoader() {
 
 int AmdsmiLoader::init_function_table() {
 #ifdef HAVE_AMDSMI_GPU_FABRIC_INFO
-  DLSYM_HELPER(amdsmi, amdsmi_, amdsmi_handle, init);
-  DLSYM_HELPER(amdsmi, amdsmi_, amdsmi_handle, shut_down);
-  DLSYM_HELPER(amdsmi, amdsmi_, amdsmi_handle, get_processor_handle_from_bdf);
-  DLSYM_HELPER(amdsmi, amdsmi_, amdsmi_handle, get_gpu_fabric_info);
+  DLSYM_HELPER((*this), amdsmi_, amdsmi_handle, init);
+  DLSYM_HELPER((*this), amdsmi_, amdsmi_handle, shut_down);
+  DLSYM_HELPER((*this), amdsmi_, amdsmi_handle, get_processor_handle_from_bdf);
+  DLSYM_HELPER((*this), amdsmi_, amdsmi_handle, get_gpu_fabric_info);
 #endif
 
   return ROCSHMEM_SUCCESS;
