@@ -619,42 +619,52 @@ TestPerformance() {
   ##############################################################################
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
-  ExecTest  "put"                     $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
-  ExecTest  "wgput"                   $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
-  ExecTest  "waveput"                 $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  ExecTest  "put"                     $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
+  ExecTest  "wgput"                   $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
+  ExecTest  "waveput"                 $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
   
-  ExecTest  "putnbi"                  $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
-  ExecTest  "wgputnbi"                $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
-  ExecTest  "waveputnbi"              $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  ExecTest  "putnbi"                  $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
+  ExecTest  "wgputnbi"                $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
+  ExecTest  "waveputnbi"              $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
   
-  ExecTest  "get"                     $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
-  ExecTest  "wgget"                   $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
-  ExecTest  "waveget"                 $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  ExecTest  "get"                     $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
+  ExecTest  "wgget"                   $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
+  ExecTest  "waveget"                 $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
   
-  ExecTest  "getnbi"                  $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
-  ExecTest  "wggetnbi"                $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
-  ExecTest  "wavegetnbi"              $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  ExecTest  "getnbi"                  $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
+  ExecTest  "wggetnbi"                $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
+  ExecTest  "wavegetnbi"              $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
   
-  ExecTest  "alltoall"                $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
-  ExecTest  "teambroadcast"           $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
-  # ExecTest  "teamreduction"           $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  ExecTest  "alltoall"                $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
+  ExecTest  "teambroadcast"           $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
+  # ExecTest  "teamreduction"           $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
   
-  ExecTest  "putmem_on_stream"        $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
-  ExecTest  "getmem_on_stream"        $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
-  ExecTest  "alltoallmem_on_stream"   $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
-  ExecTest  "broadcastmem_on_stream"  $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE 
+  ExecTest  "putmem_on_stream"        $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
+  ExecTest  "getmem_on_stream"        $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
+  ExecTest  "alltoallmem_on_stream"   $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
+  ExecTest  "broadcastmem_on_stream"  $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE 
   
   if [[ $TEST == perf-mlx5* ]]; then  
-  ExecTest  "defaultctx_waveputnbi_dp"  $RANKS_NUM     $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
-  ExecTest  "waveputnbi_dp"           $RANKS_NUM       $WGS_NUM         $THREADS_NUM        $MSG_MAX_SIZE
+  ExecTest  "defaultctx_waveputnbi_dp"  $RANKS     $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
+  ExecTest  "waveputnbi_dp"           $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
   else echo "Skip:   *_dp (AIROCSHMEM: GDA *_dp not implemented)"; fi
 }
 
 ValidateInput() {
   INPUT_COUNT=$1
+  ALL_ARGS=("$@") 
+
+  if [[ "$*" == *"--show-cases"* ]]; then
+    echo "Functional Test Cases:"
+    for test_case in "${!TEST_NUMBERS[@]}"; do
+      echo "$test_case"
+    done
+    exit 1
+  fi
+  
   if [ $INPUT_COUNT -lt 3 ] ; then
     echo "This script must be run with at least 3 arguments."
-    echo "Usage: ${0} <executable> <test_suite | test_name | test_config> <log_dir> [hostfile]"
+    echo "Usage: ${0} <executable> <test_suite | test_name | test_config> <log_dir> [hostfile] [--show-cases]"
     echo
     echo "    <executable>  : path to the tester executable"
     echo "    <test_suite>  : test suite to run, e.g. 'all', 'rma', or 'put'"
@@ -668,6 +678,7 @@ ValidateInput() {
     echo "        [max_msg_size] : maximum message size to test"
     echo "    <log_dir>     : path to output log directory"
     echo "    [hostfile]    : path to hostfile"
+    echo "    [--show-cases] : show all available test case names"
     exit 1
   fi
 }
@@ -748,38 +759,8 @@ DRIVER_RETURN_STATUS=0
 FAILED_TESTS=()  # Array to store failed test parameters
 RETRY_THRESHOLD=${RETRY_THRESHOLD:-5}  # Maximum number of failed tests to retry (can be overridden via env var)
 
-ValidateInput $#
+ValidateInput $# "$@"
 ValidateLogDir $LOG_DIR
-
-RANKS_NUM=2
-WGS_NUM=32
-THREADS_NUM=256
-MSG_MAX_SIZE=8388608
-
-while [[ $# -gt 0 ]]; do
-  case $1 in
-    -n)
-      RANKS_NUM="$2"
-      shift 2
-      ;;
-    -w)
-      WGS_NUM="$2"
-      shift 2
-      ;;
-    -z)
-      THREADS_NUM="$2"
-      shift 2
-      ;;
-    -s)
-      MSG_MAX_SIZE="$2"
-      shift 2
-      ;;
-    *)
-      # skip
-      shift
-      ;;
-  esac
-done
 
 # Print build info and environment variables before running tests
 ROCSHMEM_INFO="$(dirname "$APP")/rocshmem_info"
@@ -832,12 +813,6 @@ case $TEST in
   *"stream")
     TestOnStream
     ;;
-  *"perf")
-    TestPerformance
-    ;;
-  *"perf-mlx5")
-    TestPerformance
-    ;;
   *"other")
     TestOther
     ;;
@@ -860,7 +835,12 @@ case $TEST in
       THREADS=1
       MAX_MESSAGE_SIZE=8
     fi
-    ExecTest  "${NAME}"  "${RANKS}"  "${WORKGROUPS}"  "${THREADS}"  "${MAX_MESSAGE_SIZE}"
+
+    if [ "$NAME" == "perf" ] || [ "$NAME" == "perf-mlx5" ]; then
+      TestPerformance
+    else
+      ExecTest  "${NAME}"  "${RANKS}"  "${WORKGROUPS}"  "${THREADS}"  "${MAX_MESSAGE_SIZE}"
+    fi
     ;;
 esac
 
