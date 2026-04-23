@@ -386,7 +386,7 @@ namespace rocshmem
 
           if (!allowedDevices.empty() && allowedDevices.find(ibvDevice.name) == allowedDevices.end())
               continue;
-          DPRINTF("allowed device : %s\n", ibvDevice.name.c_str());
+          LOG_INFO("allowed device : %s\n", ibvDevice.name.c_str());
 
           {
             struct ibv_context *context = ibv.open_device(ibvDevice.devicePtr);

@@ -982,7 +982,7 @@ __device__ uint32_t rocshmem_ctx_num_qps_per_pe(rocshmem_ctx_t ctx) {
   return static_cast<GDAContext*>(ctx.ctx_opaque)->get_num_qps_per_pe();
 #endif
 
-  GPU_DPRINTF("[WARNING] not implemented for GDA_MLX5\n");
+  LOGD_API("device::ctx_num_qps_per_pe (ctx=%zd) not implemented for GDA_MLX5\n", ctx.ctx_opaque);
   return 0;
 }
 
@@ -991,7 +991,7 @@ __device__ uint32_t rocshmem_ctx_num_qps_per_pe() {
   return static_cast<GDAContext*>(ROCSHMEM_CTX_DEFAULT.ctx_opaque)->get_num_qps_per_pe(); 
 #endif
 
-  GPU_DPRINTF("[WARNING] not implemented for GDA_MLX5\n");
+  LOGD_API("device::ctx_num_qps_per_pe (ctx=%zd) not implemented for GDA_MLX5\n", ctx.ctx_opaque);
   return 0;
 }
 
@@ -1059,7 +1059,7 @@ __device__ void rocshmem_atomic_add(rocshmem_ctx_t ctx, T *dest, T val,
 template <typename T>
 __device__ void rocshmem_atomic_add_dp(rocshmem_ctx_t ctx, T *dest, T val,
                                        int qp_idx, int pe) {
-  GPU_DPRINTF("Function: rocshmem_atomic_add (ctx=%zd, dest=%p, val=%g, pe=%d w%d)\n",
+  LOGD_API("device::atomic_add_dp (ctx=%zd, dest=%p, val=%g, pe=%d w%d)",
     ctx.ctx_opaque, dest, (double)val, pe, translate_pe(ctx, pe));
 
   get_internal_ctx(ctx)->amo_add_dp<T>(dest, val, qp_idx, pe);
@@ -1216,7 +1216,7 @@ __device__ void rocshmem_put_nbi_wave(rocshmem_ctx_t ctx, T *dest,
 template <typename T>
 __device__ void rocshmem_put_nbi_wave_dp(rocshmem_ctx_t ctx, T *dest,
                                          const T *source, size_t nelems, int qp_idx, int pe) {
-  GPU_DPRINTF("Function: rocshmem_put_nbi_wave_dp (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)\n",
+  LOGD_API("device::put_nbi_wave_dp (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, translate_pe(ctx, pe));
 
   get_internal_ctx(ctx)->put_nbi_wave_dp(dest, source, nelems, qp_idx, pe);
