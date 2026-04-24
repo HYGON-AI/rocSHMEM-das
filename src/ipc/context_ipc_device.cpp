@@ -178,7 +178,7 @@ __device__ void IPCContext::internal_getmem(void *dest, const void *source,
   ipcImpl_.ipcFence<detail::atomic::memory_scope_system,
                     detail::atomic::memory_order_acquire>();
   memcpy_lane(dest, wrk_sync_pool_bases_[pe] + L_offset, nelems);
-  ipcImpl_.ipcFence<detail::atomic::memory_scope_system,
+  ipcImpl_.ipcFence<detail::atomic::memory_scope_workgroup,
                     detail::atomic::memory_order_release>();
 }
 
@@ -198,7 +198,7 @@ __device__ void IPCContext::internal_getmem_wg(void *dest, const void *source,
   ipcImpl_.ipcFence<detail::atomic::memory_scope_system,
                     detail::atomic::memory_order_acquire>();
   memcpy_wg(dest, wrk_sync_pool_bases_[pe] + L_offset, nelems);
-  ipcImpl_.ipcFence<detail::atomic::memory_scope_system,
+  ipcImpl_.ipcFence<detail::atomic::memory_scope_workgroup,
                     detail::atomic::memory_order_release>();
   __builtin_amdgcn_s_barrier();
 }
@@ -218,7 +218,7 @@ __device__ void IPCContext::internal_getmem_wave(void *dest,
   ipcImpl_.ipcFence<detail::atomic::memory_scope_system,
                     detail::atomic::memory_order_acquire>();
   memcpy_wave(dest, wrk_sync_pool_bases_[pe] + L_offset, nelems);
-  ipcImpl_.ipcFence<detail::atomic::memory_scope_system,
+  ipcImpl_.ipcFence<detail::atomic::memory_scope_workgroup,
                     detail::atomic::memory_order_release>();
 }
 
