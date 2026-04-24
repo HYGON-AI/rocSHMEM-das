@@ -206,19 +206,31 @@ __device__ __forceinline__ void store_asm(uint8_t* val, [[maybe_unused]] uint8_t
 #endif
 #if defined(__gfx90a__)
       int16_t val16{static_cast<int16_t>(*val)};
-      asm volatile("flat_store_byte %0 %1 glc slc" : : "v"(dst), "v"(val16));
+      asm volatile("flat_store_byte %0 %1 glc slc"
+                   :
+                   : "v"(dst), "v"(val16)
+                   : "memory");
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
       int16_t val16{static_cast<int16_t>(*val)};
-      asm volatile("flat_store_byte %0 %1 sc0 sc1" : : "v"(dst), "v"(val16));
+      asm volatile("flat_store_byte %0 %1 sc0 sc1"
+                   :
+                   : "v"(dst), "v"(val16)
+                   : "memory");
 #endif
 #if defined(__gfx1100__)
       int32_t val32{static_cast<int32_t>(*val)};
-      asm volatile("flat_store_byte %0 %1 glc slc" : : "v"(dst), "v"(val32));
+      asm volatile("flat_store_byte %0 %1 glc slc"
+                   :
+                   : "v"(dst), "v"(val32)
+                   : "memory");
 #endif
 #if defined(__gfx1201__)
       int32_t val32{static_cast<int32_t>(*val)};
-      asm volatile("flat_store_b8 %0 %1 scope:SCOPE_SYS" : : "v"(dst), "v"(val32));
+      asm volatile("flat_store_b8 %0 %1 scope:SCOPE_SYS"
+                   :
+                   : "v"(dst), "v"(val32)
+                   : "memory");
 #endif
       break;
     }
