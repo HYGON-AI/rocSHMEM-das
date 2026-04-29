@@ -22,37 +22,20 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#ifndef _FLOOD_AMO_TESTER_HPP_
-#define _FLOOD_AMO_TESTER_HPP_
+#ifndef _UTIL_UNIT_TEST_HPP
+#define _UTIL_UNIT_TEST_HPP
 
-#include "tester.hpp"
+#include "../src/util.hpp"
 
-/******************************************************************************
- * DEVICE TEST KERNEL
- *****************************************************************************/
-__global__ void FloodAmoTest(int loop, int skip, long long int *start_time,
-                           long long int *end_time, uint64_t *d_buf,
-                           TestType type, ShmemContextType ctx_type, int wf_size,
-                           bool *verification_error, int *grid_psync);
+static inline int set_gpu_ordinal() {
+  char* ompi_local_rank = getenv("OMPI_COMM_WORLD_LOCAL_RANK");
+  if (nullptr == ompi_local_rank) {
+    printf("Could not determine local rank, use Open MPI `mpiexec`\n");
+    abort();
+  }
+  int rank = atoi(ompi_local_rank);
+  CHECK_HIP(hipSetDevice(rank));
+  return rank;
+}
 
-/******************************************************************************
- * HOST TESTER CLASS
- *****************************************************************************/
-class FloodAmoTester : public Tester {
- public:
-  explicit FloodAmoTester(TesterArguments args);
-  virtual ~FloodAmoTester();
-
- protected:
-  virtual void resetBuffers(size_t size) override;
-
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            size_t size) override;
-
-  virtual void verifyResults(size_t size) override;
-
-  uint64_t *d_buf;
-  int *grid_psync;
-};
-
-#endif
+#endif /* _UTIL_UNIT_TEST_HPP */
