@@ -118,14 +118,8 @@ TeamReductionTester<T1, T2>::TeamReductionTester(
   int total_elems = (max_msg_size / sizeof(T1)) * args.num_wgs;
   int buff_size = total_elems * sizeof(T1);
 
-  s_buf = (T1 *)rocshmem_malloc(buff_size);
-  r_buf = (T1 *)rocshmem_malloc(buff_size);
-
-  if (s_buf == nullptr || r_buf == nullptr) {
-    std::cout << "Error allocating memory from symmetric heap" << std::endl;
-    std::cout << "source: " << s_buf << ", dest: " << r_buf << std::endl;
-    rocshmem_global_exit(1);
-  }
+  s_buf = (T1 *)alloc_test_buffer(buff_size, args.local_buf_type);
+  r_buf = (T1 *)alloc_test_buffer(buff_size);
 
   char* value{nullptr};
   num_teams = static_cast<int>(args.num_wgs);
@@ -142,8 +136,8 @@ TeamReductionTester<T1, T2>::TeamReductionTester(
 
 template <typename T1, ROCSHMEM_OP T2>
 TeamReductionTester<T1, T2>::~TeamReductionTester() {
-  rocshmem_free(s_buf);
-  rocshmem_free(r_buf);
+  free_test_buffer(s_buf, args.local_buf_type);
+  free_test_buffer(r_buf);
   CHECK_HIP(hipFree(team_reduce_world_dup));
 }
 
