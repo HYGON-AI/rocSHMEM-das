@@ -78,7 +78,7 @@ WaveDpPrimitiveTester<T>::WaveDpPrimitiveTester(TesterArguments args)
     source[i] = static_cast<T>('a' + i % 26);
   }
 
-  check_id = (_type == DefaultCtx_WAVEPutNBITestType_DP || _type == WAVEPutNBITestType_DP)
+  check_id = (_type == DefaultCtx_WAVEPutNBI_DPTestType || _type == WAVEPutNBI_DPTestType)
               ? 1
               : 0;
 }
@@ -213,7 +213,7 @@ __device__ void wave_quite_dp(signed char *dest_flags, signed char *src_flags, i
     int wg_id = get_flat_grid_id();                                           \
     bool is_default_ctx = true;                                               \
     switch (type) {                                                           \
-      case WAVEPutNBITestType_DP:                                             \
+      case WAVEPutNBI_DPTestType:                                             \
         rocshmem_wg_ctx_create(ctx_type, &ctx);                               \
         is_default_ctx = false;                                               \
         break;                                                                \
@@ -247,10 +247,10 @@ __device__ void wave_quite_dp(signed char *dest_flags, signed char *src_flags, i
         }                                                                     \
       }                                                                       \
       switch (type) {                                                                      \
-        case DefaultCtx_WAVEPutNBITestType_DP:                                             \
+        case DefaultCtx_WAVEPutNBI_DPTestType:                                             \
           rocshmem_##TNAME##_put_nbi_wave_dp(dest, source, size, qp_idx, dst_pe);          \
           break;                                                                           \
-        case WAVEPutNBITestType_DP:                                                        \
+        case WAVEPutNBI_DPTestType:                                                        \
           rocshmem_ctx_##TNAME##_put_nbi_wave_dp(ctx, dest, source, size, qp_idx, dst_pe); \
           break;                                                                           \
         default:                                                              \

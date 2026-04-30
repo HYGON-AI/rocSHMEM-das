@@ -94,8 +94,8 @@ Tester::Tester(TesterArguments args) : args(args) {
     case WAVEGetNBITestType:
     case WAVEPutTestType:
     case WAVEPutNBITestType:
-    case DefaultCtx_WAVEPutNBITestType_DP:
-    case WAVEPutNBITestType_DP:
+    case DefaultCtx_WAVEPutNBI_DPTestType:
+    case WAVEPutNBI_DPTestType:
       num_timers = args.num_wgs * num_warps;
       break;
     default:
@@ -130,8 +130,8 @@ Tester::Tester(TesterArguments args) : args(args) {
       case WAVEPutNBITestType:
       case WAVEPutSignalTestType:
       case WAVEPutSignalNBITestType:
-      case DefaultCtx_WAVEPutNBITestType_DP:
-      case WAVEPutNBITestType_DP:
+      case DefaultCtx_WAVEPutNBI_DPTestType:
+      case WAVEPutNBI_DPTestType:
         max_msg_size = args.max_volume_size / args.num_wgs / num_warps;
         break;
       case WGGetTestType:
@@ -230,17 +230,17 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Team Ctx Infra test";
       testers.push_back(new TeamCtxInfraTester(args));
       break;
-    case TeamCtxInfraTestSingleType:
+    case TeamCtxInfraSingleTestType:
       test_name = "Team Ctx Infra Single test";
       args.team_type = ROCSHMEM_TEST_TEAM_SINGLE;
       testers.push_back(new TeamCtxInfraTester(args));
       break;
-    case TeamCtxInfraTestBlockType:
+    case TeamCtxInfraBlockTestType:
       test_name = "Team Ctx Infra Block test";
       args.team_type = ROCSHMEM_TEST_TEAM_BLOCK;
       testers.push_back(new TeamCtxInfraTester(args));
       break;
-    case TeamCtxInfraTestOddEvenType:
+    case TeamCtxInfraOddEvenTestType:
       test_name = "Team Ctx Infra Odd-Even test";
       args.team_type = ROCSHMEM_TEST_TEAM_ODDEVEN;
       testers.push_back(new TeamCtxInfraTester(args));
@@ -594,19 +594,19 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Wave Signal Fetch";
       testers.push_back(new SignalingOperationsTester(args));
       break;
-    case DefaultCtx_WAVEPutNBITestType_DP:
+    case DefaultCtx_WAVEPutNBI_DPTestType:
       test_name = "Default CTX Non-Blocking Wave Dp Put";
       testers.push_back(new WaveDpPrimitiveTester<signed char>(args));
       break;
-    case WAVEPutNBITestType_DP:
+    case WAVEPutNBI_DPTestType:
       test_name = "Non-Blocking Wave Dp Put";
       testers.push_back(new WaveDpPrimitiveTester<signed char>(args));
       break;
-    case DefaultCtx_AMO_AddTestType_DP:
+    case DefaultCtx_AMO_Add_DPTestType:
       test_name = "Default CTX AMO Dp Add";
       testers.push_back(new AMODpStandardTester<long long>(args));
       break;
-    case AMO_AddTestType_DP:
+    case AMO_Add_DPTestType:
       test_name = "AMO Dp Add";
       testers.push_back(new AMODpStandardTester<long long>(args));
       break;
@@ -740,9 +740,9 @@ void Tester::execute() {
     barrier();
 
     if (_type != TeamCtxInfraTestType       &&
-        _type != TeamCtxInfraTestSingleType &&
-        _type != TeamCtxInfraTestBlockType  &&
-        _type != TeamCtxInfraTestOddEvenType &&
+        _type != TeamCtxInfraSingleTestType &&
+        _type != TeamCtxInfraBlockTestType  &&
+        _type != TeamCtxInfraOddEvenTestType &&
         _type != TeamCtxSharedInfraTestType ) {
       print(size);
     }
@@ -762,9 +762,9 @@ bool Tester::peLaunchesKernel() {
     case TeamReductionTestType:
     case TeamBroadcastTestType:
     case TeamCtxInfraTestType:
-    case TeamCtxInfraTestSingleType:
-    case TeamCtxInfraTestBlockType:
-    case TeamCtxInfraTestOddEvenType:
+    case TeamCtxInfraSingleTestType:
+    case TeamCtxInfraBlockTestType:
+    case TeamCtxInfraOddEvenTestType:
     case TeamCtxSharedInfraTestType:
     case TeamAllToAllTestType:
     case TeamAllToAllvTestType:
@@ -793,10 +793,10 @@ bool Tester::peLaunchesKernel() {
     case PutmemOnStreamTestType:
     case PutmemSignalOnStreamTestType:
     case SignalWaitUntilOnStreamTestType:
-    case DefaultCtx_WAVEPutNBITestType_DP:
-    case WAVEPutNBITestType_DP:
-    case DefaultCtx_AMO_AddTestType_DP:
-    case AMO_AddTestType_DP:
+    case DefaultCtx_WAVEPutNBI_DPTestType:
+    case WAVEPutNBI_DPTestType:
+    case DefaultCtx_AMO_Add_DPTestType:
+    case AMO_Add_DPTestType:
     case FloodPutTestType:
     case FloodPutNBITestType:
     case FloodPTestType:
