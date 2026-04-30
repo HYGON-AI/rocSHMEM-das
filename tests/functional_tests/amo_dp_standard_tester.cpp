@@ -80,7 +80,7 @@ AMODpStandardTester<T>::AMODpStandardTester(TesterArguments args) : Tester(args)
     }
   }
 
-  check_id = (_type == DefaultCtx_AMO_AddTestType_DP || _type == AMO_AddTestType_DP)
+  check_id = (_type == DefaultCtx_AMO_Add_DPTestType || _type == AMO_Add_DPTestType)
               ? 1
               : 0;
 }
@@ -138,8 +138,8 @@ void AMODpStandardTester<T>::launchKernel(dim3 gridsize, dim3 blocksize, int loo
     hipLaunchKernelGGL(wave_verify_and_set_flags, gridsize, blocksize, shared_bytes, stream, done_flags, wf_size);
   }
 
-  if (DefaultCtx_AMO_AddTestType_DP == _type ||
-      AMO_AddTestType_DP == _type) {
+  if (DefaultCtx_AMO_Add_DPTestType == _type ||
+      AMO_Add_DPTestType == _type) {
     num_msgs       = n_loops   * gridsize.x  * num_warps;
     num_timed_msgs = args.loop * gridsize.x  * num_warps;
   } else {
@@ -194,8 +194,8 @@ void AMODpStandardTester<T>::verifyDestValues() {
   };
 
   switch (_type) {
-    case DefaultCtx_AMO_AddTestType_DP:
-    case AMO_AddTestType_DP: {
+    case DefaultCtx_AMO_Add_DPTestType:
+    case AMO_Add_DPTestType: {
       const T expected = (args.addr_mode == AddrMode::PerBlock)
         ? static_cast<T>(2*num_warps)
         : static_cast<T>(num_warps * args.num_wgs * 2);
@@ -245,7 +245,7 @@ __device__ void wave_amo_quite_dp(long long *done_flags, int idx, bool is_defaul
     int n_wgs     = get_grid_num_blocks();                                     \
     bool is_default_ctx = true;                                                \
     switch (type) {                                                            \
-      case AMO_AddTestType_DP:                                                 \
+      case AMO_Add_DPTestType:                                                 \
         rocshmem_wg_ctx_create(ctx_type, &ctx);                                \
         is_default_ctx = false;                                                \
         break;                                                                 \
@@ -278,10 +278,10 @@ __device__ void wave_amo_quite_dp(long long *done_flags, int idx, bool is_defaul
         break;                                                                 \
       }                                                                        \
       switch (type) {                                                          \
-        case DefaultCtx_AMO_AddTestType_DP:                                    \
+        case DefaultCtx_AMO_Add_DPTestType:                                    \
           rocshmem_##TNAME##_atomic_add_dp((T *)ptr, 2, qp_idx, dst_pe);              \
           break;                                                                      \
-        case AMO_AddTestType_DP:                                                      \
+        case AMO_Add_DPTestType:                                                      \
           rocshmem_ctx_##TNAME##_atomic_add_dp(ctx, (T *)ptr, 2, qp_idx, dst_pe);     \
           break;                                                               \
         default:                                                               \
