@@ -61,15 +61,6 @@ enum HIPIpcHandleType {
   HandleTypeLast
 };
 
-enum HIPAllocatorType {
-  AllocatorTypeCoarsegrained = 0,
-  AllocatorTypeFinegrained,
-  AllocatorTypeUncached,
-  AllocatorTypeVMMPosix,
-  AllocatorTypeVMMFabric,
-  AllocatorTypeLast
-};
-
 #if HIP_VERSION >= 70000000
 struct HIPIpcMemHandlePosix_t {
   uint64_t fd;
@@ -135,8 +126,6 @@ class HIPAllocator : public MemoryAllocator {
 
   virtual ~HIPAllocator() = default;
 
-  HIPAllocatorType type = AllocatorTypeCoarsegrained;
-
   virtual hipError_t GetIpcHandle(void *dev_ptr, void *handle)
   {
     return hipIpcGetMemHandle(reinterpret_cast<hipIpcMemHandle_t *>(handle), dev_ptr);
@@ -197,7 +186,7 @@ public:
             malloc_with_flags,  // 静态函数指针，可以被转换
             hipFree,
             get_malloc_flags()) {
-      type = AllocatorTypeFinegrained;
+      type_ = AllocatorTypeFinegrained;
   }
 
 private:
@@ -267,7 +256,7 @@ class HIPAllocatorUncached : public HIPAllocator {
   HIPAllocatorUncached()
       : HIPAllocator(hipExtMallocWithFlags, hipFree,
                      hipDeviceMallocUncached) {
-    type = AllocatorTypeUncached;
+    type_ = AllocatorTypeUncached;
   }
 };
 #endif
