@@ -47,7 +47,7 @@ template <typename T>
 __device__ void GDAContext::p(T *dest, T value, int pe) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
-    ipcImpl_.ipcCopy(get_remote_ptr(dest, local_pe), reinterpret_cast<void *>(&value), sizeof(T));
+    ipcImpl_.ipcCopy<MemcpyKind::Put>(get_remote_ptr(dest, local_pe), reinterpret_cast<void *>(&value), sizeof(T));
     return;
   }
   putmem_nbi(dest, &value, sizeof(T), pe);
@@ -68,7 +68,7 @@ __device__ T GDAContext::g(const T *source, int pe) {
   T ret{};
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
-    ipcImpl_.ipcCopy(&ret, get_remote_ptr(source, local_pe), sizeof(T));
+    ipcImpl_.ipcCopy<MemcpyKind::Get>(&ret, get_remote_ptr(source, local_pe), sizeof(T));
     return ret;
   }
   LOGD_ERROR_ABORT("gda::g not implemented");
@@ -765,7 +765,7 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
     if (nelems != 0) {
       T* dst = (T*)((char*) dest + dest_displs[j] * sizeof(T));
       T* src = (T*)((char*) &tmp_buf[j * tmp_buf_off]);
-      memcpy_wg(dst, src, nelems);
+      memcpy_wg<MemcpyKind::Put>(dst, src, nelems);
     }
   }
 
