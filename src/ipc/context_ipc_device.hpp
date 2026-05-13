@@ -228,6 +228,7 @@ class IPCContext : public Context {
   __device__ uint64_t signal_fetch(const uint64_t *sig_addr);
   __device__ uint64_t signal_fetch_wg(const uint64_t *sig_addr);
   __device__ uint64_t signal_fetch_wave(const uint64_t *sig_addr);
+  __device__ uint64_t get_p2p_ptr(void *dest, int rank, int dst_rank);
 
  private:
 
