@@ -30,11 +30,11 @@ src_path=$(dirname "$(realpath $0)")/../../
 cmake \
     -DBUILD_CODE_COVERAGE=${CODE_COV:-OFF} \
     -DCMAKE_BUILD_TYPE=${BUILD_TYPE:-Release} \
-    -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX:-~/rocshmem} \
+    -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX:-$src_path/../rocshmem_install} \
     -DCMAKE_VERBOSE_MAKEFILE=OFF \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
     -DBUILD_FUNCTIONAL_TESTS=ON \
-    -DBUILD_UNIT_TESTS=ON \
+    -DBUILD_UNIT_TESTS=OFF \
     -DBUILD_EXAMPLES=ON \
     -DPROFILE=OFF \
     -DUSE_GDA=OFF \
@@ -47,5 +47,5 @@ cmake \
     -DUSE_SINGLE_NODE=ON \
     -DMONOLITHIC_PACKAGE=ON \
     $* $src_path
-cmake --build . --parallel 8
+cmake --build . --parallel 64
 cmake --install .

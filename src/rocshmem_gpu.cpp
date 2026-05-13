@@ -2153,11 +2153,13 @@ WAIT_DEF_GEN(uint64_t, uint64)
 // clang-format on
 
 __device__ ATTR_NO_INLINE uint64_t rocshmem_get_p2p_ptr(void *dest, int rank, int dst_rank){
-#if defined(GDA_MLX5)
-  return static_cast<GDAContext*>(ROCSHMEM_CTX_DEFAULT.ctx_opaque)->get_p2p_ptr(dest, rank, dst_rank);
-#else
-  return 0;
+#ifdef USE_IPC
+  return static_cast<IPCContext*>(ROCSHMEM_CTX_DEFAULT.ctx_opaque)->get_p2p_ptr(dest, rank, dst_rank);
 #endif
+#ifdef GDA_MLX5
+  return static_cast<GDAContext*>(ROCSHMEM_CTX_DEFAULT.ctx_opaque)->get_p2p_ptr(dest, rank, dst_rank);
+#endif
+  return 0;
 }
 
 }  // namespace rocshmem

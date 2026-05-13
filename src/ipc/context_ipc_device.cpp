@@ -304,6 +304,23 @@ __device__ uint64_t IPCContext::signal_fetch_wg(const uint64_t *sig_addr) {
   return value;
 }
 
+__device__ uint64_t IPCContext::get_p2p_ptr(void *dest, int rank, int dst_rank){
+  if (rank == dst_rank)
+    return reinterpret_cast<uint64_t>(dest);
+
+  int local_ranks = ipcImpl_.shm_size;
+  int node_src = rank / local_ranks;
+  int node_dst = dst_rank / local_ranks;
+
+  if (node_src != node_dst) {
+    return 0;
+  } else {
+    uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[rank % local_ranks];
+    char* dst_ptr = ipcImpl_.ipc_bases[dst_rank % local_ranks] + L_offset;
+    return reinterpret_cast<uint64_t>(dst_ptr);
+  }
+}
+
 __device__ uint64_t IPCContext::signal_fetch_wave(const uint64_t *sig_addr) {
   uint64_t value{0};
   if (is_thread_zero_in_wave()) {
