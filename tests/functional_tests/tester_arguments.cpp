@@ -212,6 +212,7 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     case TeamCtxInfraSingleTestType:
     case TeamCtxInfraBlockTestType:
     case TeamCtxInfraOddEvenTestType:
+    case TeamCtxSubsetParentInfraTestType:
       max_msg_size = min_msg_size;
       break;
     case PutNBIMRTestType:
@@ -288,6 +289,7 @@ void TesterArguments::get_arguments() {
     case TeamWGBarrierTestType:
     case TeamCtxInfraBlockTestType:
     case TeamCtxInfraOddEvenTestType:
+    case TeamCtxSubsetParentInfraTestType:
     // On-stream tests - support any number of PEs
     case TeamAlltoallmemOnStreamTestType:
     case BarrierAllOnStreamTestType:

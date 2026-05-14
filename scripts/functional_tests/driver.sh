@@ -132,6 +132,7 @@ declare -A TEST_NUMBERS=(
   ["teamctxsharedinfra"]="95"
   ["quiet_on_stream"]="96"
   ["sync_all_on_stream"]="97"
+  ["teamctxsubsetparentinfra"]="98"
 
   ["defaultctx_waveputnbi_dp"]="200"
   ["defaultctx_amo_add_dp"]="201"
@@ -644,6 +645,8 @@ TestOther() {
   ExecTest  "teamctxoddeveninfra" 5       1            1
   ExecTest  "teamctxsharedinfra"  2       1            1
   ExecTest  "teamctxsharedinfra"  5       1            1
+  ExecTest  "teamctxsubsetparentinfra" 4  1            1
+  ExecTest  "teamctxsubsetparentinfra" 5  1            1
   unset ROCSHMEM_MAX_NUM_CONTEXTS
 
   ExecTest  "shmemptr"         2       1            1         8
