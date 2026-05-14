@@ -140,6 +140,7 @@
   X(TeamCtxSharedInfra,        95)  \
   X(QuietOnStream,             96)  \
   X(SyncAllOnStream,           97)  \
+  X(TeamCtxSubsetParentInfra,  98)  \
   X(DefaultCtx_WAVEPutNBI_DP,  200) \
   X(DefaultCtx_AMO_Add_DP,     201) \
   X(WAVEPutNBI_DP,             202) \
