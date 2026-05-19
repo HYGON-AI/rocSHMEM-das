@@ -47,7 +47,8 @@ template <typename T>
 __device__ void GDAContext::p(T *dest, T value, int pe) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
-    ipcImpl_.ipcCopy<MemcpyKind::Put>(get_remote_ptr(dest, local_pe), reinterpret_cast<void *>(&value), sizeof(T));
+    long L_offset{reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank]};
+    ipcImpl_.ipcCopy<MemcpyKind::Put>(ipcImpl_.ipc_bases[local_pe] + L_offset, reinterpret_cast<void *>(&value), sizeof(T), local_pe);
     return;
   }
   putmem_nbi(dest, &value, sizeof(T), pe);
@@ -68,7 +69,9 @@ __device__ T GDAContext::g(const T *source, int pe) {
   T ret{};
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
-    ipcImpl_.ipcCopy<MemcpyKind::Get>(&ret, get_remote_ptr(source, local_pe), sizeof(T));
+    const char *src_typed{reinterpret_cast<const char *>(source)};
+    long L_offset{const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank]};
+    ipcImpl_.ipcCopy<MemcpyKind::Get>(&ret, ipcImpl_.ipc_bases[local_pe] + L_offset, sizeof(T), local_pe);
     return ret;
   }
   LOGD_ERROR_ABORT("gda::g not implemented");
