@@ -28,7 +28,7 @@ set -e
 set -o pipefail
 
 if [[ -z "${_ROCM_DIR}" ]]; then
-  export _ROCM_DIR=/opt/rocm
+  export _ROCM_DIR=${ROCM_PATH:-/opt/dtk}
 fi
 
 # Location of dependencies source code

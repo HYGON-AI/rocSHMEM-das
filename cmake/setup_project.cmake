@@ -53,7 +53,7 @@ set(ENV{ROCM_PATH} ${ROCM_PATH})
 #  else()
 #    find_file(rocm_version_file "version" PATH_SUFFIXES ".info"
 #      HINTS ${ROCM_PATH} ENV ROCM_PATH ${ROCM_ROOT} ENV ROCM_ROOT ${hip_ROOT} ENV hip_ROOT ${HIP_ROOT} ENV HIP_ROOT
-#      PATHS /opt/rocm
+#      PATHS ${ROCM_PATH}
 #      REQUIRED)
 #    cmake_path(GET rocm_version_file PARENT_PATH version_file_dir)
 #    cmake_path(GET version_file_dir PARENT_PATH rocm_path)

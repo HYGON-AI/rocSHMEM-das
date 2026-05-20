@@ -181,7 +181,7 @@ if (NOT BUILD_TESTS_ONLY)
     endif()
   endif()
 
-  find_package(hip REQUIRED PATHS /opt/rocm)
+  find_package(hip REQUIRED PATHS ${ROCM_PATH})
   find_package(hsa-runtime64 REQUIRED)
 
   set(CMAKE_THREAD_PREFER_PTHREAD TRUE)

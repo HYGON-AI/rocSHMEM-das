@@ -38,7 +38,7 @@
  * To compile:
    hipcc -c -fgpu-rdc -x hip rocshmem_getmem_test.cc \
          --offload-arch=<target>:<xnack>             \
-         -I/opt/rocm/include                         \
+         -I$ROCM_PATH/include                         \
          -I$ROCSHMEM_INSTALL_DIR/include             \
          -I$OPENMPI_UCX_INSTALL_DIR/include/
 
@@ -47,7 +47,7 @@
          --offload-arch=<target>:<xnack>                                     \
          $ROCSHMEM_INSTALL_DIR/lib/librocshmem.a                             \
          $OPENMPI_UCX_INSTALL_DIR/lib/libmpi.so                              \
-         -L/opt/rocm/lib -lamdhip64 -lhsa-runtime64
+         -L$ROCM_PATH/lib -lamdhip64 -lhsa-runtime64
 
  * To run:
    mpirun -np 8 -x ROCSHMEM_MAX_NUM_CONTEXTS=2 ./rocshmem_getmem_test
