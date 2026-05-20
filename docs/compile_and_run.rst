@@ -26,7 +26,7 @@ Example compile and link commands are provided at the top of the example files i
 
   # Compile
   hipcc -c -fgpu-rdc -x hip rocshmem_allreduce_test.cc \
-    -I/opt/rocm/include                                \
+    -I$ROCM_PATH/include                                \
     -I$ROCSHMEM_INSTALL_DIR/include                    \
     -I$OPENMPI_UCX_INSTALL_DIR/include/
 
@@ -34,7 +34,7 @@ Example compile and link commands are provided at the top of the example files i
   hipcc -fgpu-rdc --hip-link rocshmem_allreduce_test.o -o rocshmem_allreduce_test \
     $ROCSHMEM_INSTALL_DIR/lib/librocshmem.a                                       \
     $OPENMPI_UCX_INSTALL_DIR/lib/libmpi.so                                        \
-    -L/opt/rocm/lib -lamdhip64 -lhsa-runtime64
+    -L$ROCM_PATH/lib -lamdhip64 -lhsa-runtime64
 
 If your project uses CMake, see
 `Using CMake with AMD ROCm <https://rocmdocs.amd.com/en/latest/conceptual/cmake-packages.html>`_.

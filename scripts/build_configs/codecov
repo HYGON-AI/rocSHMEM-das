@@ -41,8 +41,8 @@ LLVM_PROFILE_FILE="$PROFRAW_DIR/ro_net-functional-%p.profraw" ../scripts/functio
 LLVM_PROFILE_FILE="$PROFRAW_DIR/ro_ipc-functional-%p.profraw" ../scripts/functional_tests/driver.sh ./ro_ipc/tests/functional_tests/rocshmem_functional_tests all ./test_output/
 
 # Coverage Report
-/opt/rocm/llvm/bin/llvm-profdata merge -sparse $PROFRAW_DIR/*.profraw -o ./coverage-report/rocshmem.profdata
-/opt/rocm/llvm/bin/llvm-cov report \
+${ROCM_PATH}/llvm/bin/llvm-profdata merge -sparse $PROFRAW_DIR/*.profraw -o ./coverage-report/rocshmem.profdata
+${ROCM_PATH}/llvm/bin/llvm-cov report \
 	-object ./ipc/tests/unit_tests/rocshmem_unit_tests \
 	-object ./ipc/tests/functional_tests/rocshmem_functional_tests \
 	-object ./ipc/examples/rocshmem_init_attr_test \
@@ -54,7 +54,7 @@ LLVM_PROFILE_FILE="$PROFRAW_DIR/ro_ipc-functional-%p.profraw" ../scripts/functio
 	-instr-profile=./coverage-report/rocshmem.profdata \
 	--ignore-filename-regex=".*test.*"
 
-/opt/rocm/llvm/bin/llvm-cov show \
+${ROCM_PATH}/llvm/bin/llvm-cov show \
 	-object ./ipc/tests/unit_tests/rocshmem_unit_tests \
 	-object ./ipc/tests/functional_tests/rocshmem_functional_tests \
 	-object ./ipc/examples/rocshmem_init_attr_test \

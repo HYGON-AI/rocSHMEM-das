@@ -103,7 +103,7 @@ HipModuleInitTester::HipModuleInitTester(TesterArguments args)
   const char* rocm_path = std::getenv("ROCM_PATH");
   std::string hip_include = rocm_path ?
     "-I" + std::string(rocm_path) + "/include" :
-    "-I/opt/rocm/include";
+    "-I/opt/dtk/include";
 
   const char* options[] = {
     arch.c_str(),

@@ -171,7 +171,7 @@ WORKDIR /app
 RUN git clone https://github.com/ROCm/rdma-perftest
 WORKDIR /app/rdma-perftest/
 RUN ./autogen.sh \
- && ./configure --enable-rocm --with-rocm=/opt/rocm \
+ && ./configure --enable-rocm --with-rocm=/opt/dtk \
  && make -j 8 #install
 
 # Clone rocSHMEM
