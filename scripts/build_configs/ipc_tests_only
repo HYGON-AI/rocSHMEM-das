@@ -46,5 +46,6 @@ cmake \
     -DUSE_HDP_FLUSH=OFF \
     -DUSE_HDP_FLUSH_HOST_SIDE=OFF \
     -DBUILD_TESTS_ONLY=ON \
+    -DMONOLITHIC_PACKAGE=ON \
     $* $src_path
 cmake --build . --parallel 8

@@ -47,6 +47,7 @@ cmake \
     -DUSE_WF_COAL=OFF \
     -DUSE_HDP_FLUSH=OFF \
     -DUSE_HDP_FLUSH_HOST_SIDE=OFF \
+    -DMONOLITHIC_PACKAGE=ON \
     $* $src_path
 cmake --build . --parallel 8
 cmake --install .
