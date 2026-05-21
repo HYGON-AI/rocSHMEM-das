@@ -61,6 +61,7 @@ option(BUILD_EXAMPLES "Build the examples" OFF)
 option(BUILD_UNIT_TESTS "Build the unit tests (Requires MPI)" OFF)
 option(BUILD_TESTS_ONLY "Build only tests. Used to link against rocSHMEM in a ROCm Release" OFF)
 option(BUILD_TOOLS "Build binary tools (e.g., rocshmem_info)" ON)
+option(MONOLITHIC_PACKAGE "Build all components into a single package" ON)
 
 option(BUILD_LOCAL_GPU_TARGET_ONLY "Build only for GPUs detected on this machine" OFF)
 option(BUILD_CODE_COVERAGE "Build with code coverage flags (gcc only)" OFF)
@@ -305,12 +306,12 @@ if (NOT BUILD_TESTS_ONLY)
     )
   endif()
 
-  rocm_package_add_dependencies(
-    DEPENDS
-      hsa-rocr
-      hip-runtime-amd
-      rocm-dev
-  )
+  # rocm_package_add_dependencies(
+  #     DEPENDS
+  #       hsa-rocr
+  #       hip-runtime-amd
+  #       rocm-dev
+  #   )
 
   rocm_export_targets(
     TARGETS roc::rocshmem
@@ -318,8 +319,14 @@ if (NOT BUILD_TESTS_ONLY)
   )
   include(ROCMPackageConfigHelpers)
   include(ROCMClients)
-  rocm_package_setup_component(clients)
-  rocm_package_setup_client_component(tests PACKAGE_NAME tests)
+
+  if (MONOLITHIC_PACKAGE)
+    set(CPACK_MONOLITHIC_INSTALL ON)
+    set(CPACK_COMPONENTS_ALL "")
+  else()
+    rocm_package_setup_component(clients)
+    rocm_package_setup_client_component(tests PACKAGE_NAME tests)
+  endif()
 
   rocm_create_package(
     NAME "rocSHMEM"
