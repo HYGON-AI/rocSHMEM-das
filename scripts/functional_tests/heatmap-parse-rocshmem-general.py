@@ -70,6 +70,7 @@ op_interval = 10
 x = [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728, 268435456, 536870912, 1073741824]
 x_str = [8,16, 32, 64, 128, 256, 512, '1KB', '2KB', '4KB', '8KB', '16KB', '32KB', '64KB', '128KB', '256KB', '512KB', '1MB', '2MB', '4MB', '8MB', '16MB', '32MB', '64MB', '128MB', '256MB', '512MB', '1GB']
 
+max_failed_chars = 500  # 失败时总打印字符数
 
 @dataclass
 class Measurement:
@@ -88,6 +89,11 @@ class Series:
     nthreads: int
     data: List[Measurement]
     has_error: bool = False  # 新增：标记是否出错
+    error_messages: List[str] = None  # 新增：存储错误信息
+    
+    def __post_init__(self):
+        if self.error_messages is None:
+            self.error_messages = []
 
 workbook = xlsxwriter.Workbook(f"{out_file}.xlsx")
 workbook.set_properties({'company':  'AMD'})
@@ -120,7 +126,7 @@ yellow_format = workbook.add_format({
 })
 # 红色失败格式（新增）
 failed_format = workbook.add_format({
-    'align': 'center',
+    'align': 'left',
     'valign': 'vcenter',
     'bold': True,
     'font_color': 'red',
@@ -155,16 +161,32 @@ for dir, file_names in files_in_dir.items():
 
         # ===================== 先扫描是否有 error =====================
         has_error = False
+        error_messages = []
+        total_chars = 0  # 累计字符数
+        
         try:
             with open(filename, 'r') as f_check:
-                for check_line in f_check:
-                    if 'error' in check_line.lower() or 'failed' in check_line.lower():
+                check_line = f_check.readline()
+                while check_line:
+                    lower_line = check_line.lower()
+                    # 检测常见错误关键词
+                    if 'error' in lower_line or 'failed' in lower_line or 'segfault' in lower_line:
                         has_error = True
+                        # 将当前触发行与后续内容拼接，然后截取最多max_failed_chars个字符
+                        remaining_content = check_line + f_check.read()
+                        error_info = remaining_content[:max_failed_chars]
+                        error_messages.append(error_info)
+                        total_chars = len(error_info)
                         break
-        except:
-            pass
+                    check_line = f_check.readline()
+        except Exception as e:
+            has_error = True
+            error_messages.append(f"文件读取错误: {str(e)[:50]}")
+
 
         this_series.has_error = has_error
+        this_series.error_messages = error_messages
+        
         if has_error:
             print(f"❌ 文件包含错误，标记为 Failed: {filename}")
             all_data.append(this_series)
@@ -255,10 +277,20 @@ for dir, file_names in files_in_dir.items():
         worksheet.write(top_start, pad_left+1, f"{data_series.nwgs}", cell_format)
         worksheet.write(top_start, pad_left+2, f"{data_series.nthreads}", cell_format)
 
-        # ===================== 出错直接显示 Failed =====================
+        # ===================== 出错显示 Failed + 关键错误日志（合并单元格）=====================
         if data_series.has_error:
-            for i in range(rows):
-                worksheet.write(top_start, i+pad_left+3, "Failed", failed_format)
+            # 获取第一条错误信息
+            error_info = ""
+            if data_series.error_messages:
+                error_info = data_series.error_messages[0]
+                # 限制长度在max_failed_chars字符以内
+                if len(error_info) > max_failed_chars:
+                    error_info_len = max_failed_chars-3
+                    error_info = error_info[:error_info_len] + "..."
+            
+            # 合并从 pad_left+3 到 pad_left+3+rows-1 的所有列，写入错误信息
+            error_text = f"Failed：{error_info}" if error_info else "Failed"
+            worksheet.merge_range(top_start, pad_left+3, top_start, pad_left+3+rows-1, error_text, failed_format)
             dataset_count += 1
             dataset_count_one_op += 1
             continue
