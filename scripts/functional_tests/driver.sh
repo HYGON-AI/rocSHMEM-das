@@ -200,6 +200,13 @@ ExecTest() {
         ${HOSTFILE:+--hostfile "$HOSTFILE"}
         --map-by numa
       )
+
+  # Use MPI Parameters when provided (overrides all default launcher params)
+  if [[ "" != "$MPI_PARAMS" ]]
+  then
+    cmd=( "$LAUNCHER" -n "$NUM_RANKS" $MPI_PARAMS )
+  fi
+
   # Construct Test Command
   TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_z"$NUM_THREADS"
   cmd+=( "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} )
@@ -637,6 +644,7 @@ TestPerformance() {
   
   ExecTest  "alltoall"                $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
   ExecTest  "teambroadcast"           $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
+  ExecTest  "fcollect"                $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
   # ExecTest  "teamreduction"           $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
   
   ExecTest  "putmem_on_stream"        $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
@@ -664,7 +672,7 @@ ValidateInput() {
   
   if [ $INPUT_COUNT -lt 3 ] ; then
     echo "This script must be run with at least 3 arguments."
-    echo "Usage: ${0} <executable> <test_suite | test_name | test_config> <log_dir> [hostfile] [--show-cases]"
+    echo "Usage: ${0} <executable> <test_suite | test_name | test_config> <log_dir> [hostfile] [mpi_params]  [--show-cases]"
     echo
     echo "    <executable>  : path to the tester executable"
     echo "    <test_suite>  : test suite to run, e.g. 'all', 'rma', or 'put'"
@@ -678,6 +686,7 @@ ValidateInput() {
     echo "        [max_msg_size] : maximum message size to test"
     echo "    <log_dir>     : path to output log directory"
     echo "    [hostfile]    : path to hostfile"
+    echo "    [mpi_params]  : MPI parameters(excluding -np/-n) to override default, e.g. '-x LD_LIBRARY_PATH -x ROCSHMEM_BACKEND=gda'"
     echo "    [--show-cases] : show all available test case names"
     exit 1
   fi
@@ -750,10 +759,90 @@ RerunFailedTests() {
   echo ""
 }
 
+PrintEnvInfo() {
+  local env_log="$LOG_DIR/env_info.log"
+  local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+  
+  # 确保日志目录存在
+  mkdir -p "$LOG_DIR" || { echo "Error: Failed to create log directory $LOG_DIR"; return 1; }
+  
+  {
+    echo -e "\033[0;32m================================================================================================\033[0m"
+    echo -e "\033[0;32mEnvironment info: $timestamp\033[0m"
+    echo -e "\033[0;32m================================================================================================\033[0m"
+
+    # build information and environment variables
+    echo ""
+    echo -e "\033[0;32m================================== Build Info and Env Vars =====================================\033[0m"
+    if [ -x "$ROCSHMEM_INFO" ]; then
+      "$ROCSHMEM_INFO" --env:all 2>&1
+    fi
+
+    # DTK
+    echo ""
+    echo -e "\033[0;32m============================================ DTK ===============================================\033[0m"
+    cat /opt/dtk/.dtk_version
+
+    # System info
+    echo ""
+    echo -e "\033[0;32m=========================================== System =============================================\033[0m"
+    if command -v uname &>/dev/null; then
+      uname -a 2>&1
+    fi
+    cat /etc/os-release 2>/dev/null
+
+    # CPU info
+    echo ""
+    echo -e "\033[0;32m=========================================== CPU ================================================\033[0m"
+    if command -v lscpu &>/dev/null; then
+      lscpu 2>&1
+    elif command -v cat &>/dev/null; then
+      cat /proc/cpuinfo 2>/dev/null
+    fi
+
+    # GPU info
+    echo ""
+    echo -e "\033[0;32m============================================ GPU ===============================================\033[0m"
+    if command -v hy-smi &>/dev/null; then
+      hy-smi --showid --showproductname 2>&1
+    fi
+
+    # Network info
+    echo ""
+    echo -e "\033[0;32m=========================================== Network ============================================\033[0m"
+    if command -v ip &>/dev/null; then
+      ip addr 2>&1
+    elif command -v hostname &>/dev/null; then
+      hostname -I 2>&1
+    fi
+
+    # IB info
+    echo ""
+    echo -e "\033[0;32m============================================== IB ==============================================\033[0m"
+    if command -v ibstat &>/dev/null; then
+      ibstat 2>&1
+    fi
+
+
+    echo ""
+    echo -e "\033[0;32m================================================================================================\033[0m"
+    echo -e "\033[0;32mEnvironment info collection completed: $timestamp\033[0m"
+    echo -e "\033[0;32m================================================================================================\033[0m"
+  } > "$env_log" 2>&1
+  
+  if [ $? -eq 0 ]; then
+    echo "Environment info saved to: $env_log"
+  else
+    echo "Error: Failed to collect environment info"
+    return 1
+  fi
+}
+
 APP=$1
 TEST=$2
 LOG_DIR=$3
 HOSTFILE=$4
+MPI_PARAMS=$5
 
 DRIVER_RETURN_STATUS=0
 FAILED_TESTS=()  # Array to store failed test parameters
@@ -771,6 +860,8 @@ fi
 if [ -x "$ROCSHMEM_INFO" ]; then
   "$ROCSHMEM_INFO"
 fi
+
+PrintEnvInfo
 
 case $TEST in
   "heatmaprma")
