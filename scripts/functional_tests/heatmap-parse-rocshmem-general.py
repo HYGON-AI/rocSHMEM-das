@@ -133,15 +133,26 @@ failed_format = workbook.add_format({
     'text_wrap': True
 })
 
-now = datetime.now()
-date_str = now.strftime("%Y-%m-%d")
-
 for dir, file_names in files_in_dir.items():
-    sheet_name = f"{dir}-{date_str}"[:31]
+    sheet_name = f"{dir}"[:31]
     worksheet = workbook.add_worksheet(sheet_name)
     worksheet.set_zoom(70)
     worksheet.set_column(0, 200, 14)  # 足够宽
     all_data = []
+    
+    # 创建当前目录的环境信息工作表
+    env_sheet_name = f"EnvInfo({dir})"[:31]
+    env_sheet = workbook.add_worksheet(env_sheet_name)
+    
+    # 查找并添加env_info.log
+    env_log_path = os.path.join(dir, "env_info.log")
+    if os.path.isfile(env_log_path):
+        env_sheet.write(0, 0, f"--- {dir} ---", workbook.add_format({'bold': True}))
+        env_row = 1
+        with open(env_log_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                env_sheet.write_string(env_row, 0, line.strip('\n'))
+                env_row += 1
 
     for file in file_names:
         mpirun_cmd = ""
@@ -238,6 +249,8 @@ for dir, file_names in files_in_dir.items():
     worksheet.write(1, 12, f"Lat: us\nBw: GB/s", yellow_format)
     worksheet.merge_range(1, 14, 1, 15, f"{show_mode_info}", yellow_format)
     worksheet.merge_range(3, 2, 3, 15, f"Note: For OnStream operations, the actual value of w is 1. The actual z varies with size. When it is greater than 256, use 256.", yellow_format)
+    # 在目录sheet第5行第3列添加跳转到对应环境信息工作表的链接
+    worksheet.write_url(4, 2, f"internal:'{env_sheet_name}'!A1", string="📎 环境信息")
 
     dataset_count = 0
     pre_pad_top = 0

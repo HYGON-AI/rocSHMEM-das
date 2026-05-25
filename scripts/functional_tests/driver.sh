@@ -759,6 +759,92 @@ RerunFailedTests() {
   echo ""
 }
 
+PrintfNetWorkInfo() {
+  has_ip_cmd=false; command -v ip &>/dev/null && has_ip_cmd=true
+  has_ifconfig_cmd=false; command -v ifconfig &>/dev/null && has_ifconfig_cmd=true
+  has_ibstat_cmd=false; command -v ibstat &>/dev/null && has_ibstat_cmd=true
+  has_ethtool_cmd=false; command -v ethtool &>/dev/null && has_ethtool_cmd=true
+
+  for nic in $(ls /sys/class/net 2>/dev/null | grep -v '^lo$'); do
+    ip_info="Unknown!"
+    if $has_ip_cmd; then
+      ip_info=$(ip -4 addr show $nic 2>/dev/null | grep -oP 'inet \K[\d.]+')
+    elif $has_ifconfig_cmd; then
+      ip_info=$(ifconfig $nic 2>/dev/null | grep -oP 'inet \K[\d.]+')
+    fi
+    [[ -z "$ip_info" ]] && ip_info="Unknown!"
+
+    driver_info="Unknown!"
+    if [ -f "/sys/class/net/$nic/device/uevent" ]; then
+      driver_info=$(grep "^DRIVER=" /sys/class/net/$nic/device/uevent 2>/dev/null | cut -d'=' -f2)
+      [[ -z "$driver_info" ]] && driver_info="Unknown!"
+    fi
+
+    speed_info="Unknown!"
+    port_info="Unknown!"
+    ib_info=""
+
+    # 检查是否为 IB/RoCE 设备
+    ib_device=""
+    if [ -d "/sys/class/net/$nic/device/infiniband" ]; then
+      ib_device=$(ls /sys/class/net/$nic/device/infiniband 2>/dev/null | head -n 1)
+    fi
+
+    # 缓存命令输出，避免重复执行
+    ibstat_out=""
+    ethtool_out=""
+    [[ -n "$ib_device" ]] && $has_ibstat_cmd && ibstat_out=$(ibstat $ib_device 2>/dev/null)
+    $has_ethtool_cmd && ethtool_out=$(ethtool $nic 2>/dev/null)
+
+    # 获取物理端口类型
+    if [[ -n "$ethtool_out" ]]; then
+      current_port=$(echo "$ethtool_out" | grep -i "Port:" | awk -F': ' '{print $2}' | tr -d '[:space:]')
+      supported_ports=$(echo "$ethtool_out" | grep -i "Supported ports:" | awk -F': ' '{print $2}' | tr -d '[:space:]')
+      if [[ -n "$current_port" ]]; then
+        port_info="$current_port"
+        [[ -n "$supported_ports" ]] && port_info+=" (Supported: $supported_ports)"
+      fi
+    fi
+
+    if [[ -n "$ibstat_out" ]]; then
+      # IB/RoCE设备处理
+      rate=$(echo "$ibstat_out" | grep "Rate:" | awk '{print $2}')
+      link_layer=$(echo "$ibstat_out" | grep "Link layer:" | awk -F': ' '{print $2}')
+      state=$(echo "$ibstat_out" | grep "State:" | head -1 | awk -F': ' '{print $2}')
+      phys_state=$(echo "$ibstat_out" | grep "Physical state:" | head -1 | awk -F': ' '{print $2}')
+      ca_type=$(echo "$ibstat_out" | grep "CA type:" | awk -F': ' '{print $2}')
+      fw_ver=$(echo "$ibstat_out" | grep "Firmware version:" | awk -F': ' '{print $2}')
+      node_guid=$(echo "$ibstat_out" | grep "Node GUID:" | awk -F': ' '{print $2}')
+      base_lid=$(echo "$ibstat_out" | grep "Base lid:" | awk -F': ' '{print $2}')
+
+      if [[ -n "$rate" ]]; then
+        if [[ "$link_layer" == "Ethernet" ]]; then
+          speed_info="${rate}Gbps (RoCE)"
+        else
+          speed_info="${rate}Gbps (IB)"
+        fi
+      fi
+
+      # 组装IB协议栈信息
+      ib_info="IB State($ib_device): ${state:-Unknown}, Phys: ${phys_state:-Unknown}, Link layer: ${link_layer:-Unknown}"
+      [[ -n "$ca_type" ]] && ib_info+=", CA: $ca_type"
+      [[ -n "$fw_ver" ]] && ib_info+=", FW: $fw_ver"
+      [[ -n "$node_guid" ]] && ib_info+=", GUID: $node_guid"
+      [[ -n "$base_lid" ]] && ib_info+=", LID: $base_lid"
+      
+    elif [[ -n "$ethtool_out" ]]; then
+      # 普通以太网设备处理
+      speed_info=$(echo "$ethtool_out" | grep -i "Speed:" | awk -F': ' '{print $2}' | tr -d '[:space:]')
+      [[ -z "$speed_info" ]] && speed_info="Unknown!"
+    fi
+
+    # 格式化打印
+    echo "$nic: IP: $ip_info, Speed: $speed_info"
+    echo "      Port: $port_info, Driver: $driver_info"
+    [[ -n "$ib_info" ]] && echo "      $ib_info"
+  done
+}
+
 PrintEnvInfo() {
   local env_log="$LOG_DIR/env_info.log"
   local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
@@ -767,67 +853,45 @@ PrintEnvInfo() {
   mkdir -p "$LOG_DIR" || { echo "Error: Failed to create log directory $LOG_DIR"; return 1; }
   
   {
-    echo -e "\033[0;32m================================================================================================\033[0m"
-    echo -e "\033[0;32mEnvironment info: $timestamp\033[0m"
-    echo -e "\033[0;32m================================================================================================\033[0m"
+    echo -e "================================================================================================"
+    echo -e "Environment info: $timestamp"
+    echo -e "================================================================================================"
 
     # build information and environment variables
     echo ""
-    echo -e "\033[0;32m================================== Build Info and Env Vars =====================================\033[0m"
-    if [ -x "$ROCSHMEM_INFO" ]; then
-      "$ROCSHMEM_INFO" --env:all 2>&1
-    fi
+    echo -e "================================== Build Info and Env Vars ====================================="
+    [ -x "$ROCSHMEM_INFO" ] && "$ROCSHMEM_INFO" --env:all 2>&1
 
     # DTK
     echo ""
-    echo -e "\033[0;32m============================================ DTK ===============================================\033[0m"
-    cat /opt/dtk/.dtk_version
+    echo -e "============================================ DTK ==============================================="
+    cat /opt/dtk/.dtk_version 2>/dev/null
 
     # System info
     echo ""
-    echo -e "\033[0;32m=========================================== System =============================================\033[0m"
-    if command -v uname &>/dev/null; then
-      uname -a 2>&1
-    fi
-    cat /etc/os-release 2>/dev/null
+    echo -e "=========================================== System ============================================="
+    uname -a 2>/dev/null
+    cat /etc/os-release 2>/dev/null | grep -E "^(NAME|VERSION)="
 
     # CPU info
     echo ""
-    echo -e "\033[0;32m=========================================== CPU ================================================\033[0m"
-    if command -v lscpu &>/dev/null; then
-      lscpu 2>&1
-    elif command -v cat &>/dev/null; then
-      cat /proc/cpuinfo 2>/dev/null
-    fi
+    echo -e "=========================================== CPU ================================================"
+    lscpu 2>/dev/null | grep -v "Flags:"
 
     # GPU info
     echo ""
-    echo -e "\033[0;32m============================================ GPU ===============================================\033[0m"
-    if command -v hy-smi &>/dev/null; then
-      hy-smi --showid --showproductname 2>&1
-    fi
+    echo -e "============================================ GPU ==============================================="
+    hy-smi --showid --showproductname 2>&1
 
     # Network info
     echo ""
-    echo -e "\033[0;32m=========================================== Network ============================================\033[0m"
-    if command -v ip &>/dev/null; then
-      ip addr 2>&1
-    elif command -v hostname &>/dev/null; then
-      hostname -I 2>&1
-    fi
-
-    # IB info
-    echo ""
-    echo -e "\033[0;32m============================================== IB ==============================================\033[0m"
-    if command -v ibstat &>/dev/null; then
-      ibstat 2>&1
-    fi
-
+    echo -e "=========================================== Network ============================================"
+    PrintfNetWorkInfo
 
     echo ""
-    echo -e "\033[0;32m================================================================================================\033[0m"
-    echo -e "\033[0;32mEnvironment info collection completed: $timestamp\033[0m"
-    echo -e "\033[0;32m================================================================================================\033[0m"
+    echo -e "================================================================================================"
+    echo -e "Environment info collection completed: $timestamp"
+    echo -e "================================================================================================"
   } > "$env_log" 2>&1
   
   if [ $? -eq 0 ]; then
