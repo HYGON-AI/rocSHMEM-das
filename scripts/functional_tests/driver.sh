@@ -201,10 +201,9 @@ ExecTest() {
         --map-by numa
       )
 
-  # Use MPI Parameters when provided (overrides all default launcher params)
-  if [[ "" != "$MPI_PARAMS" ]]
-  then
-    cmd=( "$LAUNCHER" -n "$NUM_RANKS" $MPI_PARAMS )
+  # Use MPI Parameters when provided via environment variable (overrides all default launcher params)
+  if [[ -n "${ROCSHMEM_TEST_MPI_PARAMS:-}" ]]; then
+    cmd=( "$LAUNCHER" -n "$NUM_RANKS" $ROCSHMEM_TEST_MPI_PARAMS )
   fi
 
   # Construct Test Command
@@ -233,7 +232,7 @@ ExecTest() {
   fi
 
   # Run Test
-  if [ $NUM_GPUS -ge $NUM_RANKS ] || [[ "" != "$HOSTFILE" ]]; then
+  if [ $NUM_GPUS -ge $NUM_RANKS ] || [[ "" != "$HOSTFILE" ]] || [[ "${cmd[*]}" == *-H* ]] || [[ "${cmd[*]}" == *--host* ]]; then
     echo "# $CMD >> $LOG_FILE" >"$LOG_FILE"
     "${cmd[@]}" >>"$LOG_FILE" 2>&1
   else
@@ -620,42 +619,151 @@ TestHeatMapColl() {
   ExecTest  "alltoall"         64      1            256        v1073741824
 }
 
-TestPerformance() {
+TestPerfColl() {
   NOTIMEOUT=1
   NOVERIF=1
+
   ##############################################################################
-  #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
+  #       | Name                     | Ranks               |  Max Message Size #
   ##############################################################################
-  ExecTest  "put"                     $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
-  ExecTest  "wgput"                   $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
-  ExecTest  "waveput"                 $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
+  ExecPerfTest  "alltoall"                $RANKS       $MAX_MESSAGE_SIZE
+  ExecPerfTest  "alltoallv"               $RANKS       $MAX_MESSAGE_SIZE
+  ExecPerfTest  "teambroadcast"           $RANKS       $MAX_MESSAGE_SIZE
+  ExecPerfTest  "fcollect"                $RANKS       $MAX_MESSAGE_SIZE
+  # ExecPerfTest  "teamreduction"           $RANKS       $MAX_MESSAGE_SIZE
+  ExecPerfTest  "alltoallmem_on_stream"   $RANKS       $MAX_MESSAGE_SIZE
+  ExecPerfTest  "broadcastmem_on_stream"  $RANKS       $MAX_MESSAGE_SIZE
+}
+
+TestRMAPerf() {
+  NOTIMEOUT=1
+  NOVERIF=1
+
+  local rma_ranks=$RANKS
+  if [ $rma_ranks -gt 2 ]; then    
+    rma_ranks=2  
+  fi
+
+  ##############################################################################
+  #       | Name                    | Ranks                 | Max Message Size #
+  ##############################################################################
+  ExecPerfTest  "put"                     $rma_ranks         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "wgput"                   $rma_ranks         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "waveput"                 $rma_ranks         $MAX_MESSAGE_SIZE
   
-  ExecTest  "putnbi"                  $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
-  ExecTest  "wgputnbi"                $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
-  ExecTest  "waveputnbi"              $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
+  ExecPerfTest  "putnbi"                  $rma_ranks         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "wgputnbi"                $rma_ranks         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "waveputnbi"              $rma_ranks         $MAX_MESSAGE_SIZE
   
-  ExecTest  "get"                     $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
-  ExecTest  "wgget"                   $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
-  ExecTest  "waveget"                 $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
+  ExecPerfTest  "get"                     $rma_ranks         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "wgget"                   $rma_ranks         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "waveget"                 $rma_ranks         $MAX_MESSAGE_SIZE
   
-  ExecTest  "getnbi"                  $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
-  ExecTest  "wggetnbi"                $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
-  ExecTest  "wavegetnbi"              $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
+  ExecPerfTest  "getnbi"                  $rma_ranks         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "wggetnbi"                $rma_ranks         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "wavegetnbi"              $rma_ranks         $MAX_MESSAGE_SIZE
   
-  ExecTest  "alltoall"                $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
-  ExecTest  "teambroadcast"           $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
-  ExecTest  "fcollect"                $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
-  # ExecTest  "teamreduction"           $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
-  
-  ExecTest  "putmem_on_stream"        $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
-  ExecTest  "getmem_on_stream"        $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
-  ExecTest  "alltoallmem_on_stream"   $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
-  ExecTest  "broadcastmem_on_stream"  $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE 
+  ExecPerfTest  "putmem_on_stream"        $rma_ranks         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "getmem_on_stream"        $rma_ranks         $MAX_MESSAGE_SIZE
   
   if [[ $TEST == perf-mlx5* ]]; then  
-  ExecTest  "defaultctx_waveputnbi_dp"  $RANKS     $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
-  ExecTest  "waveputnbi_dp"           $RANKS       $WORKGROUPS         $THREADS        $MAX_MESSAGE_SIZE
+  ExecPerfTest  "defaultctx_waveputnbi_dp"  $rma_ranks       $MAX_MESSAGE_SIZE
+  ExecPerfTest  "waveputnbi_dp"             $rma_ranks       $MAX_MESSAGE_SIZE
   else echo "Skip:   *_dp (AIROCSHMEM: GDA *_dp not implemented)"; fi
+}
+
+TestPerf() {
+  TestRMAPerf
+  TestPerfColl
+}
+
+ExecPerfTest() {
+  NOTIMEOUT=1
+  NOVERIF=1
+  
+  local test_name=$1
+  local num_ranks=$2
+  local max_msg_size=$3
+  
+  local -a wg_options=(${ROCSHMEM_TEST_WGS:-16})
+  local -a thread_options=(${ROCSHMEM_TEST_THDS:-128 256})
+
+  if [[ "$test_name" == "alltoallv" ]]; then
+    # alltoallv only supports one workgroup
+    wg_options=(1)
+  fi
+  
+  declare -A best_latency
+  declare -A best_bandwidth
+  declare -A best_latency_config
+  declare -A best_bandwidth_config
+  
+  echo "--------------------------------------------------------------------------------------"
+  echo "Performance Test: $test_name"
+  echo "Ranks: $num_ranks, Max Msg Size: $max_msg_size"
+  echo "Workgroups: ${wg_options[@]}"
+  echo "Threads: ${thread_options[@]}"
+  echo "--------------------------------------------------------------------------------------"
+  
+  for wg in "${wg_options[@]}"; do
+    for threads in "${thread_options[@]}"; do
+      if [ $((wg * threads)) -gt 65536 ]; then
+        continue
+      fi
+      
+      ExecTest "$test_name" "$num_ranks" "$wg" "$threads" "$max_msg_size"
+      
+      local log_file="$LOG_DIR/${test_name}_n${num_ranks}_w${wg}_z${threads}_${max_msg_size}B.log"
+      
+      if [ ! -f "$log_file" ]; then
+        continue
+      fi
+      
+      local results=$(awk -v max="$max_msg_size" '
+        /Msg Size.*Latency.*Bandwidth/ { in_table=1; next }
+        in_table && /^[0-9]/ && $2 <= max { print $2 ":" $4 ":" $5 }
+      ' "$log_file")
+      
+      while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        
+        IFS=':' read -r msg_size latency bandwidth <<< "$line"
+        
+        if [ -z "${best_latency[$msg_size]}" ] || \
+           awk -v a="$latency" -v b="${best_latency[$msg_size]}" 'BEGIN {exit !(a < b)}'; then
+          best_latency[$msg_size]="$latency"
+          best_latency_config[$msg_size]="${wg}:${threads}"
+        fi
+        
+        if [ -z "${best_bandwidth[$msg_size]}" ] || \
+           awk -v a="$bandwidth" -v b="${best_bandwidth[$msg_size]}" 'BEGIN {exit !(a > b)}'; then
+          best_bandwidth[$msg_size]="$bandwidth"
+          best_bandwidth_config[$msg_size]="${wg}:${threads}"
+        fi
+      done <<< "$results"
+    done
+  done
+  
+  local result_file="$LOG_DIR/${test_name}_n${num_ranks}_${max_msg_size}B_best.log"
+  
+  {
+    echo ""
+    echo "======================================================================================"
+    printf "  %-15s   %-15s   %-15s   %-15s   %-15s\n" \
+      "Msg Size" "Best Lat(us)" "Lat(WG:Threads)" "Best BW(GB/s)" "BW(WG:Threads)"
+    echo "--------------------------------------------------------------------------------------"
+    
+    for msg_size in $(echo "${!best_latency[@]}" | tr ' ' '\n' | sort -n); do
+      printf "  %-15s   %-15s   %-15s   %-15s   %-15s\n" \
+        "$msg_size" \
+        "${best_latency[$msg_size]}" \
+        "${best_latency_config[$msg_size]}" \
+        "${best_bandwidth[$msg_size]}" \
+        "${best_bandwidth_config[$msg_size]}"
+    done
+    
+    echo "======================================================================================"
+  } | tee "$result_file"
 }
 
 ValidateInput() {
@@ -672,7 +780,7 @@ ValidateInput() {
   
   if [ $INPUT_COUNT -lt 3 ] ; then
     echo "This script must be run with at least 3 arguments."
-    echo "Usage: ${0} <executable> <test_suite | test_name | test_config> <log_dir> [hostfile] [mpi_params]  [--show-cases]"
+    echo "Usage: ${0} <executable> <test_suite | test_name | test_config> <log_dir> [hostfile] [--show-cases]"
     echo
     echo "    <executable>  : path to the tester executable"
     echo "    <test_suite>  : test suite to run, e.g. 'all', 'rma', or 'put'"
@@ -684,10 +792,25 @@ ValidateInput() {
     echo "        <workgroups>   : number of workgroups per PE"
     echo "        <threads>      : number of threads per workgroup"
     echo "        [max_msg_size] : maximum message size to test"
+    echo
+    echo "        Performance Test Mode:"
+    echo "            Syntax: 'perf/perf-mlx5 <test_name> <ranks> [max_msg_size]'"
+    echo "            <test_name>      : 'all', 'coll', 'rma', or specific test (put, get, alltoall...)"
+    echo "            <ranks>          : number of PEs/ranks to use for test"
+    echo "            [max_msg_size]   : maximum message size to test, default 8MB"
+    echo "            Examples:"
+    echo '                "perf all 2 1048576"      # All tests, 2 ranks, max 1MB'
+    echo '                "perf put 2 8388608"      # Put test, 2 ranks, max 8MB'
+    echo '                "perf-mlx5 alltoall 2 65536" # Alltoall on mlx5, 2 ranks, max 64KB'
+    echo
     echo "    <log_dir>     : path to output log directory"
     echo "    [hostfile]    : path to hostfile"
-    echo "    [mpi_params]  : MPI parameters(excluding -np/-n) to override default, e.g. '-x LD_LIBRARY_PATH -x ROCSHMEM_BACKEND=gda'"
     echo "    [--show-cases] : show all available test case names"
+    echo
+    echo "Environment Vars:"
+    echo "     ROCSHMEM_TEST_MPI_PARAMS: MPI parameters(excluding -np/-n) to override default, e.g. '-x LD_LIBRARY_PATH -x ROCSHMEM_BACKEND=gda'"
+    echo "     ROCSHMEM_TEST_WGS: workgroup options per PE in performance test, default '8 16 32'"
+    echo "     ROCSHMEM_TEST_THDS: thread options per workgroup in performance test, default '64 128 256'" 
     exit 1
   fi
 }
@@ -881,7 +1004,7 @@ PrintEnvInfo() {
     # GPU info
     echo ""
     echo -e "============================================ GPU ==============================================="
-    hy-smi --showid --showproductname 2>&1
+    hy-smi --showid --showproductname --showdriverversion 2>&1
 
     # Network info
     echo ""
@@ -906,7 +1029,6 @@ APP=$1
 TEST=$2
 LOG_DIR=$3
 HOSTFILE=$4
-MPI_PARAMS=$5
 
 DRIVER_RETURN_STATUS=0
 FAILED_TESTS=()  # Array to store failed test parameters
@@ -971,6 +1093,24 @@ case $TEST in
   *"other")
     TestOther
     ;;
+  "perf"*|"perf-mlx5"*)
+    TEST_OPTS=($TEST)
+    NAME=${TEST_OPTS[1]}
+    if [ ${#TEST_OPTS[@]} -ge 3 ]; then
+      RANKS=${TEST_OPTS[2]}
+      MAX_MESSAGE_SIZE=${TEST_OPTS[3]:-8388608}
+    fi
+
+    if [ "$NAME" == "all" ]; then
+      TestPerf
+    elif [ "$NAME" == "rma" ]; then
+      TestRMAPerf
+    elif [ "$NAME" == "coll" ]; then
+      TestPerfColl
+    else
+      ExecPerfTest  "${NAME}"  "${RANKS}"  "${MAX_MESSAGE_SIZE}"
+    fi
+    ;;
   *)
     #######################################################################################
     #        |   Name   |   Ranks   |   Workgroups   |   Threads   |   Max Message Size   #
@@ -991,11 +1131,7 @@ case $TEST in
       MAX_MESSAGE_SIZE=8
     fi
 
-    if [ "$NAME" == "perf" ] || [ "$NAME" == "perf-mlx5" ]; then
-      TestPerformance
-    else
-      ExecTest  "${NAME}"  "${RANKS}"  "${WORKGROUPS}"  "${THREADS}"  "${MAX_MESSAGE_SIZE}"
-    fi
+    ExecTest  "${NAME}"  "${RANKS}"  "${WORKGROUPS}"  "${THREADS}"  "${MAX_MESSAGE_SIZE}"
     ;;
 esac
 
