@@ -130,6 +130,7 @@ if(USE_GDA)
   if(GDA_MLX5)
     list(APPEND BITCODE_SOURCES
       ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/mlx5/queue_pair_mlx5.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/mlx5/queue_pair_mlx5_multiqp.cpp
     )
   endif()
   if(GDA_IONIC)

@@ -278,7 +278,7 @@ if (NOT BUILD_TESTS_ONLY)
   #############################################################################
   # DEVICE BITCODE COMPILATION
   #############################################################################
-  #include(${CMAKE_SOURCE_DIR}/cmake/DeviceBitcode.cmake)
+  include(${CMAKE_SOURCE_DIR}/cmake/DeviceBitcode.cmake)
 
   #############################################################################
   # INSTALL
@@ -327,6 +327,9 @@ if (NOT BUILD_TESTS_ONLY)
     rocm_package_setup_component(clients)
     rocm_package_setup_client_component(tests PACKAGE_NAME tests)
   endif()
+
+  # 禁止strip操作，避免HSACO文件（非ELF格式）被错误处理
+  set(CPACK_RPM_SPEC_MORE_DEFINE "%define __strip /bin/true")
 
   rocm_create_package(
     NAME "rocSHMEM"
