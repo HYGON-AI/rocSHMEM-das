@@ -343,26 +343,15 @@ namespace envvar {
             doc(_doc),
             default_value(_default_value),
             value(_default_value),
-            value_set(false) {
-        const char* env_value = std::getenv(name.c_str());
-        if (env_value) {
-          std::istringstream iss{std::string(env_value)};
-          std::invoke(parse, iss, value);
-          if (iss.fail()) {
-            std::cerr << __PRETTY_FUNCTION__ << ": invalid argument "
-                      << name << "='" << env_value << "'" << std::endl;
-            value = default_value;
-          } else {
-            value_set = true;
-          }
-        }
-      }
+            value_set(false),
+            value_initialized_(false) { }
 
       // can't figure out how to do an out-of-line definition for this
       template <typename CharT, typename Traits>
       friend
       std::basic_ostream<CharT, Traits>& operator<<(std::basic_ostream<CharT, Traits>& os,
                                                     const var<value_type>& v) {
+        v.ensure_initialized();
         return os << v.name << "=" << v.value;
       }
 
@@ -377,21 +366,41 @@ namespace envvar {
         return default_value;
       }
       const_reference get_value() const {
+        ensure_initialized();
         return value;
       }
       operator const_reference() const {
+        ensure_initialized();
         return value;
       }
       bool is_default() const {
+        ensure_initialized();
         return !value_set;
       }
 
     private:
+      void ensure_initialized() const {
+        if (value_initialized_) return;
+        const char* env_value = std::getenv(name.c_str());
+        if (env_value) {
+          std::istringstream iss{std::string(env_value)};
+          std::invoke(parser::parse<T>{}, iss, value);
+          if (iss.fail()) {
+            std::cerr << __func__ << ": invalid argument " << name << "='" << env_value << "'" << std::endl;
+            value = default_value;
+          } else {
+            value_set = true;
+          }
+        }
+        value_initialized_ = true;
+      }
+
       const std::string name;
       const std::string doc;
       const value_type default_value;
-      value_type value;
-      bool value_set;
+      mutable value_type value;
+      mutable bool value_set;
+      mutable bool value_initialized_;
     };
 
     // var_list is a list<variant<var<T>...>> for all valid var types
