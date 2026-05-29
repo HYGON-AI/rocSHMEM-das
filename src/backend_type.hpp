@@ -70,6 +70,17 @@ namespace rocshmem {
     static_cast<IPCContext *>(this)->Func; \
     break;                                 \
   }
+#elif defined(USE_GDA) && defined(USE_IPC)
+#define DISPATCH(Func)                     \
+  switch(this->btype) {                    \
+  case BackendType::GDA_BACKEND:           \
+    static_cast<GDAContext *>(this)->Func; \
+    break;                                 \
+  case BackendType::IPC_BACKEND:           \
+  default:                                 \
+    static_cast<IPCContext *>(this)->Func; \
+    break;                                 \
+  }
 #elif defined(USE_GDA)
 #define DISPATCH(Func)                     \
   static_cast<GDAContext *>(this)->Func;
@@ -92,6 +103,15 @@ namespace rocshmem {
   } else if(this->btype == BackendType::RO_BACKEND) {     \
     auto ret2 = static_cast<ROContext *>(this)->Func;     \
     return ret2;                                          \
+  } else {                                                \
+    auto ret3 = static_cast<IPCContext *>(this)->Func;    \
+    return ret3;                                          \
+  }
+#elif defined(USE_GDA) && defined(USE_IPC)
+#define DISPATCH_RET(Func)                                \
+  if (this->btype == BackendType::GDA_BACKEND) {          \
+    auto ret1 = static_cast<GDAContext *>(this)->Func;    \
+    return ret1;                                          \
   } else {                                                \
     auto ret3 = static_cast<IPCContext *>(this)->Func;    \
     return ret3;                                          \
@@ -122,6 +142,19 @@ namespace rocshmem {
     break;                                           \
   case BackendType::RO_BACKEND:                      \
     ret_val = static_cast<ROContext *>(this)->Func;  \
+    break;                                           \
+  case BackendType::IPC_BACKEND:                     \
+  default:                                           \
+    ret_val = static_cast<IPCContext *>(this)->Func; \
+    break;                                           \
+  }                                                  \
+  return ret_val;
+#elif defined(USE_GDA) && defined(USE_IPC)
+#define DISPATCH_RET_PTR(Func)                       \
+  void *ret_val{nullptr};                            \
+  switch(this->btype) {                              \
+  case BackendType::GDA_BACKEND:                     \
+    ret_val = static_cast<GDAContext *>(this)->Func; \
     break;                                           \
   case BackendType::IPC_BACKEND:                     \
   default:                                           \
@@ -167,6 +200,17 @@ namespace rocshmem {
     static_cast<IPCHostContext *>(this)->Func; \
     break;                                     \
   }
+#elif defined(USE_GDA) && defined(USE_IPC)
+#define HOST_DISPATCH(Func)                    \
+  switch(this->btype) {                        \
+  case BackendType::GDA_BACKEND:               \
+    static_cast<GDAHostContext *>(this)->Func; \
+    break;                                     \
+  case BackendType::IPC_BACKEND:               \
+  default:                                     \
+    static_cast<IPCHostContext *>(this)->Func; \
+    break;                                     \
+  }
 #elif defined(USE_GDA)
 #define HOST_DISPATCH(Func) static_cast<GDAHostContext *>(this)->Func;
 #elif defined(USE_RO)
@@ -190,6 +234,15 @@ namespace rocshmem {
   } else if (this->btype == BackendType::RO_BACKEND) {        \
     auto ret2 = static_cast<ROHostContext *>(this)->Func;     \
     return ret2;                                              \
+  } else {                                                    \
+    auto ret3 = static_cast<IPCHostContext *>(this)->Func;    \
+    return ret3;                                              \
+  }
+#elif defined(USE_GDA) && defined(USE_IPC)
+#define HOST_DISPATCH_RET(Func)                               \
+  if (this->btype == BackendType::GDA_BACKEND) {              \
+    auto ret1 = static_cast<GDAHostContext *>(this)->Func;    \
+    return ret1;                                              \
   } else {                                                    \
     auto ret3 = static_cast<IPCHostContext *>(this)->Func;    \
     return ret3;                                              \
@@ -220,6 +273,19 @@ namespace rocshmem {
     break;                                               \
   case BackendType::RO_BACKEND:                          \
     ret_val = static_cast<ROHostContext *>(this)->Func;  \
+    break;                                               \
+  case BackendType::IPC_BACKEND:                         \
+  default:                                               \
+    ret_val = static_cast<IPCHostContext *>(this)->Func; \
+    break;                                               \
+  }                                                      \
+  return ret_val;
+#elif defined(USE_GDA) && defined(USE_IPC)
+#define HOST_DISPATCH_RET_PTR(Func)                      \
+  void *ret_val{nullptr};                                \
+  switch(this->btype) {                                  \
+  case BackendType::GDA_BACKEND:                         \
+    ret_val = static_cast<GDAHostContext *>(this)->Func; \
     break;                                               \
   case BackendType::IPC_BACKEND:                         \
   default:                                               \
