@@ -141,6 +141,30 @@ static BackendType select_backend_type(MPI_Comm comm, TcpBootstrap *bootstrap) {
   // Return code left in to satisfy compiler.
   return BackendType::IPC_BACKEND;
 }
+#elif defined(USE_GDA) && defined(USE_IPC)
+static BackendType select_backend_type() {
+  BackendType type;
+
+  /* Check whether the user explicitely requests a particular backend type */
+  std::string envstr = envvar::backend;
+  std::transform(envstr.begin(), envstr.end(), envstr.begin(), ::tolower);
+  if (!envstr.empty()) {
+    DPRINTF("Found environment variable ROCSHMEM_BACKEND, value is %s\n", envstr.c_str());
+    if (envstr.find("gda") != std::string::npos) {
+      return BackendType::GDA_BACKEND;
+    }
+    if (envstr.find("ipc") != std::string::npos) {
+      return BackendType::IPC_BACKEND;
+    }
+  }
+
+  if (GDABackend::backend_can_run() == ROCSHMEM_SUCCESS) {
+    DPRINTF("GDABackend::backend_can_run returned success\n");
+    return BackendType::GDA_BACKEND;
+  }
+
+  return BackendType::IPC_BACKEND;
+}
 #endif
 static void setFilesLimit() {
   rlimit filesLimit;
@@ -218,6 +242,20 @@ static void setFilesLimit() {
     break;
   case BackendType::IPC_BACKEND:
     LOG_INFO("Initializing IPC backend using MPI");
+    CHECK_HIP(hipHostMalloc(&backend, sizeof(IPCBackend)));
+    backend = new (backend) IPCBackend(comm);
+    break;
+  }
+#elif defined(USE_GDA) && defined(USE_IPC)
+  BackendType type = select_backend_type();
+  switch (type) {
+  case BackendType::GDA_BACKEND:
+    DPRINTF("Initializing GDA backend using MPI\n");
+    CHECK_HIP(hipHostMalloc(&backend, sizeof(GDABackend)));
+    backend = new (backend) GDABackend(comm);
+    break;
+  case BackendType::IPC_BACKEND:
+    DPRINTF("Initializing IPC backend using MPI\n");
     CHECK_HIP(hipHostMalloc(&backend, sizeof(IPCBackend)));
     backend = new (backend) IPCBackend(comm);
     break;
@@ -344,6 +382,20 @@ static void setFilesLimit() {
     break;
   case BackendType::IPC_BACKEND:
     LOG_INFO("Initializing IPC backend with TCP bootstrapping");
+    CHECK_HIP(hipHostMalloc(&backend, sizeof(IPCBackend)));
+    backend = new (backend) IPCBackend(bootstrap);
+    break;
+  }
+#elif defined(USE_GDA) && defined(USE_IPC)
+  BackendType type = select_backend_type();
+  switch (type) {
+  case BackendType::GDA_BACKEND:
+    DPRINTF("Initializing GDA backend with TCP bootstrapping\n");
+    CHECK_HIP(hipHostMalloc(&backend, sizeof(GDABackend)));
+    backend = new (backend) GDABackend(bootstrap);
+    break;
+  case BackendType::IPC_BACKEND:
+    DPRINTF("Initializing IPC backend with TCP bootstrapping\n");
     CHECK_HIP(hipHostMalloc(&backend, sizeof(IPCBackend)));
     backend = new (backend) IPCBackend(bootstrap);
     break;
