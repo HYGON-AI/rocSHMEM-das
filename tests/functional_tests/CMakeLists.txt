@@ -30,6 +30,9 @@ cmake_minimum_required(VERSION 3.16.3 FATAL_ERROR)
 include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
 project(rocshmem_functional_tests VERSION 1.0.0 LANGUAGES CXX)
 
+# ASAN option (if not already defined by parent project)
+option(ASAN "Enable AddressSanitizer" ${ASAN})
+
 ###############################################################################
 # SOURCES
 ###############################################################################
@@ -120,6 +123,21 @@ if(${ROCM_MAJOR_VERSION} LESS 7)
   # ROCm 6.x requires us to explicitly enable warp sync builtins
   target_compile_definitions(${PROJECT_NAME} PRIVATE HIP_ENABLE_WARP_SYNC_BUILTINS=1)
 endif()
+
+###############################################################################
+# ASAN SETTINGS
+###############################################################################
+target_compile_options(
+  ${PROJECT_NAME}
+  PRIVATE
+    $<$<BOOL:${ASAN}>:-fsanitize=address -g>
+)
+
+target_link_options(
+  ${PROJECT_NAME}
+  PRIVATE
+    $<$<BOOL:${ASAN}>:-fsanitize=address -g -shared-libsan>
+)
 
 ###############################################################################
 # DEVICE BITCODE TESTER (put/get via HSACO + rocshmem_hipmodule_init)
