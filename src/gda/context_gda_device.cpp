@@ -516,7 +516,7 @@ __device__ void GDAContext::internal_getmem_wg(void *dest, const void *source,
     ipcImpl_.ipcCopy_wg(dest, ipcImpl_.ipc_bases[local_pe] + L_offset, nelems);
     return;
   }
-  if (is_wave_zero_in_block()) {
+  if (is_thread_zero_in_block()) {
     uint64_t L_offset = const_cast<char *>(src_typed) - base_heap[my_pe];
     qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, pe, wf_info);
     qps[qp_index].quiet(wf_info);
@@ -587,7 +587,7 @@ __device__ void GDAContext::internal_putmem_nbi_wg(void *dest, const void *sourc
     ipcImpl_.ipcCopy_wg(ipcImpl_.ipc_bases[local_pe] + L_offset, const_cast<void *>(source), nelems);
     return;
   }
-  if (is_wave_zero_in_block()) {
+  if (is_thread_zero_in_block()) {
     uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[my_pe];
     qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, pe, wf_info);
   }
@@ -602,7 +602,7 @@ __device__ void GDAContext::internal_getmem_nbi_wg(void *dest, const void *sourc
     ipcImpl_.ipcCopy_wg(dest, ipcImpl_.ipc_bases[local_pe] + L_offset, nelems);
     return;
   }
-  if (is_wave_zero_in_block()) {
+  if (is_thread_zero_in_block()) {
     uint64_t L_offset = const_cast<char *>(src_typed) - base_heap[my_pe];
     qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, pe, wf_info);
   }
