@@ -101,7 +101,9 @@ __device__ void GDAContext::internal_direct_barrier_wg(int pe, int PE_start,
     for (int i = wf_id + 1, j = PE_start + stride + wf_id;
              i < n_pes;
              i+= wf_count, j += (wf_count * stride)) {
-      qps[j].quiet(wf_info);
+      if (is_thread_zero_in_wave()) {
+        qps[j].quiet(wf_info);
+      }
     }
 
     __syncthreads();
@@ -244,7 +246,7 @@ __device__ void GDAContext::barrier_all_wave() {
 }
 
 __device__ void GDAContext::barrier_all_wg() {
-  if (is_wave_zero_in_block()) {
+  if (is_thread_zero_in_block()) {
     quiet();
   }
   sync_all_wg();
@@ -289,7 +291,7 @@ __device__ void GDAContext::barrier_wg(rocshmem_team_t team) {
   long *p_sync = team_obj->barrier_pSync;
 
   ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
-  if (is_wave_zero_in_block()) {
+  if (is_thread_zero_in_block()) {
     internal_quiet(wf_info);
   }
   internal_sync_wg(pe, pe_start, pe_stride, pe_size, p_sync, wf_info);
