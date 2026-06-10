@@ -75,6 +75,7 @@
 #include "tile_rma_tester.hpp"
 #include "reduce_on_stream_tester.hpp"
 #include "host_ctx_create_tester.hpp"
+#include "team_split_2d_tester.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -743,6 +744,9 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case HostCtxCreateTestType:
       test_name = "Host CTX Create";
       testers.push_back(new HostCtxCreateTester(args));
+    case TeamSplit2DTestType:
+      test_name = "Team Split 2D";
+      testers.push_back(new TeamSplit2DTester(args));
       break;
     default:
       test_name = "Empty";
@@ -831,7 +835,8 @@ void Tester::execute() {
         _type != TeamCtxInfraOddEvenTestType &&
         _type != TeamCtxSharedInfraTestType &&
         _type != TeamCtxSubsetParentInfraTestType &&
-        _type != HostCtxCreateTestType) {
+        _type != HostCtxCreateTestType &&
+        _type != TeamSplit2DTestType  ) {
       print(size);
     }
   }
