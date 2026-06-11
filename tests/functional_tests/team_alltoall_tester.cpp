@@ -101,7 +101,7 @@ TeamAlltoallTester<T1>::TeamAlltoallTester(TesterArguments args)
   my_pe = rocshmem_team_my_pe(ROCSHMEM_TEAM_WORLD);
   n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
 
-  bw_factor = n_pes;
+  // bw_factor = n_pes; // bw_factor=1: Compute single-device performance by default.
   size_factor = n_pes;
 
   // Number of elements per work group
