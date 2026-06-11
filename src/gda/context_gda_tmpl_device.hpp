@@ -889,14 +889,19 @@ __device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team,
   int tid = get_flat_block_id();
   int step_size = min(get_flat_block_size(), WF_SIZE);
 
+  int* qp_indices = reinterpret_cast<int*>(team_obj->pWrk);
+
   // Have each PE put their designated data to the other PEs
   for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
+    ActiveWFInfo wf_info(dest_pe);
+    int qp_index = get_qp_index(dest_pe, wf_info);
+    qp_indices[j] = qp_index;
     uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[my_pe];
-    qps[dest_pe].put_nbi_single(
+    qps[qp_index].put_nbi_single(
       reinterpret_cast<char*>(&dst[my_pe_in_team * nelems]) + base_heap_offset,
       &src[j * nelems], nelems * sizeof(T), false);
-    qps[dest_pe].atomic_nofetch_single(
+    qps[qp_index].atomic_nofetch_single(
       reinterpret_cast<char *>(&pSync[alltoall_pSync_offset + my_pe_in_team]) +
       base_heap_offset, 1);
   }
@@ -908,7 +913,7 @@ __device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team,
     volatile long *vol_ivars = &pSync[alltoall_pSync_offset + dest_pe];
     while (uncached_load(vol_ivars) != 1) { }
 
-    qps[dest_pe].quiet_single();
+    qps[qp_indices[j]].quiet_single();
 
     pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
   }
