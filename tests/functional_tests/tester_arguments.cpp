@@ -216,6 +216,7 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     case TeamCtxInfraBlockTestType:
     case TeamCtxInfraOddEvenTestType:
     case TeamCtxSubsetParentInfraTestType:
+    case HostTeamSyncBarrierTestType:
       max_msg_size = min_msg_size;
       break;
     case FenceOrderPutWaveNbiChunksTestType:
@@ -317,6 +318,7 @@ void TesterArguments::get_arguments() {
     case TeamCtxSharedInfraTestType:
     case FenceOrderFanoutTestType:
     case TeamSplit2DTestType:
+    case HostTeamSyncBarrierTestType:
       requires_two_pes = false;
       break;
     default:

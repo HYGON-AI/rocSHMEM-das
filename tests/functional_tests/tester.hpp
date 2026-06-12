@@ -158,13 +158,14 @@
   X(TileGetWaveContiguous,     113)  \
   X(TileGetRowMajor,           114)  \
   X(TileGetColumnMajor,        115)  \
-  X(TileGetArbitrary,          116) \
-  X(ReduceOnStream,            117) \
-  X(HostCtxCreate,             118) \
-  X(TeamSplit2D,               119) \
-  X(DefaultCtx_WAVEPutNBI_DP,  200) \
-  X(DefaultCtx_AMO_Add_DP,     201) \
-  X(WAVEPutNBI_DP,             202) \
+  X(TileGetArbitrary,          116)  \
+  X(ReduceOnStream,            117)  \
+  X(HostCtxCreate,             118)  \
+  X(TeamSplit2D,               119)  \
+  X(HostTeamSyncBarrier,       120)  \
+  X(DefaultCtx_WAVEPutNBI_DP,  200)  \
+  X(DefaultCtx_AMO_Add_DP,     201)  \
+  X(WAVEPutNBI_DP,             202)  \
   X(AMO_Add_DP,                203) 
 
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
