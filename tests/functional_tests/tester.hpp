@@ -163,10 +163,21 @@
   X(HostCtxCreate,             118)  \
   X(TeamSplit2D,               119)  \
   X(HostTeamSyncBarrier,       120)  \
+  X(HostPutmem,                121)  \
+  X(HostGetmem,                122)  \
+  X(HostAmoFAdd,               123)  \
+  X(HostAmoFCswap,             124)  \
+  X(HostCtxPutmem,             125)  \
+  X(HostCtxGetmem,             126)  \
+  X(HostIntAmoFAdd,            127)  \
+  X(HostIntAmoFCswap,          128)  \
+  X(HostAmoAllPes,             129)  \
+  X(HostAmoSelf,               130)  \
   X(DefaultCtx_WAVEPutNBI_DP,  200)  \
   X(DefaultCtx_AMO_Add_DP,     201)  \
   X(WAVEPutNBI_DP,             202)  \
   X(AMO_Add_DP,                203) 
+
 
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {
