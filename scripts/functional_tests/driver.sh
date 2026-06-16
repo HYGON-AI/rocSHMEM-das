@@ -280,6 +280,9 @@ TestRMAPut() {
   ExecTest  "teamctxput"       2       4            128       1024
   ExecTest  "teamctxput"       2       16           256       1024
 
+  ExecTest  "defaultctxp"      2       4            128       1024
+  ExecTest  "defaultctxg"      2       4            128       1024
+
   ExecTest  "wgput"            2       1            64        1048576
   ExecTest  "wgput"            2       2            64        1048576
   ExecTest  "wgput"            2       16           64        8
@@ -301,6 +304,8 @@ TestRMAPut() {
   ExecTest  "putnbi"           2       16           128       8
   ExecTest  "putnbi"           2       32           256       512
   ExecTest  "putnbi"           2       64           1024      8
+
+  ExecTest  "putnbimr"         2       16           128       1048576
 
   ExecTest  "defaultctxputnbi" 2       4            128       1024
   ExecTest  "teamctxputnbi"    2       4            128       1024
@@ -420,6 +425,11 @@ TestAMO() {
   ExecTest  "amo_fetchand"     2       1            1
 
   ExecTest  "amo_xor"          2       1            1
+
+  ExecTest  "amo_swap"         2       1            1
+  ExecTest  "amo_fetchor"      2       1            1
+  ExecTest  "amo_fetchxor"     2       1            1
+  ExecTest  "amo_or"           2       1            1
 }
 
 TestSigOps() {
@@ -538,6 +548,8 @@ TestOther() {
   ExecTest  "pingall"          2       1            1
   ExecTest  "pingall"          2       8            1
   ExecTest  "pingall"          2       32           1
+
+  ExecTest  "randomaccess"     2       8            128       1048576
 
   ################################ Flood test ##################################
   if [[ $TEST != ro* ]]; then #AIROCSHMEM-324
