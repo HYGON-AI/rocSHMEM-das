@@ -221,6 +221,16 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
         std::cout << "Default context Non-Blocking Puts ###" << std::endl;
       testers.push_back(new DefaultCTXPrimitiveTester(args));
       return testers;
+    case DefaultCTXPTestType:
+      if (rank == 0)
+        std::cout << "Default context P ###" << std::endl;
+      testers.push_back(new DefaultCTXPrimitiveTester(args));
+      return testers;
+    case DefaultCTXGTestType:
+      if (rank == 0)
+        std::cout << "Default context G ###" << std::endl;
+      testers.push_back(new DefaultCTXPrimitiveTester(args));
+      return testers;
     case TeamCtxInfraTestType:
       if (rank == 0) std::cout << "Team Ctx Infra test ###" << std::endl;
       testers.push_back(new TeamCtxInfraTester(args));
