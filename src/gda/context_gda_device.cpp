@@ -117,7 +117,7 @@ __device__ void GDAContext::putmem(void *dest, const void *source, size_t nelems
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
   uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[constmem.my_pe];
-  qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, pe, wf_info);
+  qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, wf_info);
   qps[qp_index].quiet(wf_info);
 }
 
@@ -133,7 +133,7 @@ __device__ void GDAContext::getmem(void *dest, const void *source, size_t nelems
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
   uint64_t L_offset = const_cast<char *>(src_typed) - base_heap[constmem.my_pe];
-  qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, pe, wf_info);
+  qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, wf_info);
   qps[qp_index].quiet(wf_info);
 }
 
@@ -148,7 +148,7 @@ __device__ void GDAContext::putmem_nbi(void *dest, const void *source,
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
   uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[constmem.my_pe];
-  qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, pe, wf_info);
+  qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, wf_info);
 }
 
 __device__ void GDAContext::getmem_nbi(void *dest, const void *source,
@@ -163,7 +163,7 @@ __device__ void GDAContext::getmem_nbi(void *dest, const void *source,
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
   uint64_t L_offset = const_cast<char *>(src_typed) - base_heap[constmem.my_pe];
-  qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, pe, wf_info);
+  qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, wf_info);
 }
 
 __device__ void GDAContext::fence() {
@@ -271,7 +271,7 @@ __device__ void GDAContext::putmem_wg(void *dest, const void *source,
     uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[constmem.my_pe];
     ActiveWFInfo wf_info(pe, ThreadScope::wg);
     int qp_index = get_qp_index(pe, wf_info);
-    qps[qp_index].put_nbi(get_remote_ptr(dest, pe), source, nelems, pe, wf_info);
+    qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, wf_info);
     qps[qp_index].quiet(wf_info);
   }
 }
@@ -286,9 +286,10 @@ __device__ void GDAContext::getmem_wg(void *dest, const void *source,
     return;
   }
   if (is_thread_zero_in_block()) {
+    uint64_t L_offset = const_cast<char *>(src_typed) - base_heap[constmem.my_pe];
     ActiveWFInfo wf_info(pe, ThreadScope::wg);
     int qp_index = get_qp_index(pe, wf_info);
-    qps[qp_index].get_nbi(dest, get_remote_ptr(source, pe), nelems, pe, wf_info);
+    qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, wf_info);
     qps[qp_index].quiet(wf_info);
   }
 }
@@ -302,9 +303,10 @@ __device__ void GDAContext::putmem_nbi_wg(void *dest, const void *source,
     return;
   }
   if (is_thread_zero_in_block()) {
+    uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[constmem.my_pe];
     ActiveWFInfo wf_info(pe, ThreadScope::wg);
     int qp_index = get_qp_index(pe, wf_info);
-    qps[qp_index].put_nbi(get_remote_ptr(dest, pe), source, nelems, pe, wf_info);
+    qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, wf_info);
   }
 }
 
@@ -318,9 +320,10 @@ __device__ void GDAContext::getmem_nbi_wg(void *dest, const void *source,
     return;
   }
   if (is_thread_zero_in_block()) {
+    uint64_t L_offset = const_cast<char *>(src_typed) - base_heap[constmem.my_pe];
     ActiveWFInfo wf_info(pe, ThreadScope::wg);
     int qp_index = get_qp_index(pe, wf_info);
-    qps[qp_index].get_nbi(dest, get_remote_ptr(source, pe), nelems, pe, wf_info);
+    qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, wf_info);
   }
 }
 
@@ -336,7 +339,7 @@ __device__ void GDAContext::putmem_wave(void *dest, const void *source,
     ActiveWFInfo wf_info(pe, ThreadScope::wave);
     int qp_index = get_qp_index(pe, wf_info);
     uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[constmem.my_pe];
-    qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, pe, wf_info);
+    qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, wf_info);
     qps[qp_index].quiet(wf_info);
   }
 }
@@ -354,7 +357,7 @@ __device__ void GDAContext::getmem_wave(void *dest, const void *source,
     ActiveWFInfo wf_info(pe, ThreadScope::wave);
     int qp_index = get_qp_index(pe, wf_info);
     uint64_t L_offset = const_cast<char *>(src_typed) - base_heap[constmem.my_pe];
-    qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, pe, wf_info);
+    qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, wf_info);
     qps[qp_index].quiet(wf_info);
   }
 }
@@ -372,7 +375,7 @@ __device__ void GDAContext::putmem_nbi_wave(void *dest, const void *source,
     ActiveWFInfo wf_info(pe, ThreadScope::wave);
     int qp_index = get_qp_index(pe, wf_info);
     uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[constmem.my_pe];
-    qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, pe, wf_info);
+    qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, wf_info);
   }
 }
 
@@ -401,7 +404,7 @@ __device__ void GDAContext::getmem_nbi_wave(void *dest, const void *source,
     ActiveWFInfo wf_info(pe, ThreadScope::wave);
     int qp_index = get_qp_index(pe, wf_info);
     uint64_t L_offset = const_cast<char *>(src_typed) - base_heap[constmem.my_pe];
-    qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, pe, wf_info);
+    qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, wf_info);
   }
 }
 
@@ -539,7 +542,7 @@ __device__ void GDAContext::internal_putmem(void *dest, const void *source, size
     return;
   }
   uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[constmem.my_pe];
-  qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, pe, wf_info);
+  qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, wf_info);
   qps[qp_index].quiet(wf_info);
 }
 
@@ -553,7 +556,7 @@ __device__ void GDAContext::internal_getmem(void *dest, const void *source, size
     return;
   }
   uint64_t L_offset = const_cast<char *>(src_typed) - base_heap[constmem.my_pe];
-  qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, pe, wf_info);
+  qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, wf_info);
   qps[qp_index].quiet(wf_info);
 }
 
@@ -567,7 +570,7 @@ __device__ void GDAContext::internal_putmem_wg(void *dest, const void *source,
   }
   if (is_thread_zero_in_block()) {
     uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[constmem.my_pe];
-    qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, pe, wf_info);
+    qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, wf_info);
     qps[qp_index].quiet(wf_info);
   }
 }
@@ -583,7 +586,7 @@ __device__ void GDAContext::internal_getmem_wg(void *dest, const void *source,
   }
   if (is_thread_zero_in_block()) {
     uint64_t L_offset = const_cast<char *>(src_typed) - base_heap[constmem.my_pe];
-    qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, pe, wf_info);
+    qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, wf_info);
     qps[qp_index].quiet(wf_info);
   }
 }
@@ -598,7 +601,7 @@ __device__ void GDAContext::internal_putmem_wave(void *dest, const void *source,
   }
   if (is_thread_zero_in_wave()) {
     uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[constmem.my_pe];
-    qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, pe, wf_info);
+    qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, wf_info);
     qps[qp_index].quiet(wf_info);
   }
 }
@@ -614,7 +617,7 @@ __device__ void GDAContext::internal_getmem_wave(void *dest, const void *source,
   }
   if (is_thread_zero_in_wave()) {
     uint64_t L_offset = const_cast<char *>(src_typed) - base_heap[constmem.my_pe];
-    qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, pe, wf_info);
+    qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, wf_info);
     qps[qp_index].quiet(wf_info);
   }
 }
@@ -628,7 +631,7 @@ __device__ void GDAContext::internal_putmem_nbi(void *dest, const void *source, 
     return;
   }
   uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[constmem.my_pe];
-  qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, pe, wf_info);
+  qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, wf_info);
 }
 
 __device__ void GDAContext::internal_getmem_nbi(void *dest, const void *source, size_t nelems,
@@ -641,7 +644,7 @@ __device__ void GDAContext::internal_getmem_nbi(void *dest, const void *source, 
     return;
   }
   uint64_t L_offset = const_cast<char *>(src_typed) - base_heap[constmem.my_pe];
-  qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, pe, wf_info);
+  qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, wf_info);
 }
 
 __device__ void GDAContext::internal_putmem_nbi_wg(void *dest, const void *source,
@@ -654,7 +657,7 @@ __device__ void GDAContext::internal_putmem_nbi_wg(void *dest, const void *sourc
   }
   if (is_thread_zero_in_block()) {
     uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[constmem.my_pe];
-    qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, pe, wf_info);
+    qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, wf_info);
   }
 }
 
@@ -669,7 +672,7 @@ __device__ void GDAContext::internal_getmem_nbi_wg(void *dest, const void *sourc
   }
   if (is_thread_zero_in_block()) {
     uint64_t L_offset = const_cast<char *>(src_typed) - base_heap[constmem.my_pe];
-    qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, pe, wf_info);
+    qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, wf_info);
   }
 }
 
@@ -683,7 +686,7 @@ __device__ void GDAContext::internal_putmem_nbi_wave(void *dest, const void *sou
   }
   if (is_thread_zero_in_wave()) {
     uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[constmem.my_pe];
-    qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, pe, wf_info);
+    qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, wf_info);
   }
 }
 
@@ -698,7 +701,7 @@ __device__ void GDAContext::internal_getmem_nbi_wave(void *dest, const void *sou
   }
   if (is_thread_zero_in_wave()) {
     uint64_t L_offset = const_cast<char *>(src_typed) - base_heap[constmem.my_pe];
-    qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, pe, wf_info);
+    qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, wf_info);
   }
 }
 
