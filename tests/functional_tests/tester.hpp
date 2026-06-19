@@ -173,11 +173,16 @@
   X(HostIntAmoFCswap,          128)  \
   X(HostAmoAllPes,             129)  \
   X(HostAmoSelf,               130)  \
+  X(TileBroadcast,             131)  \
+  X(TileBroadcastWave,         132)  \
+  X(TileBroadcastWG,           133)  \
+  X(TileAllgather,             134)  \
+  X(TileAllgatherWave,         135)  \
+  X(TileAllgatherWG,           136)  \
   X(DefaultCtx_WAVEPutNBI_DP,  200)  \
   X(DefaultCtx_AMO_Add_DP,     201)  \
   X(WAVEPutNBI_DP,             202)  \
   X(AMO_Add_DP,                203) 
-
 
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {
