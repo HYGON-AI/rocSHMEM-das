@@ -85,7 +85,7 @@ public:
 
   void* GetHandleVecElem(int elem)
   {
-    return reinterpret_cast<void*> (&this->handle[elem]);
+    return reinterpret_cast<void*> (&this->handle.at(elem));
   }
 
 protected:
@@ -102,7 +102,7 @@ public:
 
   void* GetHandleVecElem(int elem)
   {
-    return reinterpret_cast<void*> (&this->handle[elem]);
+    return reinterpret_cast<void*> (&this->handle.at(elem));
   }
 
 protected:
@@ -319,7 +319,7 @@ public:
 
   void* GetHandleVecElem(int elem) override
   {
-    return reinterpret_cast<void*>(&this->handle[elem]);
+    return reinterpret_cast<void*>(&this->handle.at(elem));
   }
 
 protected:
