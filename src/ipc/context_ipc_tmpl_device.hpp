@@ -37,6 +37,9 @@
 
 namespace rocshmem {
 
+// Pipeline chunk size for large messages (256KB)
+constexpr size_t ROCSHMEM_CHUNK_BYTES = 262144;
+
 /******************************************************************************
  ************************** TEMPLATE SPECIALIZATIONS **************************
  *****************************************************************************/
@@ -418,10 +421,31 @@ __device__ void IPCContext::internal_put_broadcast(
     T *dst, const T *src, int nelems, int pe_root, int pe_start,
     int stride, int pe_size) {  // NOLINT(runtime/int)
   if (my_pe == pe_root) {
-    int finish = pe_start + stride * pe_size;
-    for (int i = pe_start; i < finish; i += stride) {
-      if (i != my_pe) {
-        put_nbi_wg(dst, src, nelems, i);
+    // pipeline chunking for large messages
+    constexpr int CHUNK_NELEMS = ROCSHMEM_CHUNK_BYTES / sizeof(T);
+    const bool use_pipeline = (nelems > CHUNK_NELEMS);
+
+    int wf_id = get_flat_block_id() / WF_SIZE;
+    int wf_count = (get_flat_block_size() + WF_SIZE - 1) / WF_SIZE;
+
+    if (!use_pipeline) {
+      int finish = pe_start + stride * pe_size;
+      for (int i = pe_start + wf_id * stride; i < finish; i += stride * wf_count) {
+        if (i != my_pe) {
+          put_nbi_wave(dst, src, nelems, i);
+        }
+      }
+    } else {
+      for (int c_start = 0; c_start < nelems; c_start += CHUNK_NELEMS) {
+        int c_end = min(c_start + CHUNK_NELEMS, nelems);
+        int c_nelems = c_end - c_start;
+
+        int finish = pe_start + stride * pe_size;
+        for (int i = pe_start + wf_id * stride; i < finish; i += stride * wf_count) {
+          if (i != my_pe) {
+            put_nbi_wave(&dst[c_start], &src[c_start], c_nelems, i);
+          }
+        }
       }
     }
   }
@@ -493,14 +517,37 @@ __device__ void IPCContext::alltoall_linear(rocshmem_team_t team, T *dst,
   long *pSync = team_obj->alltoall_pSync;
   int my_pe_in_team = team_obj->my_pe;
 
-  // Have each PE put their designated data to the other PEs
-  for (int j = 0; j < pe_size; j++) {
-    int dest_pe = team_obj->get_pe_in_world(j);
-    put_nbi_wg(&dst[my_pe_in_team * nelems], &src[j * nelems], nelems, dest_pe);
+  // pipeline chunking for large messages
+  constexpr int CHUNK_NELEMS = ROCSHMEM_CHUNK_BYTES / sizeof(T);
+  const bool use_pipeline = (nelems > CHUNK_NELEMS);
+
+  int wf_id = get_flat_block_id() / WF_SIZE;
+  int wf_count = (get_flat_block_size() + WF_SIZE - 1) / WF_SIZE;
+
+  if (!use_pipeline) {
+    for (int j = wf_id; j < pe_size; j += wf_count) {
+      int dest_pe = team_obj->get_pe_in_world(j);
+      put_nbi_wave(&dst[my_pe_in_team * nelems], &src[j * nelems], nelems, dest_pe);
+    }
+  } else {
+    for (int c_start = 0; c_start < nelems; c_start += CHUNK_NELEMS) {
+      int c_end = min(c_start + CHUNK_NELEMS, nelems);
+      int c_nelems = c_end - c_start;
+
+      for (int j = wf_id; j < pe_size; j += wf_count) {
+        int dest_pe = team_obj->get_pe_in_world(j);
+        put_nbi_wave(&dst[my_pe_in_team * nelems + c_start],
+                     &src[j * nelems + c_start],
+                     c_nelems, dest_pe);
+      }
+    }
   }
-  if (is_thread_zero_in_block()) {
-    quiet();
-  }
+
+  /* internal_sync_wg has threadfence_system */
+  //  if (is_thread_zero_in_block()) {
+  //    quiet();
+  //  }
+
   // wait until everyone has obtained their designated data
   internal_sync_wg(my_pe, pe_start, stride, pe_size, pSync);
 }
@@ -522,15 +569,32 @@ __device__ void IPCContext::fcollect_linear(rocshmem_team_t team, T *dst,
   long *pSync = team_obj->alltoall_pSync;
   int my_pe_in_team = team_obj->my_pe;
 
-  // Have each PE put their designated data to the other PEs
-  for (int j = 0; j < pe_size; j++) {
-    int dest_pe = team_obj->get_pe_in_world(j);
-    put_nbi_wg(&dst[my_pe_in_team * nelems], src, nelems, dest_pe);
+  // pipeline chunking for large messages
+  constexpr int CHUNK_NELEMS = ROCSHMEM_CHUNK_BYTES / sizeof(T);
+  const bool use_pipeline = (nelems > CHUNK_NELEMS);
+
+  int wf_id = get_flat_block_id() / WF_SIZE;
+  int wf_count = (get_flat_block_size() + WF_SIZE - 1) / WF_SIZE;
+
+  if (!use_pipeline) {
+    for (int j = wf_id; j < pe_size; j += wf_count) {
+      int dest_pe = team_obj->get_pe_in_world(j);
+      put_nbi_wave(&dst[my_pe_in_team * nelems], src, nelems, dest_pe);
+    }
+  } else {
+    for (int c_start = 0; c_start < nelems; c_start += CHUNK_NELEMS) {
+      int c_end = min(c_start + CHUNK_NELEMS, nelems);
+      int c_nelems = c_end - c_start;
+
+      for (int j = wf_id; j < pe_size; j += wf_count) {
+        int dest_pe = team_obj->get_pe_in_world(j);
+        put_nbi_wave(&dst[my_pe_in_team * nelems + c_start],
+                     &src[c_start],
+                     c_nelems, dest_pe);
+      }
+    }
   }
 
-  if (is_thread_zero_in_block()) {
-    quiet();
-  }
   // wait until everyone has obtained their designated data
   internal_sync_wg(my_pe, pe_start, stride, pe_size, pSync);
 }
@@ -598,3 +662,4 @@ IPC_CONTEXT_PUT_SIGNAL_DEF(_wave)
 }  // namespace rocshmem
 
 #endif  // LIBRARY_SRC_IPC_CONTEXT_TMPL_DEVICE_HPP_
+
