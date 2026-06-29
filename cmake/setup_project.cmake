@@ -83,7 +83,7 @@ message(STATUS "ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM
 
 # Use hipcc from our rocm install
 if (NOT DEFINED CMAKE_CXX_COMPILER)
-  find_program(CMAKE_CXX_COMPILER hipcc PATHS /opt/dtk/bin/)
+  find_program(CMAKE_CXX_COMPILER hipcc)
 endif()
 
 ###############################################################################

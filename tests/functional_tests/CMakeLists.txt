@@ -87,10 +87,10 @@ target_sources(
 ###############################################################################
 if (BUILD_TESTS_ONLY)
   #TODO these find_packages should be performed as-needed in rocshmem-config.cmake
-  find_package(hip REQUIRED PATHS ${ROCM_PATH})
+  find_package(hip REQUIRED)
   find_package(MPI)
   find_package(Threads REQUIRED)
-  find_package(rocshmem REQUIRED PATHS ${ROCM_PATH})
+  find_package(rocshmem REQUIRED)
 
   target_include_directories(
     ${PROJECT_NAME}
