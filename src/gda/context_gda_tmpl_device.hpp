@@ -423,7 +423,7 @@ __device__ void GDAContext::internal_direct_allreduce(T *dst, const T *src,
 
   __syncthreads();
 
-  for (int i = wg_id; i < num_pes; i += wg_size) {
+  for (int i = wg_id; i < PE_size; i += wg_size) {
     pSync[i] = ROCSHMEM_SYNC_VALUE;
   }
   threadfence_system();
@@ -559,7 +559,7 @@ __device__ void GDAContext::internal_ring_allreduce(T *dst, const T *src,
   }
   __syncthreads();
 
-  for (int i = wg_id; i < 2 * num_pes - 2; i += wg_size) {
+  for (int i = wg_id; i < 2 * PE_size - 2; i += wg_size) {
     pSync[i] = ROCSHMEM_SYNC_VALUE;
   }
   __syncthreads();
@@ -575,16 +575,23 @@ __device__ int GDAContext::reduce(rocshmem_team_t team, T *dest,
   size_t direct_pWrk = PE_size * nreduce;
   size_t direct_pSync = PE_size;
   size_t ring_pSync = 2 * PE_size;
-  size_t provided_pWrk = max(nreduce / 2 + 1, ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE);
+  size_t provided_pWrk = ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
   size_t provided_pSync = ROCSHMEM_REDUCE_SYNC_SIZE;
 
   ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
 
-  if (provided_pWrk >= direct_pWrk && provided_pSync >= direct_pSync) {
+  // Messages above DIRECT_MAX use ring. default 8192 (8KB).
+  constexpr int DIRECT_MAX_NELEMS = 8192;
+
+  bool use_direct = (provided_pWrk >= direct_pWrk) &&
+                    (provided_pSync >= direct_pSync) &&
+                    (nreduce <= DIRECT_MAX_NELEMS);
+
+  if (use_direct) {
     internal_direct_allreduce<T, Op>(dest, source, nreduce, team_obj, wf_info);
   } else {
     if (ring_pSync <= ROCSHMEM_REDUCE_SYNC_SIZE) {
-      size_t ring_pWrk = ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
+      size_t ring_pWrk = provided_pWrk;
       // integer division truncating value
       int chunk_size = ring_pWrk / PE_size;
       int seg_size = chunk_size * PE_size;
