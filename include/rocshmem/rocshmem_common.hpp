@@ -87,7 +87,8 @@ typedef struct {
   int num_contexts;
 } rocshmem_team_config_t;
 
-constexpr size_t ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE = 1024;
+// Per-team pWrk pool size in elements; ring seg_size must not exceed this.
+constexpr size_t ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE = 1048576;
 constexpr size_t ROCSHMEM_BARRIER_SYNC_SIZE = 256;
 constexpr size_t ROCSHMEM_REDUCE_SYNC_SIZE = 256;
 // Internally calls sync function, which matches barrier implementation

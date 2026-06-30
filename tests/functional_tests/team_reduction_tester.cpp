@@ -69,21 +69,22 @@ TEAM_FLOAT_REDUCTION_DEF_GEN(double, double)
 // so disable it for now.
 // FLOAT_REDUCTION_DEF_GEN(long double, longdouble)
 
-rocshmem_team_t team_reduce_world_dup;
-
 /******************************************************************************
  * DEVICE TEST KERNEL
  *****************************************************************************/
 template <typename T1, ROCSHMEM_OP T2>
-__global__ void TeamReductionTest(int loop, int skip, long long int *start_time,
+__global__ __launch_bounds__(512) void TeamReductionTest(int loop, int skip, long long int *start_time,
                                   long long int *end_time, T1 *s_buf, T1 *r_buf,
-                                  size_t size, [[maybe_unused]] TestType type,
+                                  int num_elems, [[maybe_unused]] TestType type,
                                   ShmemContextType ctx_type,
-                                  rocshmem_team_t team) {
+                                  rocshmem_team_t *teams) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
 
-  rocshmem_wg_team_create_ctx(team, ctx_type, &ctx);
+  rocshmem_wg_team_create_ctx(teams[wg_id], ctx_type, &ctx);
+
+  s_buf += wg_id * num_elems;
+  r_buf += wg_id * num_elems;
 
   __syncthreads();
 
@@ -91,7 +92,7 @@ __global__ void TeamReductionTest(int loop, int skip, long long int *start_time,
     if (i == skip && hipThreadIdx_x == 0) {
       start_time[wg_id] = wall_clock64();
     }
-    wg_team_reduce<T1, T2>(ctx, team, r_buf, s_buf, size);
+    wg_team_reduce<T1, T2>(ctx, teams[wg_id], r_buf, s_buf, num_elems);
   }
 
   __syncthreads();
@@ -114,23 +115,51 @@ TeamReductionTester<T1, T2>::TeamReductionTester(
   my_pe = rocshmem_team_my_pe(ROCSHMEM_TEAM_WORLD);
   n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
 
-  s_buf = (T1 *)rocshmem_malloc(max_msg_size * sizeof(T1));
-  r_buf = (T1 *)rocshmem_malloc(max_msg_size * sizeof(T1));
+  int total_elems = (max_msg_size / sizeof(T1)) * args.num_wgs;
+  int buff_size = total_elems * sizeof(T1);
+
+  s_buf = (T1 *)rocshmem_malloc(buff_size);
+  r_buf = (T1 *)rocshmem_malloc(buff_size);
+
+  if (s_buf == nullptr || r_buf == nullptr) {
+    std::cout << "Error allocating memory from symmetric heap" << std::endl;
+    std::cout << "source: " << s_buf << ", dest: " << r_buf << std::endl;
+    rocshmem_global_exit(1);
+  }
+
+  char* value{nullptr};
+  num_teams = static_cast<int>(args.num_wgs);
+  if ((value = getenv("ROCSHMEM_MAX_NUM_TEAMS"))) {
+    int env_teams = atoi(value);
+    if (env_teams > num_teams) {
+      num_teams = env_teams;
+    }
+  }
+
+  CHECK_HIP(hipMalloc(&team_reduce_world_dup,
+                      sizeof(rocshmem_team_t) * num_teams));
 }
 
 template <typename T1, ROCSHMEM_OP T2>
 TeamReductionTester<T1, T2>::~TeamReductionTester() {
   rocshmem_free(s_buf);
   rocshmem_free(r_buf);
+  CHECK_HIP(hipFree(team_reduce_world_dup));
 }
 
 template <typename T1, ROCSHMEM_OP T2>
 void TeamReductionTester<T1, T2>::preLaunchKernel() {
   bw_factor = n_pes;
 
-  team_reduce_world_dup = ROCSHMEM_TEAM_INVALID;
-  rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0,
-                               &team_reduce_world_dup);
+  for (int team_i = 0; team_i < num_teams; team_i++) {
+    team_reduce_world_dup[team_i] = ROCSHMEM_TEAM_INVALID;
+    rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0,
+                                 &team_reduce_world_dup[team_i]);
+    if (team_reduce_world_dup[team_i] == ROCSHMEM_TEAM_INVALID) {
+      printf("Team %d is invalid!\n", team_i);
+      abort();
+    }
+  }
 }
 
 template <typename T1, ROCSHMEM_OP T2>
@@ -138,35 +167,51 @@ void TeamReductionTester<T1, T2>::launchKernel(dim3 gridSize, dim3 blockSize,
                                                int loop, size_t size) {
   size_t shared_bytes = 0;
 
+  int num_elems = size / sizeof(T1);
+
   hipLaunchKernelGGL(HIP_KERNEL_NAME(TeamReductionTest<T1, T2>), gridSize,
                      blockSize, shared_bytes, stream, loop, args.skip,
-                     start_time, end_time, s_buf, r_buf, size, _type,
+                     start_time, end_time, s_buf, r_buf, num_elems, _type,
                      _shmem_context, team_reduce_world_dup);
 
-  num_msgs = loop + args.skip;
-  num_timed_msgs = loop;
+  num_msgs = (loop + args.skip) * gridSize.x;
+  num_timed_msgs = loop * gridSize.x;
 }
 
 template <typename T1, ROCSHMEM_OP T2>
 void TeamReductionTester<T1, T2>::postLaunchKernel() {
-  rocshmem_team_destroy(team_reduce_world_dup);
+  for (int team_i = 0; team_i < num_teams; team_i++) {
+    rocshmem_team_destroy(team_reduce_world_dup[team_i]);
+  }
 }
 
 template <typename T1, ROCSHMEM_OP T2>
-void TeamReductionTester<T1, T2>::resetBuffers([[maybe_unused]] size_t size) {
-  for (uint64_t i = 0; i < max_msg_size; i++) {
-    init_buf(s_buf[i], r_buf[i]);
+void TeamReductionTester<T1, T2>::resetBuffers(size_t size) {
+  int num_elems = size / sizeof(T1);
+  int idx = 0;
+
+  for (unsigned int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
+    for (unsigned int i = 0; i < static_cast<unsigned int>(num_elems); i++) {
+      idx = wg_id * num_elems + i;
+      init_buf(s_buf[idx], r_buf[idx]);
+    }
   }
 }
 
 template <typename T1, ROCSHMEM_OP T2>
 void TeamReductionTester<T1, T2>::verifyResults(size_t size) {
-  for (uint64_t i = 0; i < size; i++) {
-    auto r = verify_buf(r_buf[i], (T1)n_pes);
-    if (r.first == false) {
-      fprintf(stderr, "Data validation error at idx %lu\n", i);
-      fprintf(stderr, "%s.\n", r.second.c_str());
-      exit(-1);
+  int num_elems = size / sizeof(T1);
+  int idx = 0;
+
+  for (unsigned int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
+    for (unsigned int i = 0; i < static_cast<unsigned int>(num_elems); i++) {
+      idx = wg_id * num_elems + i;
+      auto r = verify_buf(r_buf[idx], (T1)n_pes);
+      if (r.first == false) {
+        fprintf(stderr, "Data validation error at idx %d (wg %u)\n", idx, wg_id);
+        fprintf(stderr, "%s.\n", r.second.c_str());
+        exit(-1);
+      }
     }
   }
 }
