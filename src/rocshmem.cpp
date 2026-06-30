@@ -149,7 +149,7 @@ static BackendType select_backend_type() {
   std::string envstr = envvar::backend;
   std::transform(envstr.begin(), envstr.end(), envstr.begin(), ::tolower);
   if (!envstr.empty()) {
-    DPRINTF("Found environment variable ROCSHMEM_BACKEND, value is %s\n", envstr.c_str());
+    LOG_INFO("Found environment variable ROCSHMEM_BACKEND, value is %s\n", envstr.c_str());
     if (envstr.find("gda") != std::string::npos) {
       return BackendType::GDA_BACKEND;
     }
@@ -159,7 +159,7 @@ static BackendType select_backend_type() {
   }
 
   if (GDABackend::backend_can_run() == ROCSHMEM_SUCCESS) {
-    DPRINTF("GDABackend::backend_can_run returned success\n");
+    LOG_INFO("GDABackend::backend_can_run returned success\n");
     return BackendType::GDA_BACKEND;
   }
 
@@ -250,12 +250,12 @@ static void setFilesLimit() {
   BackendType type = select_backend_type();
   switch (type) {
   case BackendType::GDA_BACKEND:
-    DPRINTF("Initializing GDA backend using MPI\n");
+    LOG_INFO("Initializing GDA backend using MPI\n");
     CHECK_HIP(hipHostMalloc(&backend, sizeof(GDABackend)));
     backend = new (backend) GDABackend(comm);
     break;
   case BackendType::IPC_BACKEND:
-    DPRINTF("Initializing IPC backend using MPI\n");
+    LOG_INFO("Initializing IPC backend using MPI\n");
     CHECK_HIP(hipHostMalloc(&backend, sizeof(IPCBackend)));
     backend = new (backend) IPCBackend(comm);
     break;
@@ -390,12 +390,12 @@ static void setFilesLimit() {
   BackendType type = select_backend_type();
   switch (type) {
   case BackendType::GDA_BACKEND:
-    DPRINTF("Initializing GDA backend with TCP bootstrapping\n");
+    LOG_INFO("Initializing GDA backend with TCP bootstrapping\n");
     CHECK_HIP(hipHostMalloc(&backend, sizeof(GDABackend)));
     backend = new (backend) GDABackend(bootstrap);
     break;
   case BackendType::IPC_BACKEND:
-    DPRINTF("Initializing IPC backend with TCP bootstrapping\n");
+    LOG_INFO("Initializing IPC backend with TCP bootstrapping\n");
     CHECK_HIP(hipHostMalloc(&backend, sizeof(IPCBackend)));
     backend = new (backend) IPCBackend(bootstrap);
     break;
