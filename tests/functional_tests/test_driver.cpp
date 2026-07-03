@@ -128,6 +128,22 @@ static void pmix_bcast(void *buf, size_t nbytes, char *key, int root)
 
 using namespace rocshmem;
 
+static void printDeviceInfo(int myid, int numprocs) {
+  char hostname[256];
+  gethostname(hostname, sizeof(hostname));
+
+  int device_id;
+  CHECK_HIP(hipGetDevice(&device_id));
+  hipDeviceProp_t deviceProps;
+  CHECK_HIP(hipGetDeviceProperties(&deviceProps, device_id));
+  char busIdStr[] = "00000000:00:00.0";
+  CHECK_HIP(hipDeviceGetPCIBusId(busIdStr, sizeof(busIdStr), device_id));
+
+  printf("#   Rank %2d Pid %6d on %10s device %2d [%s] %s\n",
+      myid, getpid(), hostname, device_id, busIdStr, deviceProps.name);
+
+}
+
 int main(int argc, char *argv[]) {
   /**
    * Setup the tester arguments.
@@ -207,6 +223,11 @@ int main(int argc, char *argv[]) {
    * method to get the tester (specified by the arguments).
    */
   std::vector<Tester *> tests = Tester::create(args);
+
+  /**
+   * Print device information
+   */
+  printDeviceInfo(args.myid, args.numprocs);
 
   /**
    * Run the tests
