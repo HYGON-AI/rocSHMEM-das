@@ -201,6 +201,7 @@ class Tester {
   bool _print_results = true;
 
  private:
+  void AlignAlgBwWithRccl(TesterArguments args, uint64_t size, double time_us, size_t *volume, double *bandwidth_gbs);
   bool _print_header = true;
   void print(uint64_t size);
 
@@ -228,3 +229,4 @@ class Tester {
 } while(0)
 
 #endif /* _TESTER_HPP */
+

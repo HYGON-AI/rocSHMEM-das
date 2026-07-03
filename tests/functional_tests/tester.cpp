@@ -812,6 +812,49 @@ bool Tester::peLaunchesKernel() {
   return is_launcher;
 }
 
+void Tester::AlignAlgBwWithRccl(TesterArguments args, uint64_t size, double time_us, size_t *volume, double *bandwidth_gbs) {
+  char* align_algbw_with_rccl = getenv("ROCSHMEM_ALIGN_ALGBW_WITH_RCCL");
+  bool _align_algbw_with_rccl = false;
+  bool is_match = false;
+
+  if (align_algbw_with_rccl != nullptr) {
+    std::string value(align_algbw_with_rccl);
+    for (char& c : value) c = std::tolower(c);
+    _align_algbw_with_rccl = (value == "1" || value == "true" || value == "on" || value == "yes");
+  }
+
+  if (!_align_algbw_with_rccl) {
+    return;
+  }
+
+  _type = (TestType)args.algorithm;
+  switch (_type) {
+    case TeamBroadcastTestType:
+    case TeamReductionTestType:
+      bw_factor = 1;
+      size_factor = 1;
+      is_match = true;
+      break;
+    case TeamFCollectTestType:   //AllGather
+    case TeamAllToAllTestType:
+    case TeamAllToAllvTestType:
+    case TeamAlltoallmemOnStreamTestType:
+      bw_factor = args.numprocs; //n_pes
+      size_factor = 1;
+      is_match = true;
+      break;
+    default:
+      break;
+  }
+
+  if (is_match) {
+    size_t total_size = size_factor * size * num_timed_msgs; // 总消息大小
+    double time_s = time_us / 1e6;   // 总时间
+    *volume = total_size / num_loops; // 对应rccl用例中的size
+    *bandwidth_gbs = static_cast<double>(bw_factor * (total_size)) / time_s / 1.0E9;
+  }
+}
+
 void Tester::print(uint64_t size) {
   if (args.myid != 0 || !_print_results) {
     return;
@@ -841,8 +884,11 @@ void Tester::print(uint64_t size) {
   int field_width = 20;
   int float_precision = 2;
 
+  // Align bandwidth with RCCL
+  AlignAlgBwWithRccl(args, size, time_us, &volume, &bandwidth_gbs);
+
   if (_print_header) {
-    printf("%-*s%-*s%-*s%*s%*s%*s",
+    printf("\n%-*s%-*s%-*s%*s%*s%*s",
            15, "# Volume (B)",
            15, "Msg Size (B)",
            15, "# of timed Msgs",
