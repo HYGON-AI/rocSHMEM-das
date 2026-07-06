@@ -24,7 +24,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma_dp_single_lane(int32_t size, uintpt
   SegmentBuilder_MLX5 seg_build(my_sq_index, sq_buf);
   seg_build.update_ctrl_seg(my_sq_counter, opcode, 0, qp_num, 0, 3, 0, 0);
   seg_build.update_raddr_seg(raddr, rkey);       
-  seg_build.update_data_seg(laddr, size, lkey); 
+  seg_build.update_data_seg(laddr, size, lkey_hdp);
 
   __atomic_signal_fence(__ATOMIC_SEQ_CST);
 

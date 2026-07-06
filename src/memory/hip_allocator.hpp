@@ -130,6 +130,17 @@ private:
  }
 };
 
+class HIPAllocatorFinegrained_HDP : public MemoryAllocator {
+public:
+  HIPAllocatorFinegrained_HDP()
+      : MemoryAllocator(
+           hipExtMallocWithFlags,
+           hipFree,
+           hipDeviceMallocFinegrained
+      ) {
+  }
+};
+
 #if defined HIP_SUPPORTS_MALLOC_UNCACHED
 class HIPAllocatorUncached : public MemoryAllocator {
  public:

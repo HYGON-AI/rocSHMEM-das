@@ -160,7 +160,7 @@ __device__ __forceinline__ void QueuePair::mlx5_wait_for_free_sq_slots(
 
 __device__ __forceinline__ void QueuePair::mlx5_build_rma_wqe(
     uint64_t my_sq_counter, uint64_t my_sq_index, uintptr_t laddr,
-    uintptr_t raddr, int32_t size, uint8_t opcode) {
+    uintptr_t raddr, int32_t size, uint8_t opcode, int flag) {
   outstanding_wqes[my_sq_counter % OUTSTANDING_TABLE_SIZE] = my_sq_counter;
 
   SegmentBuilder_MLX5 seg_build(my_sq_index, sq_buf);
@@ -172,7 +172,10 @@ __device__ __forceinline__ void QueuePair::mlx5_build_rma_wqe(
   if (size <= inline_threshold && opcode == gda_op_rdma_write) {
     seg_build.update_inl_data_seg(reinterpret_cast<const void*>(laddr), size);
   } else {
-    seg_build.update_data_seg(laddr, size, lkey);
+    if (flag == 0)
+      seg_build.update_data_seg(laddr, size, lkey_hdp);
+    else
+      seg_build.update_data_seg(laddr, size, lkey);
   }
 }
 
@@ -204,7 +207,7 @@ __device__ __forceinline__ void QueuePair::mlx5_ring_doorbell(
 }
 
 __device__ void QueuePair::mlx5_post_wqe_rma(int32_t size, uintptr_t laddr,
-    uintptr_t raddr, uint8_t opcode) {
+    uintptr_t raddr, uint8_t opcode, int flag) {
   uint64_t activemask          = get_active_lane_mask();
   uint8_t  num_active_lanes    = get_active_lane_count(activemask);
   uint8_t  my_logical_lane_id  = get_active_lane_num(activemask);
@@ -229,7 +232,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int32_t size, uintptr_t laddr,
   mlx5_wait_for_free_sq_slots(wave_sq_counter, num_active_lanes);
 
   // 3. Build the WQE for this lane
-  mlx5_build_rma_wqe(my_sq_counter, my_sq_index, laddr, raddr, size, opcode);
+  mlx5_build_rma_wqe(my_sq_counter, my_sq_index, laddr, raddr, size, opcode, flag);
 
   __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
@@ -267,7 +270,7 @@ __device__ __forceinline__ void QueuePair::mlx5_build_amo_wqe(
   SegmentBuilder_MLX5 seg_build(my_sq_index, sq_buf);
   seg_build.update_ctrl_seg(my_sq_counter, opcode, 0, qp_num,
                             MLX5_WQE_CTRL_CQ_UPDATE, 4, 0, 0);
-  seg_build.update_raddr_seg(raddr, rkey);
+  seg_build.update_raddr_seg(raddr, rkey_hdp);
   seg_build.update_atomic_seg(atomic_data, atomic_cmp);
 
   if (fetching) {

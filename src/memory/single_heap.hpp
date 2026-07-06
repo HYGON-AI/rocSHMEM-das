@@ -54,6 +54,7 @@ class SingleHeap {
    * @brief Helper type for allocation strategy
    */
   using STRAT_T = DLAllocatorStrategy<HEAP_T>;
+  using STRAT_T_HDP = DLAllocatorStrategy<HEAP_T_HDP>;
 #elif defined USE_ALLOC_POW2BINS
   /**
    * @brief Helper type for address records
@@ -78,6 +79,7 @@ class SingleHeap {
    * @param[in] Size in bytes of memory allocation
    */
   void malloc(void** ptr, size_t size);
+  void malloc_hdp(void** ptr, size_t size);
 
   /**
    * @brief Allocates memory from the heap
@@ -88,6 +90,7 @@ class SingleHeap {
    * @note Not implemented
    */
   __device__ void malloc(void** ptr, size_t size);
+  __device__ void malloc_hdp(void** ptr, size_t size);
 
   /**
    * @brief Frees memory from the heap
@@ -95,6 +98,7 @@ class SingleHeap {
    * @param[in] Raw pointer to heap memory
    */
   void free(void* ptr);
+  void free_hdp(void* ptr);
 
   /**
    * @brief Frees memory from the heap
@@ -104,6 +108,7 @@ class SingleHeap {
    * @note Not implemented
    */
   __device__ void free(void* ptr);
+  __device__ void free_hdp(void* ptr);
 
   /**
    * @brief
@@ -131,6 +136,7 @@ class SingleHeap {
    * @return Pointer to base of my heap
    */
   char* get_base_ptr();
+  char* get_base_ptr_hdp();
 
   /**
    * @brief Accessor for heap size
@@ -138,6 +144,7 @@ class SingleHeap {
    * @return Amount of bytes in heap
    */
   size_t get_size();
+  size_t get_size_hdp();
 
   /**
    * @brief Accessor for heap usage
@@ -145,6 +152,7 @@ class SingleHeap {
    * @return Amount of used bytes in heap
    */
   size_t get_used();
+  size_t get_used_hdp();
 
   /**
    * @brief Accessor for heap available
@@ -152,6 +160,7 @@ class SingleHeap {
    * @return Amount of available bytes in heap
    */
   size_t get_avail();
+  size_t get_avail_hdp();
 
   /**
    * @brief Returns is the heap is allocated with managed memory
@@ -160,16 +169,20 @@ class SingleHeap {
    */
   bool is_managed() { return heap_mem_.is_managed(); }
 
+  bool is_managed_hdp() { return heap_mem_hdp_.is_managed(); }
+
  private:
   /**
    * @brief Heap memory object
    */
   HEAP_T heap_mem_{envvar::heap_size};
+  HEAP_T_HDP heap_mem_hdp_{envvar::heap_size};
 
   /**
    * @brief Allocation strategy object
    */
   STRAT_T strat_{&heap_mem_};
+  STRAT_T_HDP strat_hdp_{&heap_mem_hdp_};
 };
 
 }  // namespace rocshmem

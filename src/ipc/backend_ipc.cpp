@@ -311,8 +311,9 @@ void IPCBackend::initIPC() {
 
 void IPCBackend::initIPC(TcpBootstrap *bootstr) {
   const auto &heap_bases{heap.get_heap_bases()};
+  const auto &heap_bases_hdp{heap.get_heap_bases_hdp()};
 
-  ipcImpl.ipcHostInit(my_pe, heap_bases,
+  ipcImpl.ipcHostInit(my_pe, heap_bases, heap_bases_hdp,
                       bootstr);
 }
 

@@ -57,4 +57,27 @@ size_t SingleHeap::get_used() { return strat_.get_used(); }
 
 size_t SingleHeap::get_avail() { return get_size() - get_used(); }
 
+void SingleHeap::malloc_hdp(void** ptr, size_t size) {
+  strat_hdp_.alloc(reinterpret_cast<char**>(ptr), size);
+}
+
+__device__ void SingleHeap::malloc_hdp(void** ptr, size_t size) {}
+
+void SingleHeap::free_hdp(void* ptr) {
+  if (!ptr) {
+    return;
+  }
+  strat_hdp_.free(reinterpret_cast<char*>(ptr));
+}
+
+__device__ void SingleHeap::free_hdp(void* ptr) {}
+
+char* SingleHeap::get_base_ptr_hdp() { return heap_mem_hdp_.get_ptr(); }
+
+size_t SingleHeap::get_size_hdp() { return heap_mem_hdp_.get_size(); }
+
+size_t SingleHeap::get_used_hdp() { return strat_hdp_.get_used(); }
+
+size_t SingleHeap::get_avail_hdp() { return get_size_hdp() - get_used_hdp(); }
+
 }  // namespace rocshmem

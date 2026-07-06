@@ -193,7 +193,8 @@ __host__ void rocshmem_finalize();
  *
  * @todo Return error code instead of ptr.
  */
-__host__ void *rocshmem_malloc(size_t size);
+__host__ void *rocshmem_malloc_orig(size_t size);
+__host__ std::pair<void*, void*> rocshmem_malloc(size_t size);
 
 /**
  * @brief Free a memory allocation from the symmetric heap.
@@ -201,7 +202,8 @@ __host__ void *rocshmem_malloc(size_t size);
  *
  * @param[in] ptr Pointer to previously allocated memory on the symmetric heap.
  */
-__host__ void rocshmem_free(void *ptr);
+__host__ void rocshmem_free_orig(void *ptr);
+__host__ void rocshmem_free(void *ptr, void *ptr_hdp);
 
 /**
  * @brief Query for the number of PEs.
@@ -678,6 +680,8 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_threadfence_system(
 __device__ ATTR_NO_INLINE void rocshmem_threadfence_system();
 
 __device__ ATTR_NO_INLINE uint64_t rocshmem_get_p2p_ptr(void *dest, int rank, int dst_rank);
+
+__device__ ATTR_NO_INLINE uint64_t rocshmem_get_p2p_ptr_hdp(void *dest, int rank, int dst_rank);
 
 }  // namespace rocshmem
 

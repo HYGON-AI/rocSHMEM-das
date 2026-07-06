@@ -69,6 +69,8 @@ void GDABackend::shca_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   gpu_qp->sq_wqe_cnt = qp_out.sq.wqe_cnt;
   gpu_qp->rkey = heap_rkey[conn_num % num_pes];
   gpu_qp->lkey = heap_mr->lkey;
+  gpu_qp->rkey_hdp = heap_rkey_hdp[conn_num % num_pes];
+  gpu_qp->lkey_hdp = heap_mr_hdp->lkey;
   gpu_qp->qp_num = qps[conn_num]->qp_num;
   gpu_qp->inline_threshold = inline_threshold;
   // The 2 in qp_out.fwb.size * 2 below facilitates the switching between fast wqe buffer registers

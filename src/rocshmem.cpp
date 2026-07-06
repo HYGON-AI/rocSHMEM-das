@@ -462,7 +462,7 @@ static BackendType select_backend_type() {
   return -1;
 }
 
-[[maybe_unused]] __host__ void *rocshmem_malloc(size_t size) {
+[[maybe_unused]] __host__ void *rocshmem_malloc_orig(size_t size) {
   VERIFY_BACKEND();
 
   void *ptr;
@@ -472,12 +472,32 @@ static BackendType select_backend_type() {
   return ptr;
 }
 
-[[maybe_unused]] __host__ void rocshmem_free(void *ptr) {
+[[maybe_unused]] __host__ void rocshmem_free_orig(void *ptr) {
   VERIFY_BACKEND();
 
   rocshmem_barrier_all();
 
   backend->heap.free(ptr);
+}
+
+[[maybe_unused]] __host__ std::pair<void*, void*> rocshmem_malloc(size_t size) {
+  VERIFY_BACKEND();
+
+  void *ptr, *ptr_hdp;
+  backend->heap.malloc(&ptr, size);
+  backend->heap.malloc_hdp(&ptr_hdp, size);
+  rocshmem_barrier_all();
+
+  return {ptr, ptr_hdp};
+}
+
+[[maybe_unused]] __host__ void rocshmem_free(void *ptr, void *ptr_hdp) {
+  VERIFY_BACKEND();
+
+  rocshmem_barrier_all();
+
+  backend->heap.free(ptr);
+  backend->heap.free_hdp(ptr_hdp);
 }
 
 __host__ void * rocshmem_ptr(const void * dest, int pe){

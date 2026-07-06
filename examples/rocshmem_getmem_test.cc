@@ -91,8 +91,12 @@ int main (int argc, char **argv)
     int my_pe = rocshmem_my_pe();
     int npes =  rocshmem_n_pes();
 
-    int *src = (int *)rocshmem_malloc(nelem * sizeof(int));
-    int *dst = (int *)rocshmem_malloc(nelem * sizeof(int));
+    std::pair<void*, void*> src_malloc = rocshmem_malloc(nelem * sizeof(int));
+    std::pair<void*, void*> dest_malloc = rocshmem_malloc(nelem * sizeof(int));
+    int *source_xdp = (int *)src_malloc.first;
+    int *src = (int *)src_malloc.second;
+    int *dst = (int *)dest_malloc.first;
+    int *dest_hdp = (int *)dest_malloc.second;
     if (NULL == src || NULL == dst) {
         std::cout << "Error allocating memory from symmetric heap" << std::endl;
         std::cout << "source: " << src << ", dest: " << dst << ", size: "
@@ -122,8 +126,8 @@ int main (int argc, char **argv)
     }
     printf("Test %s \t %s\n", argv[0], pass ? "[PASS]" : "[FAIL]");
 
-    rocshmem_free(src);
-    rocshmem_free(dst);
+    rocshmem_free(source_xdp, src);
+    rocshmem_free(dst, dest_hdp);
     rocshmem_finalize();
     return 0;
 }

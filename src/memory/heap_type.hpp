@@ -47,6 +47,7 @@ using HEAP_T = HeapMemory<HIPAllocator>;
 #endif
 #if defined USE_HEAP_DEVICE_FINEGRAIN
 using HEAP_T = HeapMemory<HIPAllocatorFinegrained>;
+using HEAP_T_HDP = HeapMemory<HIPAllocatorFinegrained_HDP>;
 #endif
 #if defined USE_HEAP_DEVICE_UNCACHED
 using HEAP_T = HeapMemory<HIPAllocatorUncached>;

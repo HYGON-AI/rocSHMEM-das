@@ -38,6 +38,7 @@ __host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id, int gda_provide
     : Context(b) {
   GDABackend *backend{static_cast<GDABackend *>(b)};
   base_heap = backend->heap.get_heap_bases().data();
+  base_heap_hdp = backend->heap.get_heap_bases_hdp().data();
 
   barrier_sync = backend->barrier_sync;
   wrk_sync_pool_bases_ = backend->get_wrk_sync_bases();
@@ -56,9 +57,11 @@ __host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id, int gda_provide
 
   for (int i = 0; i < num_qps; i++) {
     qps[i].base_heap = base_heap;
+    qps[i].base_heap_hdp = base_heap_hdp;
   }
 
   ipcImpl_.ipc_bases = backend->ipcImpl.ipc_bases;
+  ipcImpl_.ipc_bases_hdp = backend->ipcImpl.ipc_bases_hdp;
   ipcImpl_.shm_size = backend->ipcImpl.shm_size;
   ipcImpl_.shm_rank = backend->ipcImpl.shm_rank;
   ipcImpl_.pes_with_ipc_avail = backend->ipcImpl.pes_with_ipc_avail;
@@ -73,10 +76,22 @@ __device__ char* GDAContext::get_remote_ptr(const void* addr, int pe) {
   return base_heap[pe] + L_offset;
 }
 
+__device__ char* GDAContext::get_remote_ptr_hdp(const void* addr, int pe) {
+  const char* addr_ = reinterpret_cast<const char*>(addr);
+  uint64_t L_offset = addr_ - base_heap_hdp[my_pe];
+  return base_heap_hdp[pe] + L_offset;
+}
+
 __device__ char* GDAContext::get_local_ptr(const void* addr, int pe) {
   const char* addr_ = reinterpret_cast<const char*>(addr);
   uint64_t L_offset = addr_ - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
   return ipcImpl_.ipc_bases[pe] + L_offset;
+}
+
+__device__ char* GDAContext::get_local_ptr_hdp(const void* addr, int pe) {
+  const char* addr_ = reinterpret_cast<const char*>(addr);
+  uint64_t L_offset = addr_ - ipcImpl_.ipc_bases_hdp[ipcImpl_.shm_rank];
+  return ipcImpl_.ipc_bases_hdp[pe] + L_offset;
 }
 
 __device__ uint64_t GDAContext::get_p2p_ptr(void *dest, int rank, int dst_rank){
@@ -92,6 +107,23 @@ __device__ uint64_t GDAContext::get_p2p_ptr(void *dest, int rank, int dst_rank){
   } else {  // 同一计算节点上的 不同 GPU 需要 IPC 映射后将指针返回
     uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[rank % local_ranks];
     char* dst_ptr = ipcImpl_.ipc_bases[dst_rank % local_ranks] + L_offset;
+    return reinterpret_cast<uint64_t>(dst_ptr);
+  }
+}
+
+__device__ uint64_t GDAContext::get_p2p_ptr_hdp(void *dest, int rank, int dst_rank){
+  if (rank == dst_rank)
+    return reinterpret_cast<uint64_t>(dest);
+
+  int local_ranks = ipcImpl_.shm_size;
+  int node_src = rank / local_ranks;
+  int node_dst = dst_rank / local_ranks;
+
+  if (node_src != node_dst) {
+    return 0;
+  } else {
+    uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases_hdp[rank % local_ranks];
+    char* dst_ptr = ipcImpl_.ipc_bases_hdp[dst_rank % local_ranks] + L_offset;
     return reinterpret_cast<uint64_t>(dst_ptr);
   }
 }
@@ -113,7 +145,7 @@ __device__ void GDAContext::putmem(void *dest, const void *source, size_t nelems
     ipcImpl_.ipcCopy(get_local_ptr(dest, local_pe), const_cast<void *>(source), nelems);
     return;
   }
-  qps[pe].put_nbi(get_remote_ptr(dest, pe), source, nelems, pe);
+  qps[pe].put_nbi(get_remote_ptr(dest, pe), source, nelems, pe, 1);
   qps[pe].quiet();
 }
 
@@ -205,7 +237,7 @@ __device__ void GDAContext::putmem_wg(void *dest, const void *source,
     return;
   }
   if (is_wave_zero_in_block()) {
-    qps[pe].put_nbi(get_remote_ptr(dest, pe), source, nelems, pe, QueuePair::WAVE);
+    qps[pe].put_nbi(get_remote_ptr(dest, pe), source, nelems, pe, 1, QueuePair::WAVE);
     qps[pe].quiet();
   }
 }
@@ -232,7 +264,7 @@ __device__ void GDAContext::putmem_nbi_wg(void *dest, const void *source,
     return;
   }
   if (is_wave_zero_in_block()) {
-    qps[pe].put_nbi(get_remote_ptr(dest, pe), source, nelems, pe, QueuePair::WAVE);
+    qps[pe].put_nbi(get_remote_ptr(dest, pe), source, nelems, pe, 1, QueuePair::WAVE);
   }
 }
 
@@ -256,7 +288,7 @@ __device__ void GDAContext::putmem_wave(void *dest, const void *source,
     ipcImpl_.ipcCopy_wave(get_local_ptr(dest, local_pe), const_cast<void *>(source), nelems);
     return;
   }
-  qps[pe].put_nbi(get_remote_ptr(dest, pe), source, nelems, pe, QueuePair::WAVE);
+  qps[pe].put_nbi(get_remote_ptr(dest, pe), source, nelems, pe, 1, QueuePair::WAVE);
   qps[pe].quiet();
 }
 
@@ -280,7 +312,7 @@ __device__ void GDAContext::putmem_nbi_wave(void *dest, const void *source,
     return;
   }
   uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[my_pe];
-  qps[pe].put_nbi(get_remote_ptr(dest, pe), source, nelems, pe, QueuePair::WAVE);
+  qps[pe].put_nbi(get_remote_ptr(dest, pe), source, nelems, pe, 0, QueuePair::WAVE);
 }
 
 __device__ void GDAContext::putmem_nbi_wave_dp(void *dest, const void *source,

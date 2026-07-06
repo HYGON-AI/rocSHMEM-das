@@ -252,6 +252,7 @@ class GDAContext : public Context {
    * @brief get local pointer to remote data
    */
   __device__ uint64_t get_p2p_ptr(void *dest, int rank, int dst_rank);
+  __device__ uint64_t get_p2p_ptr_hdp(void *dest, int rank, int dst_rank);
 
  private:
 
@@ -313,6 +314,8 @@ class GDAContext : public Context {
    */
   __device__ char* get_remote_ptr(const void* addr, int pe);
   __device__ char* get_local_ptr(const void* addr, int pe);
+  __device__ char* get_remote_ptr_hdp(const void* addr, int pe);
+  __device__ char* get_local_ptr_hdp(const void* addr, int pe);
 
   //Temporary scratchpad memory used by internal barrier algorithms.
   int64_t *barrier_sync{nullptr};
@@ -347,6 +350,7 @@ class GDAContext : public Context {
    * @brief Base heap pointers for all PEs
    */
   char *const *base_heap{nullptr};
+  char *const *base_heap_hdp{nullptr};
 
   //TODO(Avinash):
   //Make tinfo private variable, it requires changes to the context

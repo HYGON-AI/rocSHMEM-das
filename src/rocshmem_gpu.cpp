@@ -2014,12 +2014,21 @@ WAIT_DEF_GEN(unsigned long long, ulonglong)
 WAIT_DEF_GEN(uint64_t, uint64)
 // clang-format on
 
-__device__ ATTR_NO_INLINE uint64_t rocshmem_get_p2p_ptr(void *dest, int rank, int dst_rank){
+__device__ ATTR_NO_INLINE uint64_t rocshmem_get_p2p_ptr(void *dest, int rank, int dst_rank) {
 #ifdef USE_IPC
   return static_cast<IPCContext*>(ROCSHMEM_CTX_DEFAULT.ctx_opaque)->get_p2p_ptr(dest, rank, dst_rank);
 #endif
 #ifdef USE_GDA
   return static_cast<GDAContext*>(ROCSHMEM_CTX_DEFAULT.ctx_opaque)->get_p2p_ptr(dest, rank, dst_rank);
+#endif
+}
+
+__device__ ATTR_NO_INLINE uint64_t rocshmem_get_p2p_ptr_hdp(void *dest, int rank, int dst_rank) {
+#ifdef USE_IPC
+  return static_cast<IPCContext*>(ROCSHMEM_CTX_DEFAULT.ctx_opaque)->get_p2p_ptr_hdp(dest, rank, dst_rank);
+#endif
+#ifdef USE_GDA
+  return static_cast<GDAContext*>(ROCSHMEM_CTX_DEFAULT.ctx_opaque)->get_p2p_ptr_hdp(dest, rank, dst_rank);
 #endif
 }
 

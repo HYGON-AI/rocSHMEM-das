@@ -50,13 +50,14 @@ class IpcOnImpl {
   int shm_size{0};
 
   char **ipc_bases{nullptr};
+  char **ipc_bases_hdp{nullptr};
 
   int *pes_with_ipc_avail{nullptr};
 
   __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                             MPI_Comm thread_comm);
 
-  __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
+  __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases, const HEAP_BASES_T &heap_bases_hdp,
                             TcpBootstrap *bootstrap);
 
   __host__ void ipcHostStop();
@@ -170,13 +171,14 @@ class IpcOffImpl {
   uint32_t shm_size{0};
 
   char **ipc_bases{nullptr};
+  char **ipc_bases_hdp{nullptr};
 
   int *pes_with_ipc_avail{nullptr};
 
   __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                             MPI_Comm thread_comm) {}
 
-  __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
+  __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases, const HEAP_BASES_T &heap_bases_hdp,
                             TcpBootstrap *bootstrap){}
 
   __host__ void ipcHostStop() {}

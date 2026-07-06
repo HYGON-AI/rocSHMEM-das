@@ -91,6 +91,8 @@ class SymmetricHeap {
     } else  {
       remote_heap_info_ = new RemoteHeapInfoTCP(single_heap_.get_base_ptr(),
                                                 single_heap_.get_size(), bootstrap);
+      remote_heap_info_hdp_ = new RemoteHeapInfoTCP(single_heap_.get_base_ptr_hdp(),
+                                                single_heap_.get_size_hdp(), bootstrap);
     }
   }
   /**
@@ -100,6 +102,7 @@ class SymmetricHeap {
    * @param[in] Number of bytes of requested
    */
   void malloc(void** ptr, size_t size) { single_heap_.malloc(ptr, size); }
+  void malloc_hdp(void** ptr, size_t size) { single_heap_.malloc_hdp(ptr, size); }
 
   /**
    * @brief Frees previously allocated network visible memory
@@ -107,6 +110,7 @@ class SymmetricHeap {
    * @param[in] Handle of previously allocated memory
    */
   void free(void* ptr) { single_heap_.free(ptr); }
+  void free_hdp(void* ptr) { single_heap_.free_hdp(ptr); }
 
   /**
    * @brief Accessor for local heap base
@@ -114,11 +118,13 @@ class SymmetricHeap {
    * @return Base address of the local symmetric heap
    */
   __host__ char* get_local_heap_base() { return single_heap_.get_base_ptr(); }
+  __host__ char* get_local_heap_base_hdp() { return single_heap_.get_base_ptr_hdp(); }
 
   /**
    * @brief Accessor method for heap size
    */
   auto get_size() { return single_heap_.get_size(); }
+  auto get_size_hdp() { return single_heap_.get_size_hdp(); }
 
   /**
    * @brief Returns is the heap is allocated with managed memory
@@ -126,11 +132,13 @@ class SymmetricHeap {
    * @return bool
    */
   bool is_managed() { return single_heap_.is_managed(); }
+  bool is_managed_hdp() { return single_heap_.is_managed_hdp(); }
 
   /**
    * @brief Accessor method for heap_window_info_
    */
   auto get_window_info() { return remote_heap_info_->get_window_info(); }
+  auto get_window_info_hdp() { return remote_heap_info_hdp_->get_window_info(); }
 
   /**
    * @brief Accessor for heap bases
@@ -140,6 +148,9 @@ class SymmetricHeap {
   __host__ const auto& get_heap_bases() {
     return remote_heap_info_->get_heap_bases();
   }
+  __host__ const auto& get_heap_bases_hdp() {
+    return remote_heap_info_hdp_->get_heap_bases();
+  }
 
   /**
    * @brief Accessor for heap bases
@@ -148,6 +159,9 @@ class SymmetricHeap {
    */
   __device__ auto get_heap_bases() {
     return remote_heap_info_->get_heap_bases();
+  }
+  __device__ auto get_heap_bases_hdp() {
+    return remote_heap_info_hdp_->get_heap_bases();
   }
 
  private:
@@ -160,6 +174,7 @@ class SymmetricHeap {
    * @brief Implementation of remote heaps
    */
   RemoteHeapInfoAbstract *remote_heap_info_{nullptr};
+  RemoteHeapInfoAbstract *remote_heap_info_hdp_{nullptr};
 };
 
 }  // namespace rocshmem

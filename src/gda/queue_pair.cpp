@@ -135,7 +135,7 @@ QueuePair::~QueuePair() {
 /******************************************************************************
  ************************ PROVIDER-SPECIFIC HELPERS ***************************
  *****************************************************************************/
-__device__ void QueuePair::post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy) {
+__device__ void QueuePair::post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy, int flag) {
   switch (gda_provider_) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
@@ -143,11 +143,11 @@ __device__ void QueuePair::post_wqe_rma(int pe, int32_t size, uintptr_t laddr, u
     return;
 #endif
   default:
-    post_wqe_rma_turn(pe, size, laddr, raddr, opcode, cy);
+    post_wqe_rma_turn(pe, size, laddr, raddr, opcode, cy, flag);
   }
 }
 
-__device__ void QueuePair::post_wqe_rma_turn(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy) {
+__device__ void QueuePair::post_wqe_rma_turn(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy, int flag) {
   if (cy == THREAD) {
     bool need_turn {true};
     uint64_t turns = __ballot(need_turn);
@@ -162,21 +162,21 @@ __device__ void QueuePair::post_wqe_rma_turn(int pe, int32_t size, uintptr_t lad
     }
   } else {
     if (is_thread_zero_in_wave()) {
-      post_wqe_rma_mt(pe, size, laddr, raddr, opcode);
+      post_wqe_rma_mt(pe, size, laddr, raddr, opcode, flag);
     }
   }
 }
 
-__device__ void QueuePair::post_wqe_rma_mt(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode) {
+__device__ void QueuePair::post_wqe_rma_mt(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, int flag) {
   switch (gda_provider_) {
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    mlx5_post_wqe_rma(size, laddr, raddr, opcode);
+    mlx5_post_wqe_rma(size, laddr, raddr, opcode, flag);
     return;
 #endif
 #if defined(GDA_SHCA)
   case GDAProvider::SHCA:
-    shca_post_wqe_rma(size, laddr, raddr, opcode);
+    shca_post_wqe_rma(size, laddr, raddr, opcode, flag);
     return;
 #endif
 #if defined(GDA_BNXT)
@@ -317,10 +317,10 @@ __device__ void QueuePair::quiet_dp_single_lane() {
 /******************************************************************************
  ****************************** SHMEM INTERFACE *******************************
  *****************************************************************************/
-__device__ void QueuePair::put_nbi(void *dest, const void *source, size_t nelems, int pe, Collectivity cy) {
+__device__ void QueuePair::put_nbi(void *dest, const void *source, size_t nelems, int pe, int flag, Collectivity cy) {
   uintptr_t src = reinterpret_cast<uintptr_t>(source);
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
-  post_wqe_rma(pe, nelems, src, dst, gda_op_rdma_write, cy);
+  post_wqe_rma(pe, nelems, src, dst, gda_op_rdma_write, cy, flag);
 }
 
 __device__ void QueuePair::put_nbi_single(void *dest, const void *source, size_t nelems, bool ring_db) {

@@ -90,6 +90,8 @@ class GDABackend : public Backend {
 
   uint32_t *heap_rkey = nullptr;
   struct ibv_mr *heap_mr = nullptr;
+  uint32_t *heap_rkey_hdp = nullptr;
+  struct ibv_mr *heap_mr_hdp = nullptr;
 
   std::string debug_str;
 
@@ -351,7 +353,9 @@ class GDABackend : public Backend {
   void setup_fence_buffer();
 
   void setup_heap_memory_rkey();
+  void setup_hdp_heap_memory_rkey();
   void cleanup_heap_memory_rkey();
+  void cleanup_hdp_heap_memory_rkey();
 
   void initialize_gpu_qp(QueuePair* qp, int conn_num);
   void bnxt_initialize_gpu_qp(QueuePair* qp, int conn_num);

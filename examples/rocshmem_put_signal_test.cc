@@ -97,9 +97,9 @@ int main (int argc, char **argv)
     int npes =  rocshmem_n_pes();
 
     int dst_pe = (my_pe + 1) % npes;
-    uint64_t *message = (uint64_t*)rocshmem_malloc(nelem * sizeof(uint64_t));
-    uint64_t *data = (uint64_t*)rocshmem_malloc(nelem * sizeof(uint64_t));
-    uint64_t *sig_addr = (uint64_t*)rocshmem_malloc(sizeof(uint64_t));
+    uint64_t *message = (uint64_t*)rocshmem_malloc_orig(nelem * sizeof(uint64_t));
+    uint64_t *data = (uint64_t*)rocshmem_malloc_orig(nelem * sizeof(uint64_t));
+    uint64_t *sig_addr = (uint64_t*)rocshmem_malloc_orig(sizeof(uint64_t));
     if (NULL == data || NULL == message || NULL == sig_addr) {
         std::cout << "Error allocating memory from symmetric heap" << std::endl;
         std::cout << "data: " << data
@@ -133,8 +133,8 @@ int main (int argc, char **argv)
     }
     printf("[%d] Test %s \t %s\n", my_pe, argv[0], pass ? "[PASS]" : "[FAIL]");
 
-    rocshmem_free(data);
-    rocshmem_free(message);
+    rocshmem_free_orig(data);
+    rocshmem_free_orig(message);
     rocshmem_finalize();
     return 0;
 }

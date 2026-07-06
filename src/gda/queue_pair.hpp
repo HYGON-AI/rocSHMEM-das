@@ -79,7 +79,7 @@ class QueuePair {
    * @param[in] nelems Size in bytes of data transmission.
    * @param[in] pe Destination processing element of data transmission.
    */
-  __device__ void put_nbi(void *dest, const void *source, size_t nelems, int pe, Collectivity cy = THREAD);
+  __device__ void put_nbi(void *dest, const void *source, size_t nelems, int pe, int flag = 0, Collectivity cy = THREAD);
 
   __device__ void put_nbi_single(void *dest, const void *source, size_t nelems, bool ring_db);
 
@@ -150,6 +150,7 @@ class QueuePair {
   __device__ int64_t atomic_cas_nofetch(void *dest, int64_t atomic_data, int64_t atomic_cmp, int pe);
 
   char *const *base_heap{nullptr};
+  char *const *base_heap_hdp{nullptr};
 
  private:
   /**
@@ -180,11 +181,11 @@ class QueuePair {
    * @param[in] raddr Remote address.
    * @param[in] opcode Operation to be performed.
    */
-  __device__ __attribute__((noinline)) void post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy);
-  __device__ __attribute__((noinline)) void post_wqe_rma_turn(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy);
+  __device__ __attribute__((noinline)) void post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy, int flag = 0);
+  __device__ __attribute__((noinline)) void post_wqe_rma_turn(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy, int flag = 0);
 
   __device__ __attribute__((noinline)) void post_wqe_rma_single(int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, bool ring_db);
-  __device__ __attribute__((noinline)) void post_wqe_rma_mt(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode);
+  __device__ __attribute__((noinline)) void post_wqe_rma_mt(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, int flag = 0);
 
 #if defined(GDA_MLX5)
   __device__ __forceinline__ void
@@ -196,7 +197,7 @@ class QueuePair {
 
   __device__ __forceinline__ void
   mlx5_build_rma_wqe(uint64_t my_sq_counter, uint64_t my_sq_index,
-      uintptr_t laddr, uintptr_t raddr, int32_t size, uint8_t opcode);
+      uintptr_t laddr, uintptr_t raddr, int32_t size, uint8_t opcode, int flag = 0);
 
   __device__ __forceinline__ void
   mlx5_build_amo_wqe(uint64_t my_sq_counter, uint64_t my_sq_index,
@@ -216,7 +217,7 @@ class QueuePair {
 
   __device__ void
   mlx5_post_wqe_rma(int32_t size, uintptr_t laddr,
-      uintptr_t raddr, uint8_t opcode);
+      uintptr_t raddr, uint8_t opcode, int flag = 0);
 
   __device__ void
   mlx5_quiet();
@@ -243,7 +244,7 @@ class QueuePair {
   shca_wait_for_db_touched_eq(uint64_t target_sq_counter);
   __device__ __forceinline__ void
   shca_build_rma_wqe(uint64_t my_sq_counter, uint64_t my_sq_index,
-      uintptr_t laddr, uintptr_t raddr, int32_t size, uint8_t opcode);
+      uintptr_t laddr, uintptr_t raddr, int32_t size, uint8_t opcode, int flag = 0);
   __device__ __forceinline__ void
   shca_build_amo_wqe(uint64_t my_sq_counter, uint64_t my_sq_index,
       uintptr_t raddr, uint8_t opcode, int64_t atomic_data,
@@ -258,7 +259,7 @@ class QueuePair {
       int64_t atomic_data, int64_t atomic_cmp, bool fetch);
   __device__ void
   shca_post_wqe_rma(int32_t size, uintptr_t laddr,
-      uintptr_t raddr, uint8_t opcode);
+      uintptr_t raddr, uint8_t opcode, int flag = 0);
   __device__ void
   shca_quiet();
   __device__ void shca_ring_doorbell_dp(uint64_t db_val, uint64_t my_sq_counter);
@@ -456,6 +457,8 @@ class QueuePair {
   uint32_t qp_num{0};
   uint32_t rkey{0};
   uint32_t lkey{0};
+  uint32_t rkey_hdp{0};
+  uint32_t lkey_hdp{0};
 
   uint64_t* nonfetching_atomic{nullptr};
   uint32_t nonfetching_atomic_lkey{0};
