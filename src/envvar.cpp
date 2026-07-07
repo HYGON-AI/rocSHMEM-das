@@ -171,6 +171,10 @@ namespace envvar {
       "Thread limit for single-workgroup on-stream collectives and block size "
       "for multi-workgroup collectives. Must be positive, wavefront-aligned and within kernel/device limits",
       256);
+    const var<size_t> max_symm_regions("MAX_SYMM_REGIONS",
+      "Maximum number of symmetric user buffers an application can register "
+      "with rocshmem_buffer_register_symmetric. The default value is 4",
+      4);
   }  // inline namespace _base
 
   namespace bootstrap {
