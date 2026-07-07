@@ -274,6 +274,8 @@ void GDABackend::setup_ipc() {
     ipcImpl.ipcHostInit(my_pe, heap_bases, backend_comm);
   else
     ipcImpl.ipcHostInit(my_pe, heap_bases, backend_bootstr);
+
+  ipcImpl.heap_size = heap.get_size();
 }
 
 void GDABackend::cleanup_ipc() {

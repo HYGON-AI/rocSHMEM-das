@@ -52,7 +52,7 @@ set(EXAMPLE_SOURCES
 if (MPI_CXX_FOUND)
   list(APPEND EXAMPLE_SOURCES
     rocshmem_init_attr_test.cc
-    rocshmem_same_team_stream_order.cc)
+    rocshmem_user_mem_symm_test.cc)
 
   add_subdirectory(LL_MoE)
 endif()
