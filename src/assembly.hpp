@@ -202,10 +202,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
                                         int size) {
   switch (size) {
     case 1: [[unlikely]] {
-#if defined(__gfx936__) || defined (__gfx938__)
-      *dst = *val;
-#endif
-#if defined(__gfx90a__)
+#if defined(__gfx90a__) || defined(__gfx936__) || defined (__gfx938__)
       int16_t val16{static_cast<int16_t>(*src)};
       asm volatile("flat_store_byte %0, %1, glc"
                    :
@@ -237,7 +234,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
     }
     case 2: [[unlikely]] {
       [[maybe_unused]] int16_t val16{*(reinterpret_cast<int16_t*>(src))};
-#if defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__) || defined(__gfx1100__)
+#if defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__)
       asm volatile("flat_store_short %0, %1, glc"
                    :
                    : "v"(dst), "v"(val16)
@@ -309,26 +306,33 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #endif
       break;
     }
-    case 12: [[likely]] {
-      int3 val96{*(reinterpret_cast<int3*>(val))};
+    case 12: [[unlikely]] { // Note: The branch cannot be reached now.
+      int3 val96{*(reinterpret_cast<int3*>(src))};
 #if defined(__gfx936__) || defined (__gfx938__) || defined (__gfx1100__)
-      auto dst96 = reinterpret_cast<int3*>(dst);
-      *dst96 = val96;
-      // asm volatile("flat_store_dwordx3 %0 %1 glc slc" : : "v"(dst), "v"(val96));
+      int32_t* val32_ptr = reinterpret_cast<int32_t*>(&val96);
+      int32_t* dst32_ptr = reinterpret_cast<int32_t*>(dst);
+      __builtin_nontemporal_store(val32_ptr[0], &dst32_ptr[0]);
+      __builtin_nontemporal_store(val32_ptr[1], &dst32_ptr[1]);
+      __builtin_nontemporal_store(val32_ptr[2], &dst32_ptr[2]);
+      asm volatile("" ::: "memory");
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
-      asm volatile("flat_store_dwordx3 %0 %1 sc0 sc1" : : "v"(dst), "v"(val96));
+      asm volatile("flat_store_dwordx3 %0, %1, sc0 sc1"
+                   :
+                   : "v"(dst), "v"(val96)
+                   : "memory");
+#endif
+#if defined(__gfx1201__)
+      asm volatile("flat_store_dwordx3 %0, %1, scope:SCOPE_SYS"
+                   :
+                   : "v"(dst), "v"(val96)
+                   : "memory");
 #endif
       break;
     }
     case 16: [[likely]] {
       [[maybe_unused]] __int128_t val128{*(reinterpret_cast<__int128_t*>(src))};
-#if defined(__gfx936__) || defined (__gfx938__)
-      int4 val128{*(reinterpret_cast<int4*>(val))};
-      auto dst128 = reinterpret_cast<int4*>(dst);
-      *dst128 = val128;
-#endif
-#if defined(__gfx90a__) || defined(__gfx1100__)
+#if defined(__gfx90a__) || defined(__gfx1100__) || defined(__gfx936__) || defined (__gfx938__)
       asm volatile("flat_store_dwordx4 %0, %1, glc"
                    :
                    : "v"(dst), "v"(val128)
@@ -358,7 +362,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
                                         int size) {
   switch (size) {
     case 1: [[unlikely]] {
-#if defined(__gfx90a__)
+#if defined(__gfx90a__) || defined(__gfx936__) || defined (__gfx938__)
       int16_t val16;
       asm volatile(
           "flat_load_ubyte %0, %1, glc slc\n"
@@ -401,7 +405,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
       break;
     }
     case 2: [[unlikely]] {
-#if defined(__gfx90a__)
+#if defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__)
       int16_t val16;
       asm volatile(
           "flat_load_ushort %0, %1, glc slc\n"
@@ -444,7 +448,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
       break;
     }
     case 4: [[unlikely]] {
-#if defined(__gfx90a__) || defined(__gfx1100__)
+#if defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__) || defined(__gfx1100__)
       int32_t val32;
       asm volatile(
           "flat_load_dword %0, %1, glc slc\n"
@@ -477,7 +481,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
       break;
     }
     case 8: [[unlikely]] {
-#if defined(__gfx90a__) || defined(__gfx1100__)
+#if defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__) || defined(__gfx1100__)
       int64_t val64;
       asm volatile(
           "flat_load_dwordx2 %0, %1, glc slc\n"
@@ -509,8 +513,39 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
 #endif
       break;
     }
+    case 12: [[unlikely]] {  // Note: The branch cannot be reached now.
+#if defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__) || defined(__gfx1100__)
+      int32_t* src32_ptr = reinterpret_cast<int32_t*>(src);
+      int32_t* dst32_ptr = reinterpret_cast<int32_t*>(dst);
+      dst32_ptr[0] = src32_ptr[0];
+      dst32_ptr[1] = src32_ptr[1];
+      dst32_ptr[2] = src32_ptr[2];
+      asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
+#endif
+#if defined(__gfx942__) || defined(__gfx950__)
+      int3 val96;
+      asm volatile(
+          "flat_load_dwordx3 %0, %1, sc0 sc1\n"
+          "s_waitcnt vmcnt(0)"
+          : "=v"(val96)
+          : "v"(src)
+          : "memory");
+      *(reinterpret_cast<int3*>(dst)) = val96;
+#endif
+#if defined(__gfx1201__)
+      int3 val96;
+      asm volatile(
+          "flat_load_dwordx3 %0, %1, scope:SCOPE_SYS\n"
+          "s_wait_loadcnt 0x0"
+          : "=v"(val96)
+          : "v"(src)
+          : "memory");
+      *(reinterpret_cast<int3*>(dst)) = val96;
+#endif
+      break;
+    }      
     case 16: [[likely]] {
-#if defined(__gfx90a__) || defined(__gfx1100__)
+#if defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__) || defined(__gfx1100__)
       __int128_t val128;
       asm volatile(
           "flat_load_dwordx4 %0, %1, glc slc\n"
