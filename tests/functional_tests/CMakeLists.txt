@@ -117,6 +117,11 @@ target_link_libraries(
     hiprtc
 )
 
+if(${ROCM_MAJOR_VERSION} LESS 7)
+  # ROCm 6.x requires us to explicitly enable warp sync builtins
+  target_compile_definitions(${PROJECT_NAME} PRIVATE HIP_ENABLE_WARP_SYNC_BUILTINS=1)
+endif()
+
 ###############################################################################
 # DEVICE BITCODE TESTER (put/get via HSACO + rocshmem_hipmodule_init)
 ###############################################################################
