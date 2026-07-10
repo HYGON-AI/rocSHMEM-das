@@ -401,6 +401,7 @@ constexpr bool is_blocking(MemcpyKind k) {
   return k == MemcpyKind::PutBlocking || k == MemcpyKind::GetBlocking;
 }
 
+#if 0
 template <int ChunkSize, CachePolicy LoadPolicy, CachePolicy StorePolicy, int Unroll>
 __device__ __forceinline__ void copy_bulk(void* dst, void* src,
                                           int n_chunks, int tid, int stride) {
@@ -599,6 +600,101 @@ template <MemcpyKind Kind = MemcpyKind::Put>
     copy_remainder<LP, SP>(static_cast<uint8_t*>(dst) + n_chunks * ChunkSize,
                            static_cast<uint8_t*>(src) + n_chunks * ChunkSize,
                            remainder);
+  }
+}
+#endif  // 0
+
+template <MemcpyKind Kind = MemcpyKind::Put>
+[[maybe_unused]] __device__ __forceinline__ void memcpy_lane(void* dst, void* src, size_t size) {
+  uint8_t* dst_bytes{static_cast<uint8_t*>(dst)};
+  uint8_t* src_bytes{static_cast<uint8_t*>(src)};
+
+  for (size_t i = 16; i >= 1; i >>= 1) {
+    while (size >= i) {
+      if constexpr (is_put(Kind)) {
+        put_asm(src_bytes, dst_bytes, i);
+      } else {
+        get_asm(src_bytes, dst_bytes, i);
+      }
+      src_bytes += i;
+      dst_bytes += i;
+      size -= i;
+    }
+  }
+}
+
+template <MemcpyKind Kind = MemcpyKind::Put>
+[[maybe_unused]] __device__ __forceinline__ void memcpy_wg(void* dst, void* src, size_t size) {
+  int thread_id{get_flat_block_id()};
+  int block_size{get_flat_block_size()};
+
+  int cpy_size{};
+  uint8_t* dst_bytes{nullptr};
+  uint8_t* dst_def{nullptr};
+  uint8_t* src_bytes{nullptr};
+  uint8_t* src_def{nullptr};
+
+  dst_def = reinterpret_cast<uint8_t*>(dst);
+  src_def = reinterpret_cast<uint8_t*>(src);
+  dst_bytes = dst_def;
+  src_bytes = src_def;
+
+  
+  for (int j = 16; j >= 1; j >>= 1) {
+    cpy_size = size / j;
+    for (int i = thread_id; i < cpy_size; i += block_size) {
+      dst_bytes = dst_def;
+      src_bytes = src_def;
+
+      src_bytes += i * j;
+      dst_bytes += i * j;
+
+      if constexpr (is_put(Kind)) {
+        put_asm(src_bytes, dst_bytes, j);
+      } else {
+        get_asm(src_bytes, dst_bytes, j);
+      }
+    }
+    size -= cpy_size * j;
+    dst_def += cpy_size * j;
+    src_def += cpy_size * j;
+  }
+}
+
+template <MemcpyKind Kind = MemcpyKind::Put>
+[[maybe_unused]] __device__ __forceinline__ void memcpy_wave(void* dst, void* src, size_t size) {
+  int wave_tid = get_flat_block_id() % WF_SIZE;
+  int wave_size{wave_SZ()};
+
+  int cpy_size{};
+  uint8_t* dst_bytes{nullptr};
+  uint8_t* dst_def{nullptr};
+  uint8_t* src_bytes{nullptr};
+  uint8_t* src_def{nullptr};
+
+  dst_def = reinterpret_cast<uint8_t*>(dst);
+  src_def = reinterpret_cast<uint8_t*>(src);
+  dst_bytes = dst_def;
+  src_bytes = src_def;
+
+  for (int j = 16; j >= 1; j >>= 1) {
+    cpy_size = size / j;
+    for (int i = wave_tid; i < cpy_size; i += wave_size) {
+      dst_bytes = dst_def;
+      src_bytes = src_def;
+
+      src_bytes += i * j;
+      dst_bytes += i * j;
+
+      if constexpr (is_put(Kind)) {
+        put_asm(src_bytes, dst_bytes, j);
+      } else {
+        get_asm(src_bytes, dst_bytes, j);
+      }
+    }
+    size -= cpy_size * j;
+    dst_def += cpy_size * j;
+    src_def += cpy_size * j;
   }
 }
 
