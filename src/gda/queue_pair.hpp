@@ -268,7 +268,10 @@ class QueuePair {
       uintptr_t raddr, uint8_t opcode);
   __device__ void
   shca_post_wqe_amo_dp_single_lane(int32_t size, uintptr_t raddr, uint8_t opcode,
-      int64_t atomic_data, int64_t atomic_cmp, bool fetch);  
+      int64_t atomic_data, int64_t atomic_cmp, bool fetch);
+  __device__ void
+  shca_post_wqe_amo_dp_thread_single_lane(int32_t size, uintptr_t raddr, uint8_t opcode,
+      int64_t atomic_data, int64_t atomic_cmp, bool fetch);
 #endif
 #if defined(GDA_BNXT)
 
