@@ -160,8 +160,18 @@ class GDAContext : public Context {
                                           int PE_size, int team_rank);
 
   template <typename T>
-  __device__ void broadcast(rocshmem_team_t team, T *dest, const T *source,
+  __device__ void broadcast_wg(rocshmem_team_t team, T *dest, const T *source,
                             int nelems, int pe_root);
+
+  __device__ void broadcastmem_wg(rocshmem_team_t team, void *dest, const void* source, 
+                                  int nelement, int PE_root);
+
+  template <typename T>
+  __device__ int broadcast_wave(rocshmem_team_t team,
+                                T *dest, const T* source, int nelement, int PE_root);
+
+  __device__ int broadcastmem_wave(rocshmem_team_t team,
+                                void *dest, const void* source, int nelement, int PE_root);
 
   template <typename T>
   __device__ void alltoall(rocshmem_team_t team, T *dest, const T *source,
@@ -299,23 +309,43 @@ class GDAContext : public Context {
       int capacity, CollectiveChunkPolicy policy, bool inter_node = true);
 
   //internal functions used by collective operations
-  template <typename T>
-  __device__ void internal_broadcast(T *dest, const T *source, int nelems,
+  __device__ void internal_broadcastmem_wg(void *dest, const void *source, int nelems,
       int pe_root, int pe_start, int stride, int pe_size, long *p_sync);  // NOLINT(runtime/int)
 
+  __device__ void internal_put_broadcastmem_wg(void *dst, const void *src, int nelems,
+      int pe_root, int PE_start, int logPE_stride, int PE_size,
+      ActiveWFInfo &wf_info);  // NOLINT(runtime/int)
+
+  __device__ void internal_get_broadcastmem_wg(void *dst, const void *src, int nelems,
+      int pe_root, ActiveWFInfo &wf_info);  // NOLINT(runtime/int)
+
   template <typename T>
-  __device__ bool internal_proxy_broadcast(T *dst, const T *src, int nelems,
+  __device__ void internal_broadcast_wave(T *dest, const T *source, int nelems,
+      int pe_root, int pe_start, int stride, int pe_size, long *p_sync);  // NOLINT(runtime/int)
+
+  __device__ bool internal_proxy_broadcast(void *dst, const void *src, int nelems,
       int pe_root, int pe_start, int stride, int pe_size, long *p_sync,
       ActiveWFInfo &wf_info);  // NOLINT(runtime/int)
 
   template <typename T>
-  __device__ void internal_put_broadcast(T *dst, const T *src, int nelems,
+  __device__ void internal_put_broadcast_wave(T *dst, const T *src, int nelems,
       int pe_root, int PE_start, int logPE_stride, int PE_size,
       ActiveWFInfo &wf_info);  // NOLINT(runtime/int)
 
   template <typename T>
-  __device__ void internal_get_broadcast(T *dst, const T *src, int nelems,
+  __device__ void internal_get_broadcast_wave(T *dst, const T *src, int nelems,
       int pe_root, ActiveWFInfo &wf_info);  // NOLINT(runtime/int)
+
+  __device__ void internal_broadcastmem_wave(void *dst, const void *src,
+    int nelems, int pe_root, int pe_start, int stride, int pe_size,
+    long *p_sync);
+
+  __device__ void internal_get_broadcastmem_wave(void *dst, const void *src,
+    int nelems, int pe_root, ActiveWFInfo &wf_info);
+
+  __device__ void internal_put_broadcastmem_wave(void *dst, const void *src,
+    int nelems, int pe_root, int pe_start, int stride, int pe_size,
+    ActiveWFInfo &wf_info);
 
   template <typename T>
   __device__ void fcollect_linear(rocshmem_team_t team, T *dest,

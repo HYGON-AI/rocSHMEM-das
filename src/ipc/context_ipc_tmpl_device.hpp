@@ -619,139 +619,62 @@ __device__ int IPCContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
 }
 
 template <typename T>
-__device__ void IPCContext::internal_put_broadcast(
-    T *dst, const T *src, int nelems, int pe_root, int pe_start,
+__device__ void IPCContext::internal_put_broadcast_wave(T *dst, const T *src, int nelems, int pe_root, int pe_start,
     int stride, int pe_size) {  // NOLINT(runtime/int)
-  if (constmem.my_pe == pe_root) {
-    // Complete the local copy before any wave starts reading source for a remote PUT.
-    get_wg(dst, src, nelems, pe_root);
-
-    // pipeline chunking for large messages
-    constexpr int CHUNK_NELEMS = ROCSHMEM_CHUNK_BYTES / sizeof(T);
-    const bool use_pipeline = (nelems > CHUNK_NELEMS);
-
-    int wf_id = get_flat_block_id() / WF_SIZE;
-    int wf_count = (get_flat_block_size() + WF_SIZE - 1) / WF_SIZE;
-
-    if (!use_pipeline) {
-      int finish = pe_start + stride * pe_size;
-      for (int i = pe_start + wf_id * stride; i < finish; i += stride * wf_count) {
-        if (i != constmem.my_pe) {
-          put_nbi_wave(dst, src, nelems, i);
-        }
-      }
-    } else {
-      for (int c_start = 0; c_start < nelems; c_start += CHUNK_NELEMS) {
-        int c_end = min(c_start + CHUNK_NELEMS, nelems);
-        int c_nelems = c_end - c_start;
-
-        int finish = pe_start + stride * pe_size;
-        for (int i = pe_start + wf_id * stride; i < finish; i += stride * wf_count) {
-          if (i != constmem.my_pe) {
-            put_nbi_wave(&dst[c_start], &src[c_start], c_nelems, i);
-          }
-        }
-      }
+  if (my_pe == pe_root) {
+    int finish = pe_start + stride * pe_size;
+    for (int i = pe_start; i < finish; i += stride) {
+        put_nbi_wave(dst, src, nelems, i);
     }
   }
 }
 
 template <typename T>
-__device__ void IPCContext::internal_get_broadcast(
-  T *dst, const T *src, int nelems, int pe_root) {  // NOLINT(runtime/int)
-    get_wg(dst, src, nelems, pe_root);
-}
-
-/*
- * Chunk-pipelined chain broadcast for large messages.
- *
- * Ranks are rotated so that the root has virtual rank zero.  The message is
- * split into chunks and forwarded along the virtual-rank chain.  In a given
- * round, each link carries a different chunk, so all active links can make
- * progress concurrently.  A team-wide synchronization closes each round and
- * guarantees that a received chunk is visible before it is forwarded.
- *
- * Unlike a full-message binomial tree, the root sends each byte only once.
- */
-template <typename T>
-__device__ void IPCContext::internal_chain_broadcast(
-    T *dst, const T *src, int nelems, int pe_root, int pe_start, int stride,
-    int pe_size, int64_t *p_sync) {  // NOLINT(runtime/int)
-  // Compute virtual rank: root=0, enables circular chain topology
-  int my_rank = (constmem.my_pe - pe_start) / stride;
-  int root_rank = (pe_root - pe_start) / stride;
-
-  int virtual_rank = my_rank - root_rank;
-  if (virtual_rank < 0) {
-    virtual_rank += pe_size;
-  }
-
-  // Root fetches data from source into local dst buffer
-  if (virtual_rank == 0) {
-    get_wg(dst, src, nelems, pe_root);
-  }
-
-  // Split message into chunks for pipelined forwarding
-  constexpr int CHUNK_NELEMS = ROCSHMEM_CHUNK_BYTES / sizeof(T);
-  int num_chunks = (nelems + CHUNK_NELEMS - 1) / CHUNK_NELEMS;
-
-  // Determine downstream neighbor in the chain (-1 if last node)
-  int next_pe = -1;
-  if (virtual_rank < pe_size - 1) {
-    int next_rank = virtual_rank + 1 + root_rank;
-    if (next_rank >= pe_size) {
-      next_rank -= pe_size;
-    }
-    next_pe = pe_start + next_rank * stride;
-  }
-
-  // Pipeline: forward chunks along the chain with overlap
-  for (int chunk = 0; chunk < num_chunks; chunk++) {
-    // Progress signal: chunk N is ready when p_sync[0] >= N+1
-    int64_t ready = chunk + 1;
-
-    // Non-root nodes wait for upstream to send this chunk
-    if (virtual_rank > 0) {
-      if (is_thread_zero_in_block()) {
-        wait_until(&p_sync[0], ROCSHMEM_CMP_GE, ready);
-      }
-      __syncthreads();
-    }
-
-    // Compute current chunk boundaries
-    int offset = chunk * CHUNK_NELEMS;
-    int count = min(CHUNK_NELEMS, nelems - offset);
-
-    // Forward this chunk to downstream neighbor
-    if (next_pe != -1) {
-      // Root reads from src, other nodes forward from received dst
-      const T *forward_src = (virtual_rank == 0) ? src + offset : dst + offset;
-      put_wg(dst + offset, forward_src, count, next_pe);
-
-      // Signal completion to downstream node
-      if (is_thread_zero_in_block()) {
-        fence(next_pe);
-        internal_putmem(&p_sync[0], &ready, sizeof(ready), next_pe);
-      }
-      __syncthreads();
-    }
-  }
-
-  // Global barrier ensures all PEs have completed reception
-  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync + 1);
-
-  // The chunk-ready flag is reused by the next broadcast on this team.  Clear
-  // it after the completion barrier so a subsequent invocation cannot mistake
-  // the previous operation's progress for the current operation's progress.
-  if (is_thread_zero_in_block()) {
-    *p_sync = 0;
-    threadfence_system();
-  }
-  __syncthreads();
+__device__ void IPCContext::internal_get_broadcast_wave(
+  T *dst, const T *src, int nelems, int pe_root) {
+    get_wave(dst, src, nelems, pe_root);
 }
 
 template <typename T>
-__device__ void IPCContext::broadcast(rocshmem_team_t team, T *dst,
+__device__ int IPCContext::broadcast_wave(rocshmem_team_t team,
+                              T *dest, const T *source, int nelems, int PE_root) {
+  if (dest == nullptr ||
+    source == nullptr ||
+    team == ROCSHMEM_TEAM_INVALID)
+    return ROCSHMEM_ERROR;
+
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+
+  int stride = team_obj->tinfo_wrt_world->stride;
+  int pe_start = team_obj->tinfo_wrt_world->pe_start;
+  int pe_size = team_obj->tinfo_wrt_world->size;
+  long *p_sync = team_obj->bcast_pSync;
+
+  // Passed pe_root is relative to team, convert to world root
+  int pe_root_world = team_obj->get_pe_in_world(PE_root);
+  internal_broadcast_wave<T>(dest, source, nelems, pe_root_world,
+                              pe_start, stride, pe_size, p_sync);
+
+  return ROCSHMEM_SUCCESS;
+}
+
+template <typename T>
+__device__ void IPCContext::internal_broadcast_wave(T *dst, const T *src, int nelems,
+                                      int pe_root, int pe_start,
+                                      int stride, int pe_size,
+                                      long *p_sync) {  // NOLINT(runtime/int)
+  if (constmem.num_pes < 4) {
+    internal_put_broadcast_wave<T>(dst, src, nelems, pe_root, pe_start, stride, pe_size);
+  } else {
+    internal_get_broadcast_wave<T>(dst, src, nelems, pe_root);
+  }
+
+  // Synchronize on completion of broadcast
+  internal_sync_wave(my_pe, pe_start, stride, pe_size, p_sync);
+}
+
+template <typename T>
+__device__ void IPCContext::broadcast_wg(rocshmem_team_t team, T *dst,
                                       const T *src, int nelems, int pe_root) {
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
 
@@ -762,36 +685,8 @@ __device__ void IPCContext::broadcast(rocshmem_team_t team, T *dst,
 
   // Passed pe_root is relative to team, convert to world root
   int pe_root_world = team_obj->get_pe_in_world(pe_root);
-  internal_broadcast<T>(dst, src, nelems, pe_root_world, pe_start, stride,
+  internal_broadcastmem_wg(dst, src, nelems * sizeof(T), pe_root_world, pe_start, stride,
                pe_size, p_sync);
-}
-
-template <typename T>
-__device__ void IPCContext::internal_broadcast(T *dst, const T *src, int nelems,
-                                      int pe_root, int pe_start,
-                                      int stride, int pe_size,
-                                      long *p_sync) {  // NOLINT(runtime/int)
-  constexpr size_t DIRECT_MAX_BYTES = 8 * 1024;
-  size_t message_bytes = static_cast<size_t>(nelems) * sizeof(T);
-
-  if (pe_size <= 2 || message_bytes <= DIRECT_MAX_BYTES) {
-    internal_put_broadcast(dst, src, nelems, pe_root, pe_start, stride,
-                           pe_size);
-    internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync);
-  } else {
-    internal_chain_broadcast(dst, src, nelems, pe_root, pe_start, stride, pe_size, p_sync);
-  }
-
-  // if (constmem.num_pes < 4) {
-  //   internal_put_broadcast(dst, src, nelems, pe_root, pe_start, stride,
-  //                          pe_size);
-  // } else {
-  //   internal_get_broadcast(dst, src, nelems, pe_root);
-  // }
-
-  // // Synchronize on completion of broadcast
-  // internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync);
-
 }
 
 template <typename T>
