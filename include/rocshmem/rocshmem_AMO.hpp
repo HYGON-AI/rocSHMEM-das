@@ -999,7 +999,10 @@ __device__ ATTR_NO_INLINE void rocshmem_long_atomic_add(
 
 __device__ ATTR_NO_INLINE void rocshmem_long_atomic_add_dp(
     long *dest, long value, int qp_idx, int pe);
-    
+
+__device__ ATTR_NO_INLINE void rocshmem_long_atomic_add_dp_thread(
+    long *dest, long value, int qp_idx, int pe);
+
 __host__ void rocshmem_ctx_long_atomic_add(
     rocshmem_ctx_t ctx, long *dest, long value, int pe);
 __host__ void rocshmem_long_atomic_add(

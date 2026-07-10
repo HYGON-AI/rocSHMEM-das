@@ -119,6 +119,9 @@ class GDAContext : public Context {
   __device__ void amo_add_dp(void *dst, T value, int qp_idx, int pe);
 
   template <typename T>
+  __device__ void amo_add_dp_thread(void *dst, T value, int qp_idx, int pe);
+
+  template <typename T>
   __device__ void amo_set(void *dst, T value, int pe);
 
   template <typename T>

@@ -241,6 +241,11 @@ __device__ void rocshmem_atomic_add_dp(T *dest, T val, int qp_idx, int pe) {
 }
 
 template <typename T>
+__device__ void rocshmem_atomic_add_dp_thread(T *dest, T val, int qp_idx, int pe) {
+  rocshmem_atomic_add_dp_thread(ROCSHMEM_CTX_DEFAULT, dest, val, qp_idx, pe);
+}
+
+template <typename T>
 __device__ void rocshmem_atomic_inc(T *dest, int pe) {
   rocshmem_atomic_inc(ROCSHMEM_CTX_DEFAULT, dest, pe);
 }
@@ -922,6 +927,15 @@ __device__ void rocshmem_atomic_add_dp(rocshmem_ctx_t ctx, T *dest, T val,
 }
 
 template <typename T>
+__device__ void rocshmem_atomic_add_dp_thread(rocshmem_ctx_t ctx, T *dest, T val,
+                                              int qp_idx, int pe) {
+  GPU_DPRINTF("Function: rocshmem_atomic_add (ctx=%zd, dest=%p, val=%g, pe=%d w%d)\n",
+    ctx.ctx_opaque, dest, (double)val, pe, translate_pe(ctx, pe));
+
+  get_internal_ctx(ctx)->amo_add_dp_thread<T>(dest, val, qp_idx, pe);
+}
+
+template <typename T>
 __device__ void rocshmem_atomic_inc(rocshmem_ctx_t ctx, T *dest, int pe) {
   GPU_DPRINTF("Function: rocshmem_atomic_inc (ctx=%zd, dest=%p, pe=%d w%d)\n",
     ctx.ctx_opaque, dest, pe, translate_pe(ctx, pe));
@@ -1328,6 +1342,10 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team,
   template __device__ void rocshmem_atomic_add_dp<T>(rocshmem_ctx_t ctx,       \
       T * dest, T value, int qp_idx, int pe);                                  \
   template __device__ void rocshmem_atomic_add_dp<T>(T * dest, T value,        \
+      int qp_idx, int pe);                                                     \
+  template __device__ void rocshmem_atomic_add_dp_thread<T>(rocshmem_ctx_t ctx, \
+      T * dest, T value, int qp_idx, int pe);                                  \
+  template __device__ void rocshmem_atomic_add_dp_thread<T>(T * dest, T value,  \
       int qp_idx, int pe);
 
 /**
@@ -1652,6 +1670,10 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team,
   __device__ void rocshmem_##TNAME##_atomic_add_dp(T *dest, T value,          \
       int qp_idx, int pe) {                                                   \
     rocshmem_atomic_add_dp<T>(dest, value, qp_idx, pe);                       \
+  }                                                                           \
+  __device__ void rocshmem_##TNAME##_atomic_add_dp_thread(T *dest, T value,    \
+      int qp_idx, int pe) {                                                   \
+    rocshmem_atomic_add_dp_thread<T>(dest, value, qp_idx, pe);                \
   }
 
 #define AMO_EXTENDED_DEF_GEN(T, TNAME)                                        \

@@ -132,6 +132,11 @@ __device__ void GDAContext::amo_add_dp(void *dst, T value, int qp_idx, int pe) {
 }
 
 template <typename T>
+__device__ void GDAContext::amo_add_dp_thread(void *dst, T value, int qp_idx, int pe) {
+  qps[qp_idx].atomic_nofetch_dp(get_remote_ptr(dst, pe), value, 0, pe); // must be implemented in a single thread
+}
+
+template <typename T>
 __device__ void GDAContext::amo_set(void *dst, T value, int pe) {
   amo_swap(dst, value, pe);
 }

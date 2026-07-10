@@ -510,6 +510,13 @@ __device__ void Context::amo_add_dp(void *dst, T value, int qp_idx, int pe) {
 }
 
 template <typename T>
+__device__ void Context::amo_add_dp_thread(void *dst, T value, int qp_idx, int pe) {
+  ctxStats.incStat(NUM_ATOMIC_ADD);
+
+  DISPATCH(amo_add_dp_thread(dst, value, qp_idx, pe));
+}
+
+template <typename T>
 __device__ void Context::amo_set(void *dst, T value, int pe) {
   ctxStats.incStat(NUM_ATOMIC_SET);
 
