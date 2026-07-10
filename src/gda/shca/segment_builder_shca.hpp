@@ -22,18 +22,18 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#ifndef LIBRARY_SRC_GDA_SEGMENT_BUILDER_HPP_
-#define LIBRARY_SRC_GDA_SEGMENT_BUILDER_HPP_
+#ifndef LIBRARY_SRC_GDA_SHCA_SEGMENT_BUILDER_HPP_
+#define LIBRARY_SRC_GDA_SHCA_SEGMENT_BUILDER_HPP_
 
-#include "gda/mlx5/provider_gda_mlx5.hpp"
+#include "gda/shca/provider_gda_shca.hpp"
 
 #include "util.hpp"
 
 namespace rocshmem {
 
-class SegmentBuilder {
+class SegmentBuilder_SHCA {
   public:
-    __device__ SegmentBuilder(uint64_t wqe_idx, void *base);
+    __device__ SegmentBuilder_SHCA(uint64_t wqe_idx, void *base);
 
     __device__ void update_ctrl_seg(uint16_t pi, uint8_t opcode, uint8_t opmod, uint32_t qp_num,
                                     uint8_t fm_ce_se, uint8_t ds, uint8_t signature, uint32_t imm);
@@ -49,17 +49,17 @@ class SegmentBuilder {
   private:
     const int SEGMENTS_PER_WQE = 4;
 
-    union mlx5_segment {
-      mlx5_wqe_ctrl_seg ctrl_seg;
-      mlx5_wqe_raddr_seg raddr_seg;
-      mlx5_wqe_data_seg data_seg;
-      mlx5_wqe_inl_data_seg inl_data_seg;
-      mlx5_wqe_atomic_seg atomic_seg;
+    union shca_segment {
+      shca_wqe_ctrl_seg ctrl_seg;
+      shca_wqe_raddr_seg raddr_seg;
+      shca_wqe_data_seg data_seg;
+      shca_wqe_inline_data_seg inl_data_seg;
+      shca_wqe_atomic_seg atomic_seg;
     }__attribute__((__aligned__(16)));
 
-    mlx5_segment *segp;
+    shca_segment *segp;
 };
 
 }  // namespace rocshmem
 
-#endif  // LIBRARY_SRC_GDA_SEGMENT_BUILDER_HPP_
+#endif  // LIBRARY_SRC_GDA_SHCA_SEGMENT_BUILDER_HPP_

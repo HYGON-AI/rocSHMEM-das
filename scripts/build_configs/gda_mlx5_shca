@@ -1,3 +1,4 @@
+#!/bin/bash
 ###############################################################################
 # Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
 #
@@ -21,18 +22,9 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 # IN THE SOFTWARE.
 ###############################################################################
-target_sources(
-  ${PROJECT_NAME}
-  PRIVATE
-    backend_gda_shca.cpp
-)
 
-if(GDA_SHCA)
-target_sources(
-  ${PROJECT_NAME}
-  PRIVATE
-    queue_pair_shca.cpp
-    segment_builder_shca.cpp
-    queue_pair_shca_multiqp.cpp
-)
-endif()
+set -e
+
+script_path=$(dirname "$(realpath $0)")
+
+source $script_path/gda -DGDA_MLX5=ON -DGDA_SHCA=ON $*

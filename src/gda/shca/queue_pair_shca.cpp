@@ -25,7 +25,7 @@
 #include "gda/queue_pair.hpp"
 #include "util.hpp"
 #include "containers/free_list_impl.hpp"
-#include "segment_builder.hpp"
+#include "segment_builder_shca.hpp"
 
 namespace rocshmem {
 
@@ -161,7 +161,7 @@ __device__ __forceinline__ void QueuePair::shca_build_rma_wqe(
     uintptr_t raddr, int32_t size, uint8_t opcode) {
   outstanding_wqes[my_sq_counter % OUTSTANDING_TABLE_SIZE] = my_sq_counter;
 
-  SegmentBuilder seg_build(my_sq_index, sq_buf);
+  SegmentBuilder_SHCA seg_build(my_sq_index, sq_buf);
 
   seg_build.update_ctrl_seg(my_sq_counter, opcode, 0, qp_num,
                             SHCA_WQE_CTRL_CQ_ALWAYS, 3, 0, 0);
@@ -262,7 +262,7 @@ __device__ __forceinline__ void QueuePair::shca_build_amo_wqe(
     uint64_t *wave_fetch_atomic) {
   outstanding_wqes[my_sq_counter % OUTSTANDING_TABLE_SIZE] = my_sq_counter;
 
-  SegmentBuilder seg_build(my_sq_index, sq_buf);
+  SegmentBuilder_SHCA seg_build(my_sq_index, sq_buf);
   seg_build.update_ctrl_seg(my_sq_counter, opcode, 0, qp_num,
                             SHCA_WQE_CTRL_CQ_ALWAYS, 4, 0, 0);
   seg_build.update_raddr_seg(raddr, rkey);

@@ -384,12 +384,12 @@ class QueuePair {
   shca_db_reg_t shca_db{};
   shca_cqe64 *shca_cq_buf{nullptr};
   uint32_t shca_fwb_bufsize;
-  volatile uint32_t *dbrec{nullptr};
-  uint64_t *sq_buf{nullptr};
-  uint16_t sq_wqe_cnt{0};
-  volatile uint32_t *cq_dbrec{nullptr};
-  uint32_t cq_cnt{0};
-  uint32_t cq_log_cnt{0};
+  // volatile uint32_t *dbrec_shca{nullptr};
+  // uint64_t *sq_buf_shca{nullptr};
+  // uint16_t sq_wqe_cnt_shca{0};
+  // volatile uint32_t *cq_dbrec_shca{nullptr};
+  // uint32_t cq_cnt_shca{0};
+  // uint32_t cq_log_cnt_shca{0};
 
   /* GDAProvider::IONIC START */
 

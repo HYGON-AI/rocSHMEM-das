@@ -2,7 +2,7 @@
 #include "util.hpp"
 #include "containers/free_list_impl.hpp"
 #include "gda/endian.hpp"
-#include "segment_builder.hpp"
+#include "segment_builder_mlx5.hpp"
 
 namespace rocshmem {
 
@@ -21,7 +21,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma_dp_single_lane(int32_t size, uintpt
   uint64_t my_sq_counter = __hip_atomic_fetch_add(&sq_posted, 1, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_AGENT);
   uint64_t my_sq_index = my_sq_counter & (sq_wqe_cnt - 1);
 
-  SegmentBuilder seg_build(my_sq_index, sq_buf);
+  SegmentBuilder_MLX5 seg_build(my_sq_index, sq_buf);
   seg_build.update_ctrl_seg(my_sq_counter, opcode, 0, qp_num, 0, 3, 0, 0);
   seg_build.update_raddr_seg(raddr, rkey);       
   seg_build.update_data_seg(laddr, size, lkey); 
@@ -49,7 +49,7 @@ __device__ void QueuePair::mlx5_post_wqe_amo_dp_single_lane(int32_t size, uintpt
   uint64_t my_sq_counter = __hip_atomic_fetch_add((uint64_t*)&sq_posted, 1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
   uint64_t my_sq_index = my_sq_counter & (sq_wqe_cnt - 1);
 
-  SegmentBuilder seg_build(my_sq_index, sq_buf);
+  SegmentBuilder_MLX5 seg_build(my_sq_index, sq_buf);
   seg_build.update_ctrl_seg(my_sq_counter, opcode, 0, qp_num, 0, 4, 0, 0);
   seg_build.update_raddr_seg(raddr, rkey);
   seg_build.update_atomic_seg(atomic_data, atomic_cmp);

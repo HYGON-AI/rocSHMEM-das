@@ -22,14 +22,14 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#include "segment_builder.hpp"
+#include "segment_builder_mlx5.hpp"
 
 #include "util.hpp"
 #include "gda/endian.hpp"
 
 namespace rocshmem {
 
-__device__ SegmentBuilder::SegmentBuilder(uint64_t wqe_idx, void *base) {
+__device__ SegmentBuilder_MLX5::SegmentBuilder_MLX5(uint64_t wqe_idx, void *base) {
   mlx5_segment *base_ptr = static_cast<mlx5_segment*>(base);
   size_t segment_offset = wqe_idx * SEGMENTS_PER_WQE;
   segp = &base_ptr[segment_offset];
@@ -70,7 +70,7 @@ __device__ SegmentBuilder::SegmentBuilder(uint64_t wqe_idx, void *base) {
  *   seg->imm                = imm;
  * }
  */
-__device__ void SegmentBuilder::update_ctrl_seg(uint16_t pi, uint8_t opcode, uint8_t opmod, uint32_t qp_num, uint8_t fm_ce_se, uint8_t ds, uint8_t signature, uint32_t imm) {
+__device__ void SegmentBuilder_MLX5::update_ctrl_seg(uint16_t pi, uint8_t opcode, uint8_t opmod, uint32_t qp_num, uint8_t fm_ce_se, uint8_t ds, uint8_t signature, uint32_t imm) {
   segp->ctrl_seg = {0};
   swap_endian_store(&segp->ctrl_seg.opmod_idx_opcode, ((uint32_t)opmod << 24) | ((uint32_t)pi << 8) | opcode);
   swap_endian_store(&segp->ctrl_seg.qpn_ds, qp_num << 8 | ds);
@@ -80,7 +80,7 @@ __device__ void SegmentBuilder::update_ctrl_seg(uint16_t pi, uint8_t opcode, uin
   segp++;
 }
 
-__device__ void SegmentBuilder::update_raddr_seg(uint64_t raddr, uint32_t rkey) {
+__device__ void SegmentBuilder_MLX5::update_raddr_seg(uint64_t raddr, uint32_t rkey) {
   segp->raddr_seg = {0};
   swap_endian_store(reinterpret_cast<uint64_t*>(&segp->raddr_seg.raddr), raddr);
   segp->raddr_seg.rkey = rkey;
@@ -100,7 +100,7 @@ __device__ void SegmentBuilder::update_raddr_seg(uint64_t raddr, uint32_t rkey) 
  *   seg->addr       = htobe64(address);
  * }
  */
-__device__ void SegmentBuilder::update_data_seg(uint64_t laddr, uint32_t size, uint32_t lkey) {
+__device__ void SegmentBuilder_MLX5::update_data_seg(uint64_t laddr, uint32_t size, uint32_t lkey) {
   segp->data_seg = {0};
   swap_endian_store(&segp->data_seg.byte_count, size);
   segp->data_seg.lkey = lkey;
@@ -108,7 +108,7 @@ __device__ void SegmentBuilder::update_data_seg(uint64_t laddr, uint32_t size, u
   segp++;
 }
 
-__device__ void SegmentBuilder::update_inl_data_seg(const void* laddr, int32_t size) {
+__device__ void SegmentBuilder_MLX5::update_inl_data_seg(const void* laddr, int32_t size) {
   // size is masked with 0x3FF because only the first 10 bits of byte_count are valid
   swap_endian_store(&segp->inl_data_seg.byte_count, ((size & 0x3FF) | MLX5_INLINE_SEG));
   // + 1 because we start packing the segment with data after the byte_count parameter
@@ -116,7 +116,7 @@ __device__ void SegmentBuilder::update_inl_data_seg(const void* laddr, int32_t s
   segp++;
 }
 
-__device__ void SegmentBuilder::update_atomic_seg(uint64_t atomic_data, uint64_t atomic_cmp) {
+__device__ void SegmentBuilder_MLX5::update_atomic_seg(uint64_t atomic_data, uint64_t atomic_cmp) {
   segp->atomic_seg = {0};
   swap_endian_store(reinterpret_cast<uint64_t*>(&segp->atomic_seg.swap_add), atomic_data);
   swap_endian_store(reinterpret_cast<uint64_t*>(&segp->atomic_seg.compare), atomic_cmp);
