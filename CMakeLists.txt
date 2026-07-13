@@ -160,22 +160,47 @@ endif()
 # Try to find the optional SMI fabric backend
 find_package(amd_smi QUIET)
 
+set(HAVE_AMDSMI_GPU_FABRIC_INFO FALSE)
+
 if(TARGET amd_smi)
   include(CheckLibraryExists)
+  include(CheckCXXSourceCompiles)
   include(CMakePushCheckState)
+
+  # Check if AMD SMI library has fabric info support
   cmake_push_check_state(RESET)
   set(CMAKE_REQUIRED_LIBRARIES amd_smi)
-  set(CMAKE_REQUIRED_QUIET TRUE)
-  check_library_exists(amd_smi amdsmi_get_gpu_fabric_info "" HAVE_AMDSMI_GPU_FABRIC_INFO)
+  set(CMAKE_REQUIRED_QUIET ON)  #静默检查
+  check_library_exists(amd_smi amdsmi_get_gpu_fabric_info "" HAVE_AMDSMI_FABRIC_FUNC)
   cmake_pop_check_state()
 
-  if(HAVE_AMDSMI_GPU_FABRIC_INFO)
-    message(STATUS "SMI fabric backend found with fabric info support - enabling pod-based IPC capability detection")
+  # Check if HIP runtime has hipMemFabricHandle_t
+  cmake_push_check_state(RESET)
+  set(CMAKE_REQUIRED_INCLUDES ${HIP_INCLUDE_DIRS})
+  check_cxx_source_compiles("
+    #include <hip/hip_runtime_api.h>
+    int main() {
+      hipMemFabricHandle_t handle;
+      (void)handle;
+      return 0;
+    }
+  " HAVE_HIP_FABRIC_HANDLE)
+  cmake_pop_check_state()
+
+  # Both conditions must be met for full fabric support
+  if(HAVE_AMDSMI_FABRIC_FUNC AND HAVE_HIP_FABRIC_HANDLE)
+    set(HAVE_AMDSMI_GPU_FABRIC_INFO TRUE)
+    message(STATUS "SMI library found with fabric info support - enabling pod-based IPC capability detection")
   else()
-    message(STATUS "SMI fabric backend lacks the required fabric info API - disabling pod-based IPC capability detection")
+    if(NOT HAVE_AMDSMI_FABRIC_FUNC)
+      message(STATUS "SMI library found but lacks smi_get_gpu_fabric_info - disabling pod-based IPC capability detection")
+    endif()
+    if(NOT HAVE_HIP_FABRIC_HANDLE)
+      message(STATUS "HIP runtime lacks hipMemFabricHandle_t support (requires ROCm 7.14+) - disabling fabric handle features")
+    endif()
   endif()
 else()
-  message(STATUS "SMI fabric backend not found - disabling pod-based IPC capability detection")
+  message(STATUS "SMI library not found - disabling pod-based IPC capability detection")
 endif()
 
 #############################################################################
@@ -186,14 +211,15 @@ if(USE_HEAP_DEVICE_VMM_FABRIC)
     message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_FABRIC requires ROCm 7.next or newer. Current ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}")
   endif()
 
-  # VMM Fabric allocator requires fabric info support for pod-based IPC
+  # VMM Fabric allocator requires both AMD SMI fabric info and HIP fabric handle support
   if(NOT HAVE_AMDSMI_GPU_FABRIC_INFO)
-    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_FABRIC requires an SMI backend with fabric info support. "
-                        "Either update the SMI backend or disable USE_HEAP_DEVICE_VMM_FABRIC.")
+    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_FABRIC requires both:\n"
+                        "  1. SMI library with xxxsmi_get_gpu_fabric_info support\n"
+                        "  2. HIP runtime with hipMemFabricHandle_t support (ROCm 7.14+)\n"
+                        "Either update to ROCm 7.14 or newer, or disable USE_HEAP_DEVICE_VMM_FABRIC.")
   endif()
 
-  # Note: Fabric handle support will be available in a future ROCm 7.x release
-  message(STATUS "USE_HEAP_DEVICE_VMM_FABRIC enabled. Requires fabric handle support (ROCm 7.next)")
+  message(STATUS "USE_HEAP_DEVICE_VMM_FABRIC enabled with full fabric handle support")
 endif()
 
 #############################################################################
@@ -205,10 +231,13 @@ set(DEFAULT_GPUS
     gfx936;
     gfx938)
 
-if(${ROCM_MAJOR_VERSION} GREATER 6)
-  list(APPEND DEFAULT_GPUS gfx950)
-  list(APPEND DEFAULT_GPUS gfx1250)
-endif()
+#if(${ROCM_MAJOR_VERSION} GREATER 6)
+#  list(APPEND DEFAULT_GPUS gfx950)
+#endif()
+
+#if(${ROCM_MAJOR_VERSION} GREATER 7 OR (${ROCM_MAJOR_VERSION} EQUAL 7 AND ${ROCM_MINOR_VERSION} GREATER_EQUAL 14))
+#  list(APPEND DEFAULT_GPUS gfx1250)
+#endif()
 
 if($ENV{BUILD_LOCAL_GPU_TARGET_ONLY})
   set(BUILD_LOCAL_GPU_TARGET_ONLY ON)
