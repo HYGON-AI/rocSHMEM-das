@@ -41,7 +41,6 @@
 #include "hsakmt/hsakmt.h"
 #include "hsakmt/hsakmttypes.h"
 
-namespace rocshmem {
 namespace anvil {
 
 class SdmaQueue {
@@ -51,6 +50,7 @@ class SdmaQueue {
   ~SdmaQueue();
 
   SdmaQueueDeviceHandle* deviceHandle() const;
+  SdmaQueueSingleProducerDeviceHandle* singleProducerDeviceHandle() const;
   void dump(std::ofstream& logFile);
 
  private:
@@ -60,6 +60,7 @@ class SdmaQueue {
   void* queueBuffer_;
   HsaQueueResource queue_;
   SdmaQueueDeviceHandle* deviceHandle_;
+  SdmaQueueSingleProducerDeviceHandle* singleProducerDeviceHandle_{nullptr};
 };
 
 class AnvilLib {
@@ -128,7 +129,7 @@ inline void checkHipError(hipError_t err, const char* msg, const char* file, int
   }
 }
 
-#define ANVIL_CHECK_HIP_ERROR(cmd) rocshmem::anvil::checkHipError((cmd), #cmd, __FILE__, __LINE__)
+#define ANVIL_CHECK_HIP_ERROR(cmd) anvil::checkHipError((cmd), #cmd, __FILE__, __LINE__)
 
 // Allow access to peerDeviceId from deviceId
 inline void EnablePeerAccess(int const deviceId, int const peerDeviceId) {
@@ -148,6 +149,5 @@ inline void EnablePeerAccess(int const deviceId, int const peerDeviceId) {
 }
 
 }  // namespace anvil
-}  // namespace rocshmem
 
 #endif  // LIBRARY_SRC_SDMA_ANVIL_HPP_
