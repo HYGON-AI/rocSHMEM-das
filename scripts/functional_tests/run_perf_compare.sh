@@ -353,16 +353,32 @@ echo ">>> All test runs complete"
 echo ""
 echo ">>> Step 3: Generating comparison plots"
 
+# Helper: resolve log directory (supports both direct and iterated formats)
+resolve_log_dir() {
+  local dir="$1"
+  # If dir contains .log files directly, use it as-is
+  if ls "${dir}"/*.log &>/dev/null 2>&1; then
+    echo "$dir"
+  else
+    # Otherwise assume iterated format: dir/logs-SUITE-*
+    echo "${dir}/logs-${SUITE}-*"
+  fi
+}
+
+# Resolve paths for both modes
+BASELINE_RESOLVED=$(resolve_log_dir "$BUILD_BASELINE")
+BRANCH_RESOLVED=$(resolve_log_dir "$BUILD_BRANCH")
+
 # Build --variants args: always include the branch, then extra variants
-VARIANT_ARGS=("${BRANCH_LABEL}:$BUILD_BRANCH/logs-${SUITE}-*")
+VARIANT_ARGS=("${BRANCH_LABEL}:$BRANCH_RESOLVED")
 for spec in "${VARIANT_SPECS[@]}"; do
   IFS=':' read -r vname venv vcmake <<< "$spec"
   vdir="$PROJECTS_DIR/build-${BRANCH_SAFE}-${vname}"
-  VARIANT_ARGS+=("${vname}:${vdir}/logs-${SUITE}-*")
+  VARIANT_ARGS+=("${vname}:$(resolve_log_dir "$vdir")")
 done
 
 "$PYTHON" "$COMPARE" \
-  --baseline "$BUILD_BASELINE/logs-${SUITE}-*" \
+  --baseline "$BASELINE_RESOLVED" \
   --variants "${VARIANT_ARGS[@]}" \
   --outdir "$OUTDIR"
 

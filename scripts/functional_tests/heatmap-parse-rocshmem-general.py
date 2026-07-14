@@ -133,6 +133,10 @@ failed_format = workbook.add_format({
     'text_wrap': True
 })
 
+# 收集所有环境信息，最后统一写入
+env_data_list = []
+env_sheet_name = "EnvInfo"
+
 for dir, file_names in files_in_dir.items():
     sheet_name = f"{dir}"[:31]
     worksheet = workbook.add_worksheet(sheet_name)
@@ -140,19 +144,14 @@ for dir, file_names in files_in_dir.items():
     worksheet.set_column(0, 200, 14)  # 足够宽
     all_data = []
     
-    # 创建当前目录的环境信息工作表
-    env_sheet_name = f"EnvInfo({dir})"[:31]
-    env_sheet = workbook.add_worksheet(env_sheet_name)
-    
-    # 查找并添加env_info.log
+    # 收集环境信息（暂不写入）
     env_log_path = os.path.join(dir, "env_info.log")
     if os.path.isfile(env_log_path):
-        env_sheet.write(0, 0, f"--- {dir} ---", workbook.add_format({'bold': True}))
-        env_row = 1
+        env_info_content = []
         with open(env_log_path, 'r', encoding='utf-8') as f:
             for line in f:
-                env_sheet.write_string(env_row, 0, line.strip('\n'))
-                env_row += 1
+                env_info_content.append(line.strip('\n'))
+        env_data_list.append((dir, env_info_content))
 
     for file in file_names:
         mpirun_cmd = ""
@@ -340,6 +339,21 @@ for dir, file_names in files_in_dir.items():
 
         dataset_count += 1
         dataset_count_one_op += 1
+
+# 最后创建 EnvInfo 工作表（放在最后）
+if env_data_list:
+    env_sheet_name = "EnvInfo"
+    env_sheet = workbook.add_worksheet(env_sheet_name)
+    global_env_row = 0
+    
+    for dir, env_content in env_data_list:
+        if global_env_row > 0:
+            global_env_row += 5
+        env_sheet.merge_range(global_env_row, 0, global_env_row, 13, f"********************************************** {dir} **********************************************", yellow_format)
+        global_env_row += 1
+        for line in env_content:
+            env_sheet.write_string(global_env_row, 0, line)
+            global_env_row += 1
 
 workbook.close()
 print(f"\n✅ 生成成功：{out_file}.xlsx")

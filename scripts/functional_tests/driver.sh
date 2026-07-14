@@ -1630,6 +1630,8 @@ if [[ -n "$ARTIFACT_DIR" && $EXIT_STATUS -eq 0 ]]; then
         # Full comparison: caller supplied pre-built baseline and branch directories
         bash "$RUN_COMPARE" \
           --skip-build \
+          --skip-baseline \
+          --skip-branch \
           --suite "$TEST" \
           --iterations 1 \
           --baseline-dir "$PERF_BASELINE_DIR" \
