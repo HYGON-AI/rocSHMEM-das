@@ -1125,6 +1125,7 @@ void Tester::AlignAlgBwWithRccl(TesterArguments args, uint64_t size, double time
   switch (_type) {
     case TeamBroadcastTestType:
     case TeamReductionTestType:
+    case TeamBroadcastmemOnStreamTestType:
       bw_factor = 1;
       size_factor = 1;
       is_match = true;

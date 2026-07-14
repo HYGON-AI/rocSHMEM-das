@@ -158,6 +158,8 @@ static void finalize_slr()
 using namespace rocshmem;
 
 static void printDeviceInfo(int myid, int numprocs) {
+  rocshmem_barrier_all();
+
   char hostname[256];
   gethostname(hostname, sizeof(hostname));
 
