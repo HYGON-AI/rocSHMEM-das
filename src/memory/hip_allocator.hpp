@@ -134,10 +134,58 @@ class HIPAllocatorFinegrained_HDP : public MemoryAllocator {
 public:
   HIPAllocatorFinegrained_HDP()
       : MemoryAllocator(
-           hipExtMallocWithFlags,
+           hdp_malloc_with_flags,
            hipFree,
-           hipDeviceMallocFinegrained
+           get_hdp_malloc_flags()
       ) {
+  }
+private:
+  static bool is_hdp_disabled() {
+    char* disable_hdp = getenv("ROCSHMEM_GDR_DISABLE_HDP"); // Both Symmetric Heap can use XDP when disable.
+    if (disable_hdp != NULL) {
+      char disable_value[16];
+      strncpy(disable_value, disable_hdp, sizeof(disable_value) - 1);
+      disable_value[sizeof(disable_value) - 1] = '\0';
+      for (char* p = disable_value; *p; ++p) {
+        *p = tolower(*p);
+      }
+
+      if (strcmp(disable_value, "1") == 0 ||
+          strcmp(disable_value, "true") == 0 ||
+          strcmp(disable_value, "on") == 0 ||
+          strcmp(disable_value, "yes") == 0) {
+        FILE* fp = fopen("/sys/module/hycu/parameters/xdp_size", "r");
+        if (!fp) {
+          return false;
+        }
+
+        unsigned long xdp_size;
+        int result = fscanf(fp, "%lu", &xdp_size);
+        fclose(fp);
+
+        if (result != 1) {
+          return false;
+        }
+        return xdp_size > 0;
+      }
+    }
+    return false;
+  }
+
+  static unsigned int get_hdp_malloc_flags() {
+#if defined(HIP_VERSION_PATCH) && (HIP_VERSION_PATCH >= 25521)
+    if (is_hdp_disabled()) {
+      return hipDeviceMallocUncachedXdp;
+    } else {
+      return hipDeviceMallocFinegrained;
+    }
+#else
+   return hipDeviceMallocFinegrained;
+#endif
+  }
+
+  static hipError_t hdp_malloc_with_flags(void** ptr, size_t size, unsigned int ) {
+    return hipExtMallocWithFlags(ptr, size, get_hdp_malloc_flags());
   }
 };
 
