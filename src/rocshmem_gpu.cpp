@@ -75,25 +75,33 @@
 
 namespace rocshmem {
 
-__device__  rocshmem_ctx_t
-__attribute__((visibility("default"))) ROCSHMEM_CTX_DEFAULT{};
-
-__constant__  rocshmem_ctx_t *rocshmem_ctx_array;
-
-__constant__ Backend *device_backend_proxy;
-
-__constant__ constmem_t constmem;
-
-__constant__ rocshmem_ctx_t ROCSHMEM_CTX_INVALID = {nullptr, nullptr};
-
-__constant__ struct logd_constants logd_constants;
-
-namespace device {
-    extern "C" __constant__ rocshmem_team_t
-    __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD = nullptr;
-    extern "C" __constant__ rocshmem_team_t
-    __attribute__((visibility("default"), used)) ROCSHMEM_TEAM_SHARED = nullptr;
-}
+/*
+ * Device global definitions were moved to device_globals.cpp so the host-only
+ * shared library does not carry a second HIP device image or a duplicate copy
+ * of rocSHMEM device state. Keep the former definitions here, commented out,
+ * to document their original ownership and make the split easy to trace.
+ *
+ * __device__ rocshmem_ctx_t
+ * __attribute__((visibility("default"))) ROCSHMEM_CTX_DEFAULT{};
+ *
+ * __constant__ rocshmem_ctx_t* rocshmem_ctx_array;
+ *
+ * __constant__ Backend* device_backend_proxy;
+ *
+ * __constant__ constmem_t constmem;
+ *
+ * __constant__ rocshmem_ctx_t ROCSHMEM_CTX_INVALID = {nullptr, nullptr};
+ *
+ * __constant__ struct logd_constants logd_constants;
+ *
+ * namespace device {
+ * extern "C" __constant__ rocshmem_team_t
+ * __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD = nullptr;
+ * extern "C" __constant__ rocshmem_team_t
+ * __attribute__((visibility("default"), used))
+ *     ROCSHMEM_TEAM_SHARED = nullptr;
+ * }
+ */
 
 #if defined(ENABLE_IPC_BITCODE)
   typedef IPCContext ContextTy;

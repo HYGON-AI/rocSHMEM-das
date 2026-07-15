@@ -67,6 +67,7 @@ option(BUILD_UNIT_TESTS "Build the unit tests (Requires MPI)" OFF)
 option(BUILD_PYTHON_TESTS "Install rocshmem4py test assets (RO execution requires MPI launcher, Python, pip)" OFF)
 option(BUILD_TESTS_ONLY "Build only tests. Used to link against rocSHMEM in a ROCm Release" OFF)
 option(BUILD_TOOLS "Build binary tools (e.g., rocshmem_info)" ON)
+option(BUILD_SPLIT_LIBRARIES "Build separate host shared and device static rocSHMEM libraries" OFF)
 option(MONOLITHIC_PACKAGE "Build all components into a single package" ON)
 option(BUILD_CTESTS "Register tests with CTest for tier-based execution" ON)
 
@@ -255,7 +256,7 @@ message(STATUS "Compiling for ${GPU_TARGETS}")
 # CREATE ROCSHMEM LIBRARY
 ###############################################################################
 if (NOT BUILD_TESTS_ONLY)
-  add_library(${PROJECT_NAME})
+  add_library(${PROJECT_NAME} STATIC)
   add_library(roc::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
 
   #############################################################################
@@ -522,6 +523,10 @@ endif (NOT BUILD_TESTS_ONLY)
 ###############################################################################
 if (NOT BUILD_TESTS_ONLY)
   add_subdirectory(src)
+  if(BUILD_SPLIT_LIBRARIES)
+    # Create the split libraries after the complete rocshmem target is populated.
+    include(${CMAKE_SOURCE_DIR}/cmake/RocshmemSplitLibraries.cmake)
+  endif()
 endif (NOT BUILD_TESTS_ONLY)
 
 ###############################################################################
