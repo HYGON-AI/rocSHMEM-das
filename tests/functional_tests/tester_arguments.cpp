@@ -223,6 +223,7 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     case TeamAllToAllTestType:
     case TeamAllToAllvTestType:
     case TeamBroadcastTestType:
+    case BroadcastWaveTestType:
       min_msg_size = 8;
       break;
     case TeamCtxInfraTestType:
