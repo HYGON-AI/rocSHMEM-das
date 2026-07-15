@@ -372,7 +372,7 @@ __device__ int GDAContext::reduce_das(rocshmem_team_t team, T *dest,
       chunk_size = seg_size / PE_size;
 
       if (n_seg > 0) {
-        internal_ring_allreduce<T, Op>(dest, source, nreduce, team_obj, n_seg,
+        internal_ring_allreduce_das<T, Op>(dest, source, nreduce, team_obj, n_seg,
           seg_size, chunk_size, wf_info);
       }
       if (n_seg_up > n_seg) {
@@ -382,7 +382,7 @@ __device__ int GDAContext::reduce_das(rocshmem_team_t team, T *dest,
         int p_chunk = p_count / PE_size;
 
         if (p_chunk > 0) {
-          internal_ring_allreduce<T, Op>(p_dst, p_src, (p_chunk * PE_size),
+          internal_ring_allreduce_das<T, Op>(p_dst, p_src, (p_chunk * PE_size),
             team_obj, 1, (p_chunk * PE_size), p_chunk, wf_info);
         }
 
@@ -695,10 +695,118 @@ __device__ __forceinline__ bool gda_copy_if_self(int pe, void* dst,
 }
 
 template <typename T>
-__device__ void GDAContext::alltoall_das(rocshmem_team_t team, T *dst,
+__device__ void GDAContext::alltoall_linear_wg_das(rocshmem_team_t team, T *dst,
+                                            const T *src, int nelems,
+                                            int elem_offset, int elem_count) {
+  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
+
+  int pe_start = team_obj->tinfo_wrt_world->pe_start;
+  int pe_size = team_obj->num_pes;
+  int stride = team_obj->tinfo_wrt_world->stride;
+  long *pSync = team_obj->alltoall_pSync;
+  int my_pe_in_team = team_obj->my_pe;
+
+  // Normalize: elem_count == -1 means "process the full [0, nelems) range".
+  if (elem_count < 0) elem_count = nelems;
+
+  int wf_id = get_flat_block_id() / WF_SIZE;
+  int wf_count = (int) ceil((double)get_flat_block_size() / (double)WF_SIZE);
+
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
+  // Empty slices still participate in the team synchronization below, but
+  // must not submit a zero-byte RDMA operation. alltoallv_on_stream may launch
+  // more workgroups than elements because its counts reside in device memory.
+  if (elem_count > 0) {
+    const int chunk_elems = collective_chunk_elems<T>(
+        elem_count, kAlltoallChunks, pe_size > constmem.ipc_shm_size);
+    for (int processed = 0; processed < elem_count;) {
+      const int count = min(chunk_elems, elem_count - processed);
+      const int offset = elem_offset + processed;
+      // Have each PE put their designated data to the other PEs.
+      for (int j = wf_id; j < pe_size; j += wf_count) {
+        int dest_pe = team_obj->get_pe_in_world(j);
+        internal_putmem_nbi_wave(&dst[my_pe_in_team * nelems + offset],
+          &src[j * nelems + offset],
+          count * sizeof(T), dest_pe, dest_pe, wf_info);
+      }
+      // Drain each chunk before allowing the next burst of peer transfers.
+      for (int j = wf_id; j < pe_size; j += wf_count) {
+        int dest_pe = team_obj->get_pe_in_world(j);
+        internal_quiet(dest_pe, wf_info);
+      }
+      processed += count;
+    }
+  }
+
+  // wait until everyone has obtained their designated data
+  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, pSync, wf_info);
+}
+
+template <typename T>
+__device__ void GDAContext::alltoall_linear_thread_puts_das(rocshmem_team_t team,
+    T *dst, const T *src, int nelems, int elem_offset, int elem_count) {
+  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
+
+  int pe_size = team_obj->num_pes;
+  long *pSync = team_obj->alltoall_pSync;
+  int my_pe_in_team = team_obj->my_pe;
+  uint64_t a2a_sn = team_obj->alltoall_sequence_number;
+  uint64_t alltoall_pSync_offset = (a2a_sn % 2) * pe_size;
+  long completion_count = a2a_sn / 2 + 1;
+
+  // Normalize: elem_count == -1 means "process the full [0, nelems) range".
+  if (elem_count < 0) elem_count = nelems;
+
+  int tid = get_flat_block_id();
+  int step_size = min(get_flat_block_size(), WF_SIZE);
+
+  int* qp_indices = reinterpret_cast<int*>(team_obj->pWrk);
+
+  // Have each PE put their designated data to the other PEs
+  for (int j = tid; j < pe_size; j += step_size) {
+    int dest_pe = team_obj->get_pe_in_world(j);
+    ActiveWFInfo wf_info(dest_pe);
+    int qp_index = get_qp_index(dest_pe, wf_info);
+    qp_indices[j] = qp_index;
+    uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
+    if (gda_copy_if_self(
+          dest_pe, &dst[my_pe_in_team * nelems + elem_offset],
+          &src[j * nelems + elem_offset], elem_count * sizeof(T))) {
+      pSync[alltoall_pSync_offset + my_pe_in_team] = completion_count;
+      continue;
+    }
+
+    put_nbi_shared_qp(qp_index,
+      reinterpret_cast<char*>(&dst[my_pe_in_team * nelems + elem_offset]) + base_heap_offset,
+      &src[j * nelems + elem_offset], elem_count * sizeof(T), false);
+    atomic_nofetch_shared_qp(qp_index,
+      reinterpret_cast<char *>(&pSync[alltoall_pSync_offset + my_pe_in_team]) +
+      base_heap_offset, 1);
+  }
+
+  // wait until everyone has obtained their designated data
+  for (int j = tid; j < pe_size; j+= step_size) {
+    int dest_pe = team_obj->get_pe_in_world(j);
+
+    long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
+    while (uncached_load(sync_flags) < completion_count) { }
+
+    qps[qp_indices[j]].quiet_single();
+
+  }
+
+  if (is_thread_zero_in_block()) {
+    team_obj->alltoall_sequence_number++;
+  }
+
+  __syncthreads();
+}
+
+template <typename T>
+__device__ void GDAContext::alltoall_wg_das(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems,
                                      int elem_offset, int elem_count) {
-  alltoall_linear(team, dst, src, nelems, elem_offset, elem_count);
+  alltoall_linear_wg_das(team, dst, src, nelems, elem_offset, elem_count);
 }
 
 template <typename T>
@@ -724,16 +832,16 @@ __device__ void GDAContext::alltoallv_das(rocshmem_team_t team,
     size_t elem_offset = 0;
     size_t elem_count = 0;
     split_wg_range(nelems, wg_id, wg_count, &elem_offset, &elem_count);
-    alltoall(team, dest, source, static_cast<int>(nelems),
+    alltoall_wg_das(team, dest, source, static_cast<int>(nelems),
              static_cast<int>(elem_offset), static_cast<int>(elem_count));
     return;
   }
 
   if (constmem.alltoall_wg_algo == gda::ALLTOALLV_WG_ALGO_COPY) {
-    alltoallv_copy(team, dest, dest_nelems, dest_displs, source, source_nelems,
+    alltoallv_copy_das(team, dest, dest_nelems, dest_displs, source, source_nelems,
                    source_displs, wg_id, wg_count);
   } else {
-    alltoallv_get(team,
+    alltoallv_get_das(team,
                   dest, dest_nelems, dest_displs,
                   source, source_nelems, source_displs,
                   wg_id, wg_count);
@@ -930,114 +1038,6 @@ __device__ void GDAContext::alltoallv_get_das(rocshmem_team_t team, T *dest,
     while (uncached_load(sync_flags) < completion_count) { }
 
     qps[qp_index].quiet_single();
-  }
-
-  if (is_thread_zero_in_block()) {
-    team_obj->alltoall_sequence_number++;
-  }
-
-  __syncthreads();
-}
-
-template <typename T>
-__device__ void GDAContext::alltoall_linear_das(rocshmem_team_t team, T *dst,
-                                            const T *src, int nelems,
-                                            int elem_offset, int elem_count) {
-  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
-
-  int pe_start = team_obj->tinfo_wrt_world->pe_start;
-  int pe_size = team_obj->num_pes;
-  int stride = team_obj->tinfo_wrt_world->stride;
-  long *pSync = team_obj->alltoall_pSync;
-  int my_pe_in_team = team_obj->my_pe;
-
-  // Normalize: elem_count == -1 means "process the full [0, nelems) range".
-  if (elem_count < 0) elem_count = nelems;
-
-  int wf_id = get_flat_block_id() / WF_SIZE;
-  int wf_count = (int) ceil((double)get_flat_block_size() / (double)WF_SIZE);
-
-  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
-  // Empty slices still participate in the team synchronization below, but
-  // must not submit a zero-byte RDMA operation. alltoallv_on_stream may launch
-  // more workgroups than elements because its counts reside in device memory.
-  if (elem_count > 0) {
-    const int chunk_elems = collective_chunk_elems<T>(
-        elem_count, kAlltoallChunks, pe_size > constmem.ipc_shm_size);
-    for (int processed = 0; processed < elem_count;) {
-      const int count = min(chunk_elems, elem_count - processed);
-      const int offset = elem_offset + processed;
-      // Have each PE put their designated data to the other PEs.
-      for (int j = wf_id; j < pe_size; j += wf_count) {
-        int dest_pe = team_obj->get_pe_in_world(j);
-        internal_putmem_nbi_wave(&dst[my_pe_in_team * nelems + offset],
-          &src[j * nelems + offset],
-          count * sizeof(T), dest_pe, dest_pe, wf_info);
-      }
-      // Drain each chunk before allowing the next burst of peer transfers.
-      for (int j = wf_id; j < pe_size; j += wf_count) {
-        int dest_pe = team_obj->get_pe_in_world(j);
-        internal_quiet(dest_pe, wf_info);
-      }
-      processed += count;
-    }
-  }
-
-  // wait until everyone has obtained their designated data
-  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, pSync, wf_info);
-}
-
-template <typename T>
-__device__ void GDAContext::alltoall_linear_thread_puts_das(rocshmem_team_t team,
-    T *dst, const T *src, int nelems, int elem_offset, int elem_count) {
-  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
-
-  int pe_size = team_obj->num_pes;
-  long *pSync = team_obj->alltoall_pSync;
-  int my_pe_in_team = team_obj->my_pe;
-  uint64_t a2a_sn = team_obj->alltoall_sequence_number;
-  uint64_t alltoall_pSync_offset = (a2a_sn % 2) * pe_size;
-  long completion_count = a2a_sn / 2 + 1;
-
-  // Normalize: elem_count == -1 means "process the full [0, nelems) range".
-  if (elem_count < 0) elem_count = nelems;
-
-  int tid = get_flat_block_id();
-  int step_size = min(get_flat_block_size(), WF_SIZE);
-
-  int* qp_indices = reinterpret_cast<int*>(team_obj->pWrk);
-
-  // Have each PE put their designated data to the other PEs
-  for (int j = tid; j < pe_size; j += step_size) {
-    int dest_pe = team_obj->get_pe_in_world(j);
-    ActiveWFInfo wf_info(dest_pe);
-    int qp_index = get_qp_index(dest_pe, wf_info);
-    qp_indices[j] = qp_index;
-    uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
-    if (gda_copy_if_self(
-          dest_pe, &dst[my_pe_in_team * nelems + elem_offset],
-          &src[j * nelems + elem_offset], elem_count * sizeof(T))) {
-      pSync[alltoall_pSync_offset + my_pe_in_team] = completion_count;
-      continue;
-    }
-
-    put_nbi_shared_qp(qp_index,
-      reinterpret_cast<char*>(&dst[my_pe_in_team * nelems + elem_offset]) + base_heap_offset,
-      &src[j * nelems + elem_offset], elem_count * sizeof(T), false);
-    atomic_nofetch_shared_qp(qp_index,
-      reinterpret_cast<char *>(&pSync[alltoall_pSync_offset + my_pe_in_team]) +
-      base_heap_offset, 1);
-  }
-
-  // wait until everyone has obtained their designated data
-  for (int j = tid; j < pe_size; j+= step_size) {
-    int dest_pe = team_obj->get_pe_in_world(j);
-
-    long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
-    while (uncached_load(sync_flags) < completion_count) { }
-
-    qps[qp_indices[j]].quiet_single();
-
   }
 
   if (is_thread_zero_in_block()) {

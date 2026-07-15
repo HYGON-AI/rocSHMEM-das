@@ -193,6 +193,7 @@
   X(HostWaitUntilSomeStatus,   148)  \
   X(TeamReduceScatter,         149)  \
   X(BroadcastWave,             150)  \
+  X(AllToAllWave,              151)  \
   X(DefaultCtx_WAVEPutNBI_DP,  500)  \
   X(DefaultCtx_AMO_Add_DP,     501)  \
   X(WAVEPutNBI_DP,             502)  \

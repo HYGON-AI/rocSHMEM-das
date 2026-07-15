@@ -37,12 +37,12 @@ class IPCContext : public Context {
 #if defined(USE_DAS)
   // DAS implementations called by the original collective entry points.
   template <typename T>
-  __device__ void alltoall_das(rocshmem_team_t team, T *dest, const T *source,
+  __device__ void alltoall_wg_das(rocshmem_team_t team, T *dest, const T *source,
                            int nelems, int elem_offset = 0,
                            int elem_count = -1);
 
   template <typename T>
-  __device__ void alltoall_linear_das(rocshmem_team_t team, T *dest,
+  __device__ void alltoall_linear_wg_das(rocshmem_team_t team, T *dest,
                                   const T *source, int nelems,
                                   int elem_offset = 0, int elem_count = -1);
 
@@ -67,6 +67,11 @@ class IPCContext : public Context {
   __device__ void internal_broadcastmem_wg_das(void *dest, const void *source, int nelems, int pe_root,
                                      int pe_start, int stride, int pe_size,
                                      long *p_sync);
+  
+  __device__ void internal_chain_broadcast(void *dst, const void *src, int nelems,
+                                          int pe_root, int pe_start,
+                                          int stride, int pe_size,
+                                          long *p_sync);  // NOLINT(runtime/int)
 
   template <typename T, ROCSHMEM_OP Op>
   __device__ void internal_ring_allreduce_das(T *dst, const T *src,
@@ -209,9 +214,12 @@ class IPCContext : public Context {
                                 void *dest, const void *source, int nelement, int PE_root);
 
   template <typename T>
-  __device__ void alltoall(rocshmem_team_t team, T *dest, const T *source,
+  __device__ void alltoall_wg(rocshmem_team_t team, T *dest, const T *source,
                            int nelems, int elem_offset = 0,
                            int elem_count = -1);
+
+  __device__ void alltoallmem_wg(rocshmem_team_t team, void* dest,
+                                   const void* source, int nelems);
 
   template <typename T>
   __device__ void alltoallv(rocshmem_team_t team,
@@ -220,6 +228,13 @@ class IPCContext : public Context {
                             T *source, const size_t source_nelems[],
                             const size_t source_displs[], int wg_id = 0,
                             int wg_count = 1);
+
+  template <typename T>
+  __device__ int alltoall_wave(rocshmem_team_t team, T* dest, 
+                                  const T* source, int nelems);
+
+  __device__ int alltoallmem_wave(rocshmem_team_t team, void* dest, 
+                                  const void* source, int nelems);
 
   template <typename T>
   __device__ void fcollect(rocshmem_team_t team, T *dest, const T *source,
@@ -457,24 +472,19 @@ class IPCContext : public Context {
   template <typename T>
   __device__ void internal_get_broadcast_wave(T *dst, const T *src, int nelems, int pe_root);
 
-  __device__ void internal_chain_broadcast(void *dst, const void *src, int nelems,
-                                          int pe_root, int pe_start,
-                                          int stride, int pe_size,
-                                          long *p_sync);  // NOLINT(runtime/int)
-
   template <typename T>
   __device__ void fcollect_linear(rocshmem_team_t team, T *dest,
                                   const T *source, int nelems,
                                   int elem_offset, int elem_count);
 
-  template <typename T>
-  __device__ void alltoall_linear(rocshmem_team_t team, T *dest,
-                                  const T *source, int nelems,
-                                  int elem_offset = 0, int elem_count = -1);
-  template <typename T>
-  __device__ void alltoall_linear_thread_puts(rocshmem_team_t team, T *dest,
-                                  const T *source, int nelems,
-                                  int elem_offset = 0, int elem_count = -1);
+  __device__ void internal_alltoallmem_wg(rocshmem_team_t team, void *dst,
+                                          const void *src, int nelems);
+
+  __device__ void alltoallmem_wg_linear(rocshmem_team_t team, void *dest,
+                                        const void *source, int nelems);
+
+  __device__ void alltoallmem_wg_linear_thread_puts(rocshmem_team_t team, void *dest,
+                                                    const void *source, int nelems);
 
   __device__ void internal_sync(int pe, int PE_start, int stride, int PE_size,
                                 int64_t *pSync);
@@ -518,6 +528,15 @@ class IPCContext : public Context {
 
   __device__ void internal_getmem_wave(void *dest, const void *source,
                                       size_t nelems, int pe);
+
+  __device__ void internal_alltoallmem_wave(rocshmem_team_t team, void *dst,
+                                            const void *src, int nelems);
+
+  __device__ void alltoallmem_linear_wave(rocshmem_team_t team, void *dst,
+                                            const void *src, int nelems);
+
+  __device__ void alltoallmem_linear_thread_puts_wave(rocshmem_team_t team,
+      void *dst, const void *src, int nelems);
 
   //Temporary scratchpad memory used by internal barrier algorithms.
   int64_t *barrier_sync{nullptr};
