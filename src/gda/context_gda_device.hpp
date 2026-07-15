@@ -42,12 +42,12 @@ class GDAContext : public Context {
       void *dst, const void *src, int nelems, int pe_root, ActiveWFInfo &wf_info);
 
   template <typename T>
-  __device__ void alltoall_das(rocshmem_team_t team, T *dest, const T *source,
+  __device__ void alltoall_wg_das(rocshmem_team_t team, T *dest, const T *source,
                            int nelems, int elem_offset = 0,
                            int elem_count = -1);
 
   template <typename T>
-  __device__ void alltoall_linear_das(rocshmem_team_t team, T *dest,
+  __device__ void alltoall_linear_wg_das(rocshmem_team_t team, T *dest,
     const T *source, int nelems, int elem_offset = 0, int elem_count = -1);
 
   template <typename T>
@@ -96,12 +96,28 @@ class GDAContext : public Context {
       ActiveWFInfo &wf_info);
 
   template <typename T, ROCSHMEM_OP Op>
+  __device__ void internal_proxy_allreduce(T *dst, const T *src, int nelems,
+      GDATeam *team_obj, ActiveWFInfo &wf_info);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ void internal_fused_ipc_reduce(T *dst, const T *src,
+      int source_offset, int count, int local_size, int local_slot,
+      int wg_id, int wg_size);
+
+  template <typename T, ROCSHMEM_OP Op>
   __device__ int reduce_das(rocshmem_team_t team, T *dest, const T *source, int nreduce);
 
   template <typename T, ROCSHMEM_OP Op>
   __device__ int reduce_scatter_wg_das(rocshmem_team_t team, T *dest, const T *source,
                                    int nreduce, int elem_offset = 0,
                                    int elem_count = -1);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int hybrid_reduce_scatter_wg(GDATeam *team_obj, T *dest, const T *source,
+                                          int nreduce, int elem_offset,
+                                          int elem_count, int PE_start, int stride,
+                                          int PE_size, int team_rank);
+
 #endif  // USE_DAS
 
   __host__ GDAContext(Backend *b, unsigned int ctx_id);
@@ -222,11 +238,6 @@ class GDAContext : public Context {
   __device__ int reduce_scatter_wg(rocshmem_team_t team, T *dest, const T *source,
                                    int nreduce, int elem_offset = 0,
                                    int elem_count = -1);
-  template <typename T, ROCSHMEM_OP Op>
-  __device__ int hybrid_reduce_scatter_wg(GDATeam *team_obj, T *dest, const T *source,
-                                          int nreduce, int elem_offset,
-                                          int elem_count, int PE_start, int stride,
-                                          int PE_size, int team_rank);
 
   template <typename T>
   __device__ void broadcast_wg(rocshmem_team_t team, T *dest, const T *source,
@@ -243,9 +254,12 @@ class GDAContext : public Context {
                                 void *dest, const void* source, int nelement, int PE_root);
 
   template <typename T>
-  __device__ void alltoall(rocshmem_team_t team, T *dest, const T *source,
+  __device__ void alltoall_wg(rocshmem_team_t team, T *dest, const T *source,
                            int nelems, int elem_offset = 0,
                            int elem_count = -1);
+
+  __device__ void alltoallmem_wg(rocshmem_team_t team, void *dest, const void *source,
+                           int nelems);
 
   template <typename T>
   __device__ void alltoallv(rocshmem_team_t team,
@@ -270,6 +284,13 @@ class GDAContext : public Context {
                                 T *source, const size_t source_nelems[],
                                 const size_t source_displs[], int wg_id,
                                 int wg_count);
+
+  template <typename T>
+  __device__ int alltoall_wave(rocshmem_team_t team, T* dest, 
+                                  const T* source, int nelems);
+
+  __device__ int alltoallmem_wave(rocshmem_team_t team, void* dest, 
+                                  const void* source, int nelems);
 
   template <typename T>
   __device__ void fcollect(rocshmem_team_t team, T *dest, const T *source,
@@ -421,23 +442,29 @@ class GDAContext : public Context {
       const T *source, int nelems, int elem_offset, int elem_count);
 
   template <typename T>
-  __device__ void alltoall_linear(rocshmem_team_t team, T *dest,
+  __device__ void alltoall_linear_wg(rocshmem_team_t team, T *dest,
     const T *source, int nelems, int elem_offset = 0, int elem_count = -1);
 
-  template <typename T>
-  __device__ void alltoall_linear_thread_puts(rocshmem_team_t team, T *dest,
-                                              const T *source, int nelems,
-                                              int elem_offset = 0,
-                                              int elem_count = -1);
+  __device__ void alltoallmem_linear_thread_puts_wg(rocshmem_team_t team, void *dest,
+                                              const void *source, int nelems);
 
   __device__ __forceinline__ uint64_t get_next_qp_group(
       int qp_index, uint64_t pending_lanes);
+
   __device__ __forceinline__ void put_nbi_shared_qp(int qp_index, void *dest,
       const void *source, size_t length, bool ring_db);
+
   __device__ __forceinline__ void get_nbi_shared_qp(int qp_index, void *dest,
       const void *source, size_t length);
+
   __device__ __forceinline__ void atomic_nofetch_shared_qp(int qp_index, void *dest,
       int64_t value);
+
+  __device__ void alltoallmem_linear_wave(rocshmem_team_t team, void *dst,
+                                          const void *src, int nelems);
+
+  __device__ void alltoallmem_linear_thread_puts_wave(rocshmem_team_t team,
+    void *dst, const void *src, int nelems);
 
   __device__ void internal_sync(int pe, int PE_start, int stride, int PE_size,
       int64_t *pSync, ActiveWFInfo &wf_info);
@@ -471,15 +498,6 @@ class GDAContext : public Context {
   __device__ void internal_ring_allreduce(T *dst, const T *src, int nelems,
       GDATeam *team_obj, int n_seg, int seg_size, int chunk_size,
       ActiveWFInfo &wf_info);
-
-  template <typename T, ROCSHMEM_OP Op>
-  __device__ void internal_proxy_allreduce(T *dst, const T *src, int nelems,
-      GDATeam *team_obj, ActiveWFInfo &wf_info);
-
-  template <typename T, ROCSHMEM_OP Op>
-  __device__ void internal_fused_ipc_reduce(T *dst, const T *src,
-      int source_offset, int count, int local_size, int local_slot,
-      int wg_id, int wg_size);
 
   __device__ void internal_putmem(void *dest, const void *source,
       size_t nelems, int pe, int qp_index, ActiveWFInfo &wf_info);

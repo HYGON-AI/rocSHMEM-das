@@ -173,7 +173,7 @@ __device__ int IPCContext::reduce_das(rocshmem_team_t team, T *dest,
     const int block_count = nreduce / PE_size;
     const int team_rank = team_obj->my_pe;
     T *local_block = dest + team_rank * block_count;
-    int status = reduce_scatter_wg<T, Op>(team, local_block, source,
+    int status = reduce_scatter_wg_das<T, Op>(team, local_block, source,
                                           block_count);
     if (status != ROCSHMEM_SUCCESS) {
       return status;
@@ -215,7 +215,7 @@ __device__ int IPCContext::reduce_das(rocshmem_team_t team, T *dest,
       chunk_size = seg_size / PE_size;
 
       if (n_seg > 0) {
-        internal_ring_allreduce<T, Op>(dest, source, nreduce, team_obj, n_seg,
+        internal_ring_allreduce_das<T, Op>(dest, source, nreduce, team_obj, n_seg,
                                        seg_size, chunk_size);
       }
       if (n_seg_up > n_seg) {
@@ -224,7 +224,7 @@ __device__ int IPCContext::reduce_das(rocshmem_team_t team, T *dest,
         int p_count = nreduce - (n_seg * seg_size);
         int p_chunk = p_count / PE_size;
         if (p_chunk > 0) {
-          internal_ring_allreduce<T, Op>(p_dst, p_src,
+          internal_ring_allreduce_das<T, Op>(p_dst, p_src,
                                          (p_chunk * PE_size), team_obj, 1,
                                          (p_chunk * PE_size), p_chunk);
         }
@@ -428,81 +428,7 @@ __device__ int IPCContext::reduce_scatter_wg_das(rocshmem_team_t team, T *dest,
 }
 
 template <typename T>
-__device__ void IPCContext::alltoall_das(rocshmem_team_t team, T *dst,
-                                     const T *src, int nelems,
-                                     int elem_offset, int elem_count) {
-  // Normalize: elem_count == -1 means "process the full [0, nelems) range".
-  if (elem_count < 0) elem_count = nelems;
-#if defined(USE_SDMA)
-  if (sizeof(T) * elem_count < 512 || ipcImpl_.sdmaImpl_.sdmaEnabled)
-#else
-  if (sizeof(T) * elem_count < 512)
-#endif
-    alltoall_linear_thread_puts(team, dst, src, nelems, elem_offset, elem_count);
-  else
-    alltoall_linear(team, dst, src, nelems, elem_offset, elem_count);
-}
-
-template <typename T>
-__device__ void IPCContext::alltoallv_das([[maybe_unused]] rocshmem_team_t team,
-                                      [[maybe_unused]] T *dest, [[maybe_unused]] const size_t dest_nelems[],
-                                      [[maybe_unused]] const size_t dest_displs[],
-                                      [[maybe_unused]] T *source, [[maybe_unused]] const size_t source_nelems[],
-                                      [[maybe_unused]] const size_t source_displs[],
-                                      int wg_id, int wg_count) {
-  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
-  const int pe_size = team_obj->num_pes;
-  const int my_rank = team_obj->my_pe;
-  const int wave_id = get_flat_block_id() / WF_SIZE;
-  const int num_waves = (get_flat_block_size() + WF_SIZE - 1) / WF_SIZE;
-
-  // Uniform alltoallv is common in communication benchmarks and frameworks;
-  // route it through the vectorized alltoall path. Nonuniform counts and
-  // displacements continue through the fully general path below.
-  const size_t uniform_count = source_nelems[0];
-  bool uniform = uniform_count == dest_nelems[0];
-  for (int rank = 0; rank < pe_size && uniform; rank++) {
-    uniform = source_nelems[rank] == uniform_count &&
-              dest_nelems[rank] == uniform_count &&
-              source_displs[rank] == static_cast<size_t>(rank) * uniform_count &&
-              dest_displs[rank] == static_cast<size_t>(rank) * uniform_count;
-  }
-  if (uniform) {
-    // Uniform alltoallv is exactly alltoall. Split its per-peer element range
-    // across duplicate teams so single- and multi-WG launches share the same
-    // optimized alltoall implementation.
-    const int total = static_cast<int>(uniform_count);
-    size_t elem_offset = 0;
-    size_t elem_count = 0;
-    split_wg_range(uniform_count, wg_id, wg_count, &elem_offset, &elem_count);
-    alltoall(team, dest, source, total, elem_offset, elem_count);
-    return;
-  }
-
-  // Every WG runs the same alltoallv algorithm over all peers, restricted to
-  // its own slice of each peer's element range.  wg_id=0,wg_count=1 naturally
-  // covers the complete single-WG operation.
-  for (int remote_rank = wave_id; remote_rank < pe_size;
-       remote_rank += num_waves) {
-    const size_t total = source_nelems[remote_rank];
-    size_t elem_offset = 0;
-    size_t elem_count = 0;
-    split_wg_range(total, wg_id, wg_count, &elem_offset, &elem_count);
-    if (elem_count == 0) continue;
-    const int pe = team_obj->get_pe_in_world(remote_rank);
-    put_nbi_wave(dest + dest_displs[my_rank] + elem_offset,
-                 source + source_displs[remote_rank] + elem_offset,
-                 elem_count, pe);
-  }
-
-  internal_sync_wg(constmem.my_pe,
-                   team_obj->tinfo_wrt_world->pe_start,
-                   team_obj->tinfo_wrt_world->stride, pe_size,
-                   team_obj->alltoall_pSync);
-}
-
-template <typename T>
-__device__ void IPCContext::alltoall_linear_das(rocshmem_team_t team, T *dst,
+__device__ void IPCContext::alltoall_linear_wg_das(rocshmem_team_t team, T *dst,
                                             const T *src, int nelems,
                                             int elem_offset, int elem_count) {
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
@@ -600,6 +526,80 @@ __device__ void IPCContext::alltoall_linear_thread_puts_das(rocshmem_team_t team
   }
 
   __syncthreads();
+}
+
+template <typename T>
+__device__ void IPCContext::alltoall_wg_das(rocshmem_team_t team, T *dst,
+                                     const T *src, int nelems,
+                                     int elem_offset, int elem_count) {
+  // Normalize: elem_count == -1 means "process the full [0, nelems) range".
+  if (elem_count < 0) elem_count = nelems;
+#if defined(USE_SDMA)
+  if (sizeof(T) * elem_count < 512 || ipcImpl_.sdmaImpl_.sdmaEnabled)
+#else
+  if (sizeof(T) * elem_count < 512)
+#endif
+    alltoall_linear_thread_puts_das(team, dst, src, nelems, elem_offset, elem_count);
+  else
+    alltoall_linear_wg_das(team, dst, src, nelems, elem_offset, elem_count);
+}
+
+template <typename T>
+__device__ void IPCContext::alltoallv_das([[maybe_unused]] rocshmem_team_t team,
+                                      [[maybe_unused]] T *dest, [[maybe_unused]] const size_t dest_nelems[],
+                                      [[maybe_unused]] const size_t dest_displs[],
+                                      [[maybe_unused]] T *source, [[maybe_unused]] const size_t source_nelems[],
+                                      [[maybe_unused]] const size_t source_displs[],
+                                      int wg_id, int wg_count) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+  const int pe_size = team_obj->num_pes;
+  const int my_rank = team_obj->my_pe;
+  const int wave_id = get_flat_block_id() / WF_SIZE;
+  const int num_waves = (get_flat_block_size() + WF_SIZE - 1) / WF_SIZE;
+
+  // Uniform alltoallv is common in communication benchmarks and frameworks;
+  // route it through the vectorized alltoall path. Nonuniform counts and
+  // displacements continue through the fully general path below.
+  const size_t uniform_count = source_nelems[0];
+  bool uniform = uniform_count == dest_nelems[0];
+  for (int rank = 0; rank < pe_size && uniform; rank++) {
+    uniform = source_nelems[rank] == uniform_count &&
+              dest_nelems[rank] == uniform_count &&
+              source_displs[rank] == static_cast<size_t>(rank) * uniform_count &&
+              dest_displs[rank] == static_cast<size_t>(rank) * uniform_count;
+  }
+  if (uniform) {
+    // Uniform alltoallv is exactly alltoall. Split its per-peer element range
+    // across duplicate teams so single- and multi-WG launches share the same
+    // optimized alltoall implementation.
+    const int total = static_cast<int>(uniform_count);
+    size_t elem_offset = 0;
+    size_t elem_count = 0;
+    split_wg_range(uniform_count, wg_id, wg_count, &elem_offset, &elem_count);
+    alltoall_wg_das(team, dest, source, total, elem_offset, elem_count);
+    return;
+  }
+
+  // Every WG runs the same alltoallv algorithm over all peers, restricted to
+  // its own slice of each peer's element range.  wg_id=0,wg_count=1 naturally
+  // covers the complete single-WG operation.
+  for (int remote_rank = wave_id; remote_rank < pe_size;
+       remote_rank += num_waves) {
+    const size_t total = source_nelems[remote_rank];
+    size_t elem_offset = 0;
+    size_t elem_count = 0;
+    split_wg_range(total, wg_id, wg_count, &elem_offset, &elem_count);
+    if (elem_count == 0) continue;
+    const int pe = team_obj->get_pe_in_world(remote_rank);
+    put_nbi_wave(dest + dest_displs[my_rank] + elem_offset,
+                 source + source_displs[remote_rank] + elem_offset,
+                 elem_count, pe);
+  }
+
+  internal_sync_wg(constmem.my_pe,
+                   team_obj->tinfo_wrt_world->pe_start,
+                   team_obj->tinfo_wrt_world->stride, pe_size,
+                   team_obj->alltoall_pSync);
 }
 
 template <typename T>
