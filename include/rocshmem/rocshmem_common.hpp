@@ -124,7 +124,10 @@ typedef struct rocshmem_ctx{
 /**
  * Shmem default context.
  */
-extern "C" __device__  rocshmem_ctx_t __attribute__((visibility("default"))) ROCSHMEM_CTX_DEFAULT;
+extern "C" {
+extern __device__ rocshmem_ctx_t __attribute__((visibility("default")))
+    ROCSHMEM_CTX_DEFAULT;
+}
 
 /**
  * A value corresponding to an invalid communication context. This value can be

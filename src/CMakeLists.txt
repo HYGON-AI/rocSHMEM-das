@@ -36,6 +36,8 @@ target_sources(
     envvar.cpp
     context_host.cpp
     context_device.cpp
+    device_globals.cpp
+    device_module_registry.cpp
     mpi_instance.cpp
     rocshmem_gpu.cpp
     rocshmem_tile_gpu.cpp

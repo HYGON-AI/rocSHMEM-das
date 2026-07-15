@@ -1,6 +1,7 @@
 #include "constmem.hpp"
 #include "backend_bc.hpp"
 #include "envvar.hpp"
+#include "device_module_registry.hpp"
 #if defined(USE_GDA)
 #include "gda/backend_gda.hpp"
 #endif
@@ -41,6 +42,7 @@ void init_constant_memory(void) {
 #endif
 
   CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &constmem_values, sizeof(constmem_t)));
+  sync_device_modules();
 }
 
 }

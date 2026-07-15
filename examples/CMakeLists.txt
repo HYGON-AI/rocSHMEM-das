@@ -61,11 +61,17 @@ foreach(SOURCE_FILE IN LISTS EXAMPLE_SOURCES)
 
   add_executable(${EXECUTABLE_NAME} ${SOURCE_FILE})
 
-  target_link_libraries(
-    ${EXECUTABLE_NAME}
-    PRIVATE
+  if(TARGET roc::rocshmem_host AND TARGET roc::rocshmem_device)
+    target_link_libraries(${EXECUTABLE_NAME} PRIVATE
+      roc::rocshmem_host
+      -Wl,--whole-archive
+      roc::rocshmem_device
+      -Wl,--no-whole-archive
+      $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>)
+    target_link_options(${EXECUTABLE_NAME} PRIVATE -Wl,--export-dynamic)
+  else()
+    target_link_libraries(${EXECUTABLE_NAME} PRIVATE
       roc::rocshmem
-      $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>
-  )
+      $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>)
+  endif()
 endforeach()
-
