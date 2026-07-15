@@ -103,6 +103,12 @@ __host__ void* Context::shmem_ptr(const void* dest, int pe) {
   HOST_DISPATCH_RET_PTR(shmem_ptr(dest, pe));
 }
 
+__host__ void* Context::shmem_ptr_hdp(const void* dest, int pe) {
+  ctxHostStats.incStat(NUM_HOST_SHMEM_PTR_HDP);
+
+  HOST_DISPATCH_RET_PTR(shmem_ptr_hdp(dest, pe));
+}
+
 __host__ void Context::sync_all() {
   ctxHostStats.incStat(NUM_HOST_SYNC_ALL);
 

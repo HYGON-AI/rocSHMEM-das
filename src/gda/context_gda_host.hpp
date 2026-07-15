@@ -80,6 +80,8 @@ class GDAHostContext : public Context {
 
   __host__ void *shmem_ptr(const void *dest, int pe);
 
+  __host__ void *shmem_ptr_hdp(const void *dest, int pe);
+
   __host__ void barrier_all();
 
   __host__ void barrier_all_on_stream(hipStream_t stream);

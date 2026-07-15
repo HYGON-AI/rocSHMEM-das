@@ -43,6 +43,7 @@ __host__ GDAHostContext::GDAHostContext(Backend *backend,
 
   int *pes_with_ipc_avail = new int[backend->ipcImpl.shm_size];
   char** ipc_bases = new char*[b->ipcImpl.shm_size];
+  char** ipc_bases_hdp = new char*[b->ipcImpl.shm_size];
   if (backend->ipcImpl.pes_with_ipc_avail != nullptr) {
     CHECK_HIP(hipMemcpy(pes_with_ipc_avail,
                   backend->ipcImpl.pes_with_ipc_avail,
@@ -52,9 +53,14 @@ __host__ GDAHostContext::GDAHostContext(Backend *backend,
                   backend->ipcImpl.ipc_bases,
                   backend->ipcImpl.shm_size * sizeof(char *),
                   hipMemcpyDeviceToHost));
+    CHECK_HIP(hipMemcpy(ipc_bases_hdp,
+                  backend->ipcImpl.ipc_bases_hdp,
+                  backend->ipcImpl.shm_size * sizeof(char *),
+                  hipMemcpyDeviceToHost));
   }
   ipcImpl_.pes_with_ipc_avail = pes_with_ipc_avail;
   ipcImpl_.ipc_bases = ipc_bases;
+  ipcImpl_.ipc_bases_hdp = ipc_bases_hdp;
   ipcImpl_.shm_size = backend->ipcImpl.shm_size;
   ipcImpl_.shm_rank = backend->ipcImpl.shm_rank;
 }
@@ -62,6 +68,7 @@ __host__ GDAHostContext::GDAHostContext(Backend *backend,
 __host__ GDAHostContext::~GDAHostContext() {
   delete[] ipcImpl_.pes_with_ipc_avail;
   delete[] ipcImpl_.ipc_bases;
+  delete[] ipcImpl_.ipc_bases_hdp;
 
   host_interface->release_window_context(context_window_info);
 }
@@ -101,6 +108,17 @@ __host__ void *GDAHostContext::shmem_ptr(const void *dest, int pe) {
     void *dst = const_cast<void *>(dest);
     uint64_t L_offset = reinterpret_cast<char *>(dst) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
     ret = ipcImpl_.ipc_bases[local_pe] + L_offset;
+  }
+  return ret;
+}
+
+__host__ void *GDAHostContext::shmem_ptr_hdp(const void *dest, int pe) {
+  void *ret = nullptr;
+  int local_pe{-1};
+  if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
+    void *dst = const_cast<void *>(dest);
+    uint64_t L_offset = reinterpret_cast<char *>(dst) - ipcImpl_.ipc_bases_hdp[ipcImpl_.shm_rank];
+    ret = ipcImpl_.ipc_bases_hdp[local_pe] + L_offset;
   }
   return ret;
 }

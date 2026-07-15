@@ -101,6 +101,8 @@ __host__ void * rocshmem_get_device_ctx();
 __host__ void* rocshmem_ptr(const void *dest, int pe);
 __device__ ATTR_NO_INLINE void* rocshmem_ptr(const void *dest, int pe);
 
+__host__ void* rocshmem_ptr_hdp(const void *dest, int pe);
+
 #if defined(HAVE_EXTERNAL_MPI)
 /**
  * @brief Initialize the rocSHMEM runtime and underlying transport layer
