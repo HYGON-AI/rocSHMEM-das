@@ -293,10 +293,19 @@ class GDAContext : public Context {
                                   const void* source, int nelems);
 
   template <typename T>
-  __device__ void fcollect(rocshmem_team_t team, T *dest, const T *source,
+  __device__ void fcollect_wg(rocshmem_team_t team, T *dest, const T *source,
                            int nelems, int elem_offset = 0,
                            int elem_count = -1);
 
+  __device__ void fcollectmem_wg(rocshmem_team_t team, void *dest, const void *source,
+                           int nelems);
+
+  template <typename T>
+  __device__ int fcollect_wave(rocshmem_team_t team, T *dest, const T *source,
+                           int nelems);
+
+  __device__ int fcollectmem_wave(rocshmem_team_t team, void *dest, const void *source,
+                           int nelems);
 
   // Block/wave functions
   __device__ void putmem_wg(void *dest, const void *source, size_t nelems,
@@ -436,10 +445,12 @@ class GDAContext : public Context {
   __device__ void internal_put_broadcastmem_wave(void *dst, const void *src,
     int nelems, int pe_root, int pe_start, int stride, int pe_size,
     ActiveWFInfo &wf_info);
+      
+  __device__ void fcollectmem_linear_wg(rocshmem_team_t team, void *dest,
+      const void *source, int nelems);
 
-  template <typename T>
-  __device__ void fcollect_linear(rocshmem_team_t team, T *dest,
-      const T *source, int nelems, int elem_offset, int elem_count);
+  __device__ void fcollectmem_linear_wave(rocshmem_team_t team, void *dest,
+      const void *source, int nelems);
 
   template <typename T>
   __device__ void alltoall_linear_wg(rocshmem_team_t team, T *dest,
