@@ -170,6 +170,7 @@ set(TEST_reduce_scatter_on_stream 505)
 set(TEST_fcollect_on_stream 506)
 set(TEST_broadcast_wave 150)
 set(TEST_alltoall_wave 151)
+set(TEST_fcollect_wave 152)
 
 # MPI should already be found by the parent CMakeLists.txt
 # Use standard CMake MPI variables set by find_package(MPI)
@@ -1075,6 +1076,7 @@ function(add_coll_tests)
     begin_test_group(CATEGORY "COLLECTIVE;WAVE" TIER full BACKENDS "ipc;gda" GPUS "all")
         add_rocshmem_functional_test(NAME broadcast_wave RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
         add_rocshmem_functional_test(NAME alltoall_wave RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 512)
+        add_rocshmem_functional_test(NAME fcollect_wave RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
     end_test_group()
 endfunction()
 

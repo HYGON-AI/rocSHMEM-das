@@ -207,7 +207,7 @@ __device__ void Context::alltoallv(rocshmem_team_t team,
 }
 
 template <typename T>
-__device__ void Context::fcollect(rocshmem_team_t team, T *dest,
+__device__ void Context::fcollect_wg(rocshmem_team_t team, T *dest,
                                   const T *source, int nelems,
                                   int elem_offset, int elem_count) {
   if (nelems == 0) {
@@ -218,7 +218,21 @@ __device__ void Context::fcollect(rocshmem_team_t team, T *dest,
     ctxStats.incStat(NUM_FCOLLECT);
   }
 
-  DISPATCH(fcollect<T>(team, dest, source, nelems, elem_offset, elem_count));
+  DISPATCH(fcollect_wg<T>(team, dest, source, nelems, elem_offset, elem_count));
+}
+
+template <typename T>
+__device__ int Context::fcollect_wave(rocshmem_team_t team, T *dest,
+                                  const T *source, int nelems) {
+  if (nelems == 0) {
+    return ROCSHMEM_SUCCESS;
+  }
+
+  if (is_thread_zero_in_block()) {
+    ctxStats.incStat(NUM_FCOLLECT);
+  }
+
+  DISPATCH_RET(fcollect_wave<T>(team, dest, source, nelems));
 }
 
 template <typename T>
