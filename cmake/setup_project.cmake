@@ -51,7 +51,7 @@ set(ENV{ROCM_PATH} ${ROCM_PATH})
 #  if(EXPLICIT_ROCM_VERSION)
 #    set(rocm_version_string "${EXPLICIT_ROCM_VERSION}")
 #  else()
-#    find_file(rocm_version_file "version" PATH_SUFFIXES ".info"
+#    find_file(rocm_version_file "version" PATH_SUFFIXES ".info" "core/.info"
 #      HINTS ${ROCM_PATH} ENV ROCM_PATH ${ROCM_ROOT} ENV ROCM_ROOT ${hip_ROOT} ENV hip_ROOT ${HIP_ROOT} ENV HIP_ROOT
 #      PATHS ${ROCM_PATH}
 #      REQUIRED)
