@@ -57,9 +57,9 @@ __device__ void QueuePair::mlx5_post_wqe_amo_dp_single_lane(int32_t size, uintpt
   
   __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
-  if (gpuHdpReg != nullptr) {
-    __hip_atomic_store(reinterpret_cast<uint32_t*>(gpuHdpReg), (uint32_t)0x1, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
-  }
+  // if (gpuHdpReg != nullptr) {
+  //   __hip_atomic_store(reinterpret_cast<uint32_t*>(gpuHdpReg), (uint32_t)0x1, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
+  // }
 
   uint64_t wqe_writed {0};
   do {
