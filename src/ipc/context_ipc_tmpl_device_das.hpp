@@ -199,7 +199,7 @@ __device__ int IPCContext::reduce_das(rocshmem_team_t team, T *dest,
   }
 
   if (use_direct) {
-    internal_direct_allreduce<T, Op>(dest, source, nreduce, team_obj);
+    internal_direct_allreduce_wg<T, Op>(dest, source, nreduce, team_obj);
   } else {
     if (ring_pSync <= ROCSHMEM_REDUCE_SYNC_SIZE) {
       size_t ring_pWrk = provided_pWrk;
@@ -235,7 +235,7 @@ __device__ int IPCContext::reduce_das(rocshmem_team_t team, T *dest,
           p_dst += (p_chunk * PE_size);
           const T *p_src2 = p_src + (p_chunk * PE_size);
 
-          internal_direct_allreduce<T, Op>(p_dst, p_src2, p_count, team_obj);
+          internal_direct_allreduce_wg<T, Op>(p_dst, p_src2, p_count, team_obj);
         }
       }
     } else {
