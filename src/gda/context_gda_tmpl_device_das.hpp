@@ -356,7 +356,7 @@ __device__ int GDAContext::reduce_das(rocshmem_team_t team, T *dest,
                     (provided_pSync >= direct_pSync) &&
                     (nreduce <= DIRECT_MAX_NELEMS);
   if (use_direct) {
-    internal_direct_allreduce<T, Op>(dest, source, nreduce, team_obj, wf_info);
+    internal_direct_allreduce_wg<T, Op>(dest, source, nreduce, team_obj, wf_info);
   } else {
     if (ring_pSync <= ROCSHMEM_REDUCE_SYNC_SIZE) {
       size_t ring_pWrk = provided_pWrk;
@@ -392,7 +392,7 @@ __device__ int GDAContext::reduce_das(rocshmem_team_t team, T *dest,
           p_dst += (p_chunk * PE_size);
           const T *p_src2 = p_src + (p_chunk * PE_size);
 
-          internal_direct_allreduce<T, Op>(p_dst, p_src2, p_count, team_obj, wf_info);
+          internal_direct_allreduce_wg<T, Op>(p_dst, p_src2, p_count, team_obj, wf_info);
         }
       }
     } else {
