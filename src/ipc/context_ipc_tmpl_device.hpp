@@ -519,6 +519,9 @@ __device__ void IPCContext::internal_put_broadcast(
     T *dst, const T *src, int nelems, int pe_root, int pe_start,
     int stride, int pe_size) {  // NOLINT(runtime/int)
   if (constmem.my_pe == pe_root) {
+    // Complete the local copy before any wave starts reading source for a remote PUT.
+    get_wg(dst, src, nelems, pe_root);
+
     // pipeline chunking for large messages
     constexpr int CHUNK_NELEMS = ROCSHMEM_CHUNK_BYTES / sizeof(T);
     const bool use_pipeline = (nelems > CHUNK_NELEMS);
@@ -555,6 +558,53 @@ __device__ void IPCContext::internal_get_broadcast(
     get_wg(dst, src, nelems, pe_root);
 }
 
+/*
+ * Latency/bandwidth balanced broadcast for medium-sized messages.
+ *
+ * Ranks are rotated so that the root has virtual rank zero.  In round k,
+ * every rank that already owns the data sends it to one new rank, doubling
+ * the number of owners.  A team-wide synchronization closes each round; this
+ * is intentionally stronger than a workgroup barrier because a newly reached
+ * PE must not forward dst until the preceding remote PUT is globally visible.
+ * For eight PEs this takes three rounds and reduces root traffic from 7*N to
+ * 3*N bytes.
+ */
+template <typename T>
+__device__ void IPCContext::internal_tree_broadcast(
+    T *dst, const T *src, int nelems, int pe_root, int pe_start, int stride,
+    int pe_size, int64_t *p_sync) {  // NOLINT(runtime/int)
+  int my_rank = (constmem.my_pe - pe_start) / stride;
+  int root_rank = (pe_root - pe_start) / stride;
+  int virtual_rank = my_rank - root_rank;
+  if (virtual_rank < 0) {
+    virtual_rank += pe_size;
+  }
+
+  if (virtual_rank == 0) {
+    get_wg(dst, src, nelems, pe_root);
+  }
+
+  for (int distance = 1; distance < pe_size; distance <<= 1) {
+    if (virtual_rank < distance) {
+      int peer_virtual_rank = virtual_rank + distance;
+      if (peer_virtual_rank < pe_size) {
+        int peer_rank = peer_virtual_rank + root_rank;
+        if (peer_rank >= pe_size) {
+          peer_rank -= pe_size;
+        }
+        int peer = pe_start + peer_rank * stride;
+        const T *forward_src = (virtual_rank == 0) ? src : dst;
+        // Blocking WG PUT drains every participating lane before the receiver
+        // can leave the following team synchronization and forward dst.
+        put_wg(dst, forward_src, nelems, peer);
+      }
+    }
+
+    // Completes remote stores and prevents a receiver from forwarding early.
+    internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync);
+  }
+}
+
 template <typename T>
 __device__ void IPCContext::broadcast(rocshmem_team_t team, T *dst,
                                       const T *src, int nelems, int pe_root) {
@@ -576,15 +626,27 @@ __device__ void IPCContext::internal_broadcast(T *dst, const T *src, int nelems,
                                       int pe_root, int pe_start,
                                       int stride, int pe_size,
                                       long *p_sync) {  // NOLINT(runtime/int)
-  if (constmem.num_pes < 4) {
+  constexpr size_t DIRECT_MAX_BYTES = 8 * 1024;
+  size_t message_bytes = static_cast<size_t>(nelems) * sizeof(T);
+
+  if (pe_size <= 2 || message_bytes <= DIRECT_MAX_BYTES) {
     internal_put_broadcast(dst, src, nelems, pe_root, pe_start, stride,
                            pe_size);
+    internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync);
   } else {
-    internal_get_broadcast(dst, src, nelems, pe_root);
+    internal_tree_broadcast(dst, src, nelems, pe_root, pe_start, stride, pe_size, p_sync);
   }
 
-  // Synchronize on completion of broadcast
-  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync);
+  // if (constmem.num_pes < 4) {
+  //   internal_put_broadcast(dst, src, nelems, pe_root, pe_start, stride,
+  //                          pe_size);
+  // } else {
+  //   internal_get_broadcast(dst, src, nelems, pe_root);
+  // }
+
+  // // Synchronize on completion of broadcast
+  // internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync);
+
 }
 
 template <typename T>

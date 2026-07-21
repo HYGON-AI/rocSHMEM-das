@@ -375,6 +375,12 @@ class IPCContext : public Context {
                                          int pe_root);  // NOLINT(runtime/int)
 
   template <typename T>
+  __device__ void internal_tree_broadcast(T *dst, const T *src, int nelems,
+                                          int pe_root, int pe_start,
+                                          int stride, int pe_size,
+                                          int64_t *p_sync);  // NOLINT(runtime/int)
+
+  template <typename T>
   __device__ void fcollect_linear(rocshmem_team_t team, T *dest,
                                   const T *source, int nelems);
 
