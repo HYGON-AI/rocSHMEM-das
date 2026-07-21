@@ -264,6 +264,9 @@ struct SdmaQueueDeviceHandle {
         // inactive, so that other lanes in the same wavefront can proceed.
 #if defined(__gfx1250__)
         asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
+#elif defined(__gfx936__) || defined(__gfx938__)
+        __builtin_amdgcn_s_waitcnt(0);
+        __threadfence_system();
 #elif defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
         __builtin_amdgcn_s_waitcnt(0);
 #else
@@ -276,6 +279,9 @@ struct SdmaQueueDeviceHandle {
 
 #if defined(__gfx1250__)
         asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
+#elif defined(__gfx936__) || defined(__gfx938__)
+        __builtin_amdgcn_s_waitcnt(0);
+        __threadfence_system();
 #elif defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
         __builtin_amdgcn_s_waitcnt(0);
 #else
@@ -288,6 +294,9 @@ struct SdmaQueueDeviceHandle {
 
 #if defined(__gfx1250__)
         asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
+#elif defined(__gfx936__) || defined(__gfx938__)
+        __builtin_amdgcn_s_waitcnt(0);
+        __threadfence_system();
 #elif defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
         __builtin_amdgcn_s_waitcnt(0);
 #else
@@ -300,6 +309,9 @@ struct SdmaQueueDeviceHandle {
 
 #if defined(__gfx1250__)
         asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
+#elif defined(__gfx936__) || defined(__gfx938__)
+        __builtin_amdgcn_s_waitcnt(0);
+        __threadfence_system();
 #elif defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
         __builtin_amdgcn_s_waitcnt(0);
 #else
@@ -355,6 +367,10 @@ struct SdmaQueueDeviceHandle {
                          : "=v"(vdst)
                          : "v"(vaddr), "v"(vdata)
                          : "memory");
+#elif defined(__gfx936__) || defined(__gfx938__)
+    __asm__ __volatile__("flat_atomic_cmpswap_x2 %0, %1, %2 sc0 nt;\n s_waitcnt vmcnt(0); \n\t"
+                         : "=v"(vdst)
+                         : "v"(vaddr), "v"(vdata));
 #elif defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
     __asm__ __volatile__("flat_atomic_cmpswap_x2 %0, %1, %2 sc0 nt;\n s_waitcnt vmcnt(0); \n\t"
                          : "=v"(vdst)
@@ -428,6 +444,9 @@ struct SdmaQueueSingleProducerDeviceHandle : SdmaQueueDeviceHandle {
     *wptr = pendingWptr;
 #if defined(__gfx1250__)
     asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
+#elif defined(__gfx936__) || defined(__gfx938__)
+    __builtin_amdgcn_s_waitcnt(0);
+    __threadfence_system();
 #elif defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
     __builtin_amdgcn_s_waitcnt(0);
 #else

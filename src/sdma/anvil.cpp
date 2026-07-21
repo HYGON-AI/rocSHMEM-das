@@ -79,6 +79,62 @@ static bool s_kfd_opened = false;
 
 void CloseKFD() { CHECK_HSAKMT_SUCCESS(hsaKmtCloseKFD(), "hsaKmtCloseKFD() failed"); }
 
+// Get the KFD topology node associated with a HIP device.
+static bool getAgentNodeId(int deviceId, uint32_t* nodeId) {
+  if (deviceId < 0 || deviceId >= static_cast<int>(gpuAgents_.size())) {
+    return false;
+  }
+  return hsa_agent_get_info(gpuAgents_[deviceId], HSA_AGENT_INFO_NODE, nodeId) ==
+         HSA_STATUS_SUCCESS;
+}
+
+// Return the SDMA engines recommended by KFD for this peer link.
+static uint32_t getRecommendedSdmaEngineMask(int srcDeviceId, int dstDeviceId) {
+  uint32_t srcNodeId{};
+  uint32_t dstNodeId{};
+  if (!getAgentNodeId(srcDeviceId, &srcNodeId) ||
+      !getAgentNodeId(dstDeviceId, &dstNodeId)) {
+    return 0;
+  }
+
+  HsaNodeProperties nodeProperties{};
+  if (hsaKmtGetNodeProperties(srcNodeId, &nodeProperties) != HSAKMT_STATUS_SUCCESS ||
+      nodeProperties.NumIOLinks == 0) {
+    return 0;
+  }
+
+  std::vector<HsaIoLinkProperties> links(nodeProperties.NumIOLinks);
+  if (hsaKmtGetNodeIoLinkProperties(srcNodeId, nodeProperties.NumIOLinks, links.data()) !=
+      HSAKMT_STATUS_SUCCESS) {
+    return 0;
+  }
+
+  for (const auto& link : links) {
+    if (link.NodeFrom == srcNodeId && link.NodeTo == dstNodeId) {
+      return link.RecSdmaEngIdMask;
+    }
+  }
+  return 0;
+}
+
+// Spread channels across the engine IDs set in the recommendation mask.
+static uint32_t selectSdmaEngine(uint32_t engineMask, int channel) {
+  if (engineMask == 0) {
+    return 0;
+  }
+  int engineCount = 0;
+  for (uint32_t mask = engineMask; mask != 0; mask >>= 1) {
+    engineCount += mask & 1U;
+  }
+  int selected = channel % engineCount;
+  for (uint32_t engine = 0; engine < 32; ++engine) {
+    if ((engineMask & (1U << engine)) != 0 && selected-- == 0) {
+      return engine;
+    }
+  }
+  return 0;
+}
+
 // Convert a logical deviceId index to the NVML device minor number
 static const std::string getBusId(int deviceId) {
   char busIdChar[] = "00000000:00:00.0";
@@ -91,7 +147,7 @@ static const std::string getBusId(int deviceId) {
 }
 
 SdmaQueue::SdmaQueue([[maybe_unused]] int localDeviceId, int remoteDeviceId, hsa_agent_t& localAgent,
-                     uint32_t engineId)
+                     HSA_QUEUE_TYPE queueType, uint32_t engineId)
     : remoteDeviceId_(remoteDeviceId) {
   int originalDeviceId;
 
@@ -122,7 +178,7 @@ SdmaQueue::SdmaQueue([[maybe_unused]] int localDeviceId, int remoteDeviceId, hsa
   // Create SDMA Queue
   memset(&queue_, 0, sizeof(HsaQueueResource));
 
-  CHECK_HSAKMT_SUCCESS(hsaKmtCreateQueueExt(localNodeId, HSA_QUEUE_SDMA_BY_ENG_ID,
+  CHECK_HSAKMT_SUCCESS(hsaKmtCreateQueueExt(localNodeId, queueType,
                                             DEFAULT_QUEUE_PERCENTAGE, DEFAULT_PRIORITY, engineId,
                                             queueBuffer_, SDMA_QUEUE_SIZE, nullptr, &queue_),
                        "hsaKmtCreateQueueExt failed");
@@ -305,11 +361,11 @@ void AnvilLib::init() {
   });
 }
 
-SdmaQueue* AnvilLib::createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t engineId,
-                                     int* channelIdx) {
+SdmaQueue* AnvilLib::createSdmaQueue(int srcDeviceId, int dstDeviceId, HSA_QUEUE_TYPE queueType,
+                                     uint32_t engineId, int* channelIdx) {
   auto& vec = sdma_channels_[dstDeviceId];
-  vec.emplace_back(
-      std::make_unique<SdmaQueue>(srcDeviceId, dstDeviceId, gpuAgents_[srcDeviceId], engineId));
+  vec.emplace_back(std::make_unique<SdmaQueue>(srcDeviceId, dstDeviceId, gpuAgents_[srcDeviceId],
+                                               queueType, engineId));
   if (channelIdx != nullptr) {
     *channelIdx = static_cast<int>(vec.size() - 1);
   }
@@ -317,11 +373,26 @@ SdmaQueue* AnvilLib::createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t 
 }
 
 bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
-  uint32_t engineId = getSdmaEngineId(srcDeviceId, dstDeviceId);
-  LOG_TRACE("SDMA: Connect from %d to %d with %d channels using engine %d",
-            srcDeviceId, dstDeviceId, numChannels, engineId);
+  // Use KFD-recommended XGMI engines on gfx936/gfx938; preserve legacy mapping elsewhere.
+  hipDeviceProp_t properties{};
+  ANVIL_CHECK_HIP_ERROR(hipGetDeviceProperties(&properties, srcDeviceId));
+  std::string arch = properties.gcnArchName;
+  bool useRecommendedXgmi = arch.rfind("gfx936", 0) == 0 || arch.rfind("gfx938", 0) == 0;
+  uint32_t engineMask = useRecommendedXgmi ? getRecommendedSdmaEngineMask(srcDeviceId, dstDeviceId) : 0;
   for (int c = 0; c < numChannels; ++c) {
-    createSdmaQueue(srcDeviceId, dstDeviceId, engineId);
+    HSA_QUEUE_TYPE queueType = HSA_QUEUE_SDMA_BY_ENG_ID;
+    uint32_t engineId{};
+    if (useRecommendedXgmi && engineMask != 0) {
+      engineId = selectSdmaEngine(engineMask, c);
+    } else if (useRecommendedXgmi) {
+      // Let KFD choose an XGMI engine when link recommendations are unavailable.
+      queueType = HSA_QUEUE_SDMA_XGMI;
+    } else {
+      engineId = getSdmaEngineId(srcDeviceId, dstDeviceId);
+    }
+    LOG_TRACE("SDMA: Connect from %d to %d channel %d using queue type %d engine %d mask %#x",
+              srcDeviceId, dstDeviceId, c, queueType, engineId, engineMask);
+    createSdmaQueue(srcDeviceId, dstDeviceId, queueType, engineId);
   }
   return true;
 }
