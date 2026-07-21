@@ -34,6 +34,14 @@ __device__ bool Backend::create_ctx(int64_t option, rocshmem_ctx_t* ctx) {
     default:
       return static_cast<IPCBackend*>(this)->create_ctx(option, ctx);
   }
+#elif defined(USE_RO) && defined(USE_IPC)
+  switch(this->type) {
+    case BackendType::RO_BACKEND:
+      return static_cast<ROBackend*>(this)->create_ctx(option, ctx);
+    case BackendType::IPC_BACKEND:
+    default:
+      return static_cast<IPCBackend*>(this)->create_ctx(option, ctx);
+  }
 #elif defined(USE_GDA) && defined(USE_IPC)
   switch(this->type) {
     case BackendType::GDA_BACKEND:
@@ -59,6 +67,16 @@ __device__ void Backend::destroy_ctx(rocshmem_ctx_t* ctx) {
     case BackendType::GDA_BACKEND:
       static_cast<GDABackend*>(this)->destroy_ctx(ctx);
       break;
+    case BackendType::RO_BACKEND:
+      static_cast<ROBackend*>(this)->destroy_ctx(ctx);
+      break;
+    case BackendType::IPC_BACKEND:
+    default:
+      static_cast<IPCBackend*>(this)->destroy_ctx(ctx);
+      break;
+  }
+#elif defined(USE_RO) && defined(USE_IPC)
+  switch(this->type) {
     case BackendType::RO_BACKEND:
       static_cast<ROBackend*>(this)->destroy_ctx(ctx);
       break;
