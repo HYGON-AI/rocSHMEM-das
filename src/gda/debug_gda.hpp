@@ -32,8 +32,10 @@ static void dump_ibv_port_attr(struct ibv_port_attr *x);
 static void dump_ibv_qp(struct ibv_qp *qp, int conn_num);
 static void dump_mlx5dv_qp(struct mlx5dv_qp *qp_dv, int conn_num);
 static void dump_mlx5dv_cq(struct mlx5dv_cq *cq_dv, int conn_num);
+#if defined(GDA_SHCA)
 static void dump_shcadv_qp(struct shca_dv_qp *qp_dv, int conn_num);
 static void dump_shcadv_cq(struct shca_dv_cq *cq_dv, int conn_num);
+#endif
 static void dump_ibv_context(struct ibv_context* x) {
   /*
    * struct ibv_context {
@@ -266,6 +268,7 @@ void dump_mlx5dv_cq(struct mlx5dv_cq *cq_dv, int conn_num) {
   DPRINTF("================== CQ_DUMP_END ================\n");
 }
 
+#if defined(GDA_SHCA)
 void dump_shcadv_qp(struct shca_dv_qp *qp_dv, int conn_num) {
   DPRINTF("\n");
   DPRINTF("===============================================\n");
@@ -300,4 +303,5 @@ void dump_shcadv_cq(struct shca_dv_cq *cq_dv, int conn_num) {
   DPRINTF("  (uint64_t) comp_mask       = 0x%lx\n",  cq_dv->comp_mask);
   DPRINTF("================== CQ_DUMP_END ================\n");
 }
+#endif
 #endif /* LIBRARY_SRC_GDA_DEBUG_GDA_HPP_ */

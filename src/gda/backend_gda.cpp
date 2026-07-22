@@ -875,18 +875,23 @@ void GDABackend::close_dv_libs() {
   if (mlx5dv_handle_ != nullptr)
     dlclose(mlx5dv_handle_);
 
+#if defined(GDA_SHCA)
   if (shcadv_handle_ != nullptr)
     dlclose(shcadv_handle_);
+#endif
   gda_provider = GDAProvider::UNSET;
 }
 
 void GDABackend::exchange_qp_dest_info() {
   for (int i = 0; i < qps.size(); i++) {
 #if defined(GDA_SHCA)
-    dest_info[i].shca_lid = portinfo.lid;
-#else
-    dest_info[i].lid = portinfo.lid;
+    if (gda_provider == GDAProvider::SHCA) {
+      dest_info[i].shca_lid = portinfo.lid;
+    }
 #endif
+    if (gda_provider != GDAProvider::SHCA) {
+      dest_info[i].lid = portinfo.lid;
+    }
     dest_info[i].qpn = qps[i]->qp_num;
     dest_info[i].psn = 0;
     dest_info[i].gid = gid;
@@ -1133,10 +1138,13 @@ void GDABackend::modify_qps_init_to_rtr() {
       memcpy(&attr.ah_attr.grh.dgid, &dest_info[i].gid, 16);
     } else {
 #if defined(GDA_SHCA)
-      attr.ah_attr.dlid = dest_info[i].shca_lid;
-#else
-      attr.ah_attr.dlid = dest_info[i].lid;
+      if (gda_provider == GDAProvider::SHCA) {
+        attr.ah_attr.dlid = dest_info[i].shca_lid;
+      }
 #endif
+      if (gda_provider != GDAProvider::SHCA) {
+        attr.ah_attr.dlid = dest_info[i].lid;
+      }
     }
 
     if (gda_provider == GDAProvider::BNXT) {
@@ -1344,9 +1352,11 @@ void GDABackend::initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   case GDAProvider::MLX5:
     mlx5_initialize_gpu_qp(gpu_qp, conn_num);
     break;
+#if defined(GDA_SHCA)
   case GDAProvider::SHCA:
     shca_initialize_gpu_qp(gpu_qp, conn_num);
     break;
+#endif
   default:
     assert(false /* GDAProvider initialize_gpu_qp */);
   }

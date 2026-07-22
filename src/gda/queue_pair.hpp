@@ -44,7 +44,9 @@
 #include "gda/ionic/provider_gda_ionic.hpp"
 #include "gda/mlx5/provider_gda_mlx5.hpp"
 #include "gda/bnxt/provider_gda_bnxt.hpp"
+#if defined(GDA_SHCA)
 #include "gda/shca/provider_gda_shca.hpp"
+#endif
 
 #include "containers/free_list.hpp"
 #include "memory/hip_allocator.hpp"
@@ -381,9 +383,11 @@ class QueuePair {
   uint64_t outstanding_wqes[OUTSTANDING_TABLE_SIZE]{0};
 
   /* GDAProvider::MLX5 END */
+#if defined(GDA_SHCA)
   shca_db_reg_t shca_db{};
   shca_cqe64 *shca_cq_buf{nullptr};
   uint32_t shca_fwb_bufsize;
+#endif
   // volatile uint32_t *dbrec_shca{nullptr};
   // uint64_t *sq_buf_shca{nullptr};
   // uint16_t sq_wqe_cnt_shca{0};
