@@ -62,7 +62,7 @@ enum HIPIpcHandleType {
   HandleTypeLast
 };
 
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
 struct HIPIpcMemHandlePosix_t {
   uint64_t fd;
   uint32_t pid;
@@ -94,7 +94,7 @@ protected:
 
 };
 
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
 class HIPIpcHandlePosixVec : public HIPIpcHandleVec {
 public:
   friend class HIPAllocatorVMMPosixFd;
@@ -148,7 +148,7 @@ class HIPAllocator : public MemoryAllocator {
     return sizeof(hipIpcMemHandle_t);
   }
 
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
   /**
    * @brief HIP VMM handle type used by this allocator's symmetric heap.
    *
@@ -496,7 +496,7 @@ class HIPAllocatorUncached : public HIPAllocator {
 };
 #endif
 
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
 class HIPAllocatorVMMPosixFd : public HIPAllocator {
  private:
   struct VMMAllocationInfo {
@@ -532,7 +532,7 @@ class HIPAllocatorVMMPosixFd : public HIPAllocator {
     return hipMemHandleTypePosixFileDescriptor;
   }
 };
-#endif  // HIP_VERSION >= 70000000
+#endif  // HIP_VERSION >= 70200000
 
 #ifdef HAVE_AMDSMI_GPU_FABRIC_INFO
 /**
