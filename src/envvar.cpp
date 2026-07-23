@@ -129,7 +129,7 @@ namespace envvar {
       32);
     const var<size_t> max_num_host_contexts("MAX_NUM_HOST_CONTEXTS",
       "Maximum number of host-side communication contexts",
-      1);
+      32);
     const var<size_t> max_num_teams("MAX_NUM_TEAMS",
       "Defines the number of teams an application can use.",
       40);
