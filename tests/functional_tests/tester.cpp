@@ -161,6 +161,7 @@ Tester::Tester(TesterArguments args) : args(args) {
       case TeamAllToAllTestType:
       case TeamAllToAllvTestType:
       case TeamAlltoallmemOnStreamTestType:
+      case ReduceOnStreamTestType:
         max_msg_size = args.max_volume_size / args.num_wgs / args.numprocs;
         break;
       default:
@@ -1126,6 +1127,7 @@ void Tester::AlignAlgBwWithRccl(TesterArguments args, uint64_t size, double time
     case TeamBroadcastTestType:
     case TeamReductionTestType:
     case TeamBroadcastmemOnStreamTestType:
+    case ReduceOnStreamTestType:
       bw_factor = 1;
       size_factor = 1;
       is_match = true;

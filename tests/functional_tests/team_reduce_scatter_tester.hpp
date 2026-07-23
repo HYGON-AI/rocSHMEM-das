@@ -53,12 +53,14 @@ class TeamReduceScatterTester : public Tester {
 
   virtual void verifyResults(uint64_t size) override;
 
-  T1 *s_buf;  // source: n_pes * size elements per PE
-  T1 *r_buf;  // dest:   size elements per PE
+  T1 *s_buf;  // source: n_pes * size elements per PE per WG
+  T1 *r_buf;  // dest:   size elements per PE per WG
+  rocshmem_team_t *team_reduce_scatter_world_dups;
 
  private:
   int my_pe = 0;
   int n_pes = 0;
+  int num_teams = 0;
 
   std::function<void(T1 &, T1 &)> init_buf;
   std::function<std::pair<bool, std::string>(const T1 &, const T1 &)>
