@@ -667,7 +667,7 @@ __device__ __forceinline__ void GDAContext::get_nbi_shared_qp(
 __device__ __forceinline__ void GDAContext::atomic_nofetch_shared_qp(
     int qp_index, void *dest, int64_t value) {
   if (ctx_id_ != 0) {
-    qps[qp_index].atomic_nofetch_single(dest, value);
+    qps[qp_index].atomic_add_single(dest, value);
     return;
   }
 
@@ -678,7 +678,7 @@ __device__ __forceinline__ void GDAContext::atomic_nofetch_shared_qp(
     const uint64_t qp_group = get_next_qp_group(qp_index, pending_lanes);
     if (qp_group & (uint64_t{1} << lane_id)) {
       ActiveWFInfo wf_info(qp_index);
-      qps[qp_index].atomic_nofetch(dest, value, 0, wf_info);
+      qps[qp_index].atomic_add(dest, value, 0, wf_info);
     }
     pending_lanes &= ~qp_group;
   }
