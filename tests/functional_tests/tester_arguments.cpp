@@ -311,6 +311,7 @@ void TesterArguments::get_arguments() {
     case TeamReduceScatterTestType:
     case ReduceOnStreamTestType:
     case ReduceWaveTestType:
+    case TeamReduceScatterWaveTestType:
     case TeamBroadcastTestType:
     case PingAllTestType:
     case TeamBarrierTestType:
