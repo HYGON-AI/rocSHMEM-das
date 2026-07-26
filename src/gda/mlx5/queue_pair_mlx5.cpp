@@ -172,10 +172,10 @@ __device__ __forceinline__ void QueuePair::mlx5_build_rma_wqe(
   if (size <= inline_threshold && opcode == gda_op_rdma_write) {
     seg_build.update_inl_data_seg(reinterpret_cast<const void*>(laddr), size);
   } else {
-    if (flag == 0)
-      seg_build.update_data_seg(laddr, size, lkey_hdp);
-    else
-      seg_build.update_data_seg(laddr, size, lkey);
+    // if (flag == 0) // TODO: normal mode dont use XDP for now.
+    //   seg_build.update_data_seg(laddr, size, lkey_hdp);
+    // else
+    seg_build.update_data_seg(laddr, size, lkey);
   }
 }
 
@@ -270,7 +270,7 @@ __device__ __forceinline__ void QueuePair::mlx5_build_amo_wqe(
   SegmentBuilder_MLX5 seg_build(my_sq_index, sq_buf);
   seg_build.update_ctrl_seg(my_sq_counter, opcode, 0, qp_num,
                             MLX5_WQE_CTRL_CQ_UPDATE, 4, 0, 0);
-  seg_build.update_raddr_seg(raddr, rkey_hdp);
+  seg_build.update_raddr_seg(raddr, rkey);
   seg_build.update_atomic_seg(atomic_data, atomic_cmp);
 
   if (fetching) {
