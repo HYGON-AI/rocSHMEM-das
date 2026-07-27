@@ -884,14 +884,15 @@ void GDABackend::close_dv_libs() {
 
 void GDABackend::exchange_qp_dest_info() {
   for (int i = 0; i < qps.size(); i++) {
-#if defined(GDA_SHCA)
-    if (gda_provider == GDAProvider::SHCA) {
-      dest_info[i].shca_lid = portinfo.lid;
-    }
+#if defined(GDA_SHCA) // TODO: shca 3.x will support the same ibverbs.
+    // if (gda_provider == GDAProvider::SHCA) {
+       dest_info[i].shca_lid = portinfo.lid;
+    // }
+#else
+    // if (gda_provider != GDAProvider::SHCA) {
+       dest_info[i].lid = portinfo.lid;
+    // }
 #endif
-    if (gda_provider != GDAProvider::SHCA) {
-      dest_info[i].lid = portinfo.lid;
-    }
     dest_info[i].qpn = qps[i]->qp_num;
     dest_info[i].psn = 0;
     dest_info[i].gid = gid;
@@ -1137,14 +1138,15 @@ void GDABackend::modify_qps_init_to_rtr() {
     if (portinfo.link_layer == IBV_LINK_LAYER_ETHERNET) {
       memcpy(&attr.ah_attr.grh.dgid, &dest_info[i].gid, 16);
     } else {
-#if defined(GDA_SHCA)
-      if (gda_provider == GDAProvider::SHCA) {
-        attr.ah_attr.dlid = dest_info[i].shca_lid;
-      }
+#if defined(GDA_SHCA) // TODO: shca 3.x will support the same ibverbs.
+      // if (gda_provider == GDAProvider::SHCA) {
+         attr.ah_attr.dlid = dest_info[i].shca_lid;
+      // }
+#else
+      // if (gda_provider != GDAProvider::SHCA) {
+         attr.ah_attr.dlid = dest_info[i].lid;
+      // }
 #endif
-      if (gda_provider != GDAProvider::SHCA) {
-        attr.ah_attr.dlid = dest_info[i].lid;
-      }
     }
 
     if (gda_provider == GDAProvider::BNXT) {
