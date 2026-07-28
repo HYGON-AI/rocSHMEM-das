@@ -52,6 +52,7 @@
 #include "ipc/context_ipc_tmpl_host.hpp"
 #endif
 #include "constmem.hpp"
+#include "device_module_registry.hpp"
 #include "mpi_instance.hpp"
 #include "team.hpp"
 #include "templates_host.hpp"
@@ -704,6 +705,10 @@ __host__ void * rocshmem_ptr(const void * dest, int pe){
 
 [[maybe_unused]] __host__ void rocshmem_finalize() {
   VERIFY_BACKEND();
+
+  // A device module loaded after finalization must not receive context or
+  // backend pointers that are about to be destroyed below.
+  clear_device_module_state();
 
   /*
    * Dump backend statistics if ROCSHMEM_DEBUG_LEVEL=...:stats was requested.

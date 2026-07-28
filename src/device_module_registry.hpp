@@ -23,6 +23,10 @@ extern "C" void rocshmem_register_device_module(
 
 void sync_device_modules();
 
+// Prevent modules registered after rocshmem_finalize() from receiving a
+// snapshot containing device pointers owned by the destroyed backend.
+void clear_device_module_state();
+
 }  // namespace rocshmem
 
 #endif

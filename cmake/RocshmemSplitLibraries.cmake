@@ -24,7 +24,7 @@ foreach(_arch ${BITCODE_GPU_ARCHS})
   list(APPEND _bundle_targets "hip-amdgcn-amd-amdhsa--${_arch}")
 endforeach()
 list(JOIN _bundle_targets "," _bundle_targets_arg)
-list(JOIN ALL_BITCODE_OUTPUTS "," _bundle_inputs_arg)
+list(JOIN ALL_BITCODE_OUTPUTS_NO_DEVICE_GLOBALS "," _bundle_inputs_arg)
 
 find_program(CLANG_OFFLOAD_BUNDLER clang-offload-bundler
   PATHS ${ROCM_PATH}/llvm/bin ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin
@@ -37,7 +37,7 @@ add_custom_command(
           -targets=${_bundle_targets_arg}
           -inputs=${_bundle_inputs_arg}
           -outputs=${ROCSHMEM_DEVICE_OBJECT}
-  DEPENDS ${ALL_BITCODE_OUTPUTS}
+  DEPENDS ${ALL_BITCODE_OUTPUTS_NO_DEVICE_GLOBALS}
   COMMENT "Bundling rocSHMEM device bitcode"
   VERBATIM)
 
