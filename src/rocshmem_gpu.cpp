@@ -2129,6 +2129,8 @@ AMO_EXTENDED_GEN(unsigned long long)
 AMO_BITWISE_GEN(unsigned int)
 AMO_BITWISE_GEN(unsigned long)
 AMO_BITWISE_GEN(unsigned long long)
+AMO_BITWISE_GEN(int32_t)
+AMO_BITWISE_GEN(int64_t)
 
 /* Supported synchronization types */
 WAIT_GEN(float)
