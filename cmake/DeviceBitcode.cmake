@@ -143,6 +143,7 @@ set(BITCODE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/context_device.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/backend_bc_device.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/device/rocshmem_wrapper.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/device_globals.cpp
 )
 
 # Backend-specific device sources. The bitcode MUST match the host library's
@@ -208,6 +209,7 @@ endif()
 # all __device__ bodies are retained), then run opt -O3 over the merged BC where
 # all callers exist.  This mirrors the approach in CMakeDeviceBitcodeTester.cmake.
 set(ALL_BITCODE_OUTPUTS)
+set(ALL_BITCODE_OUTPUTS_NO_DEVICE_GLOBALS)
 foreach(gpu_arch ${BITCODE_GPU_ARCHS})
   # Per-source flags: -Xclang -disable-llvm-passes suppresses DCE.
   set(_COMPILE_FLAGS ${BITCODE_COMPILE_FLAGS_BASE} --offload-arch=${gpu_arch}
@@ -255,11 +257,45 @@ foreach(gpu_arch ${BITCODE_GPU_ARCHS})
     COMPONENT runtime
   )
 
+  ###############################################################################
+  # CREATE FOR DEVICE STATIC LIBRARY
+  ###############################################################################
+  # The standalone/JIT bitcode above needs device_globals.  The split device
+  # archive compiles device_globals.cpp as its own HIP translation unit, so its
+  # bundled bitcode must omit the duplicate definitions.
+  set(_BITCODE_OBJECTS_NO_DEVICE_GLOBALS ${BITCODE_OBJECTS_${gpu_arch}})
+  list(REMOVE_ITEM _BITCODE_OBJECTS_NO_DEVICE_GLOBALS
+    ${CMAKE_CURRENT_BINARY_DIR}/bitcode/${gpu_arch}/device_globals.bc)
+  set(_UNOPT_BC_NO_DEVICE_GLOBALS
+    ${CMAKE_CURRENT_BINARY_DIR}/bitcode/${gpu_arch}/librocshmem_device_${gpu_arch}_no_device_globals_unopt.bc)
+  set(_BC_NO_DEVICE_GLOBALS
+    ${CMAKE_CURRENT_BINARY_DIR}/librocshmem_device_no_device_globals_${gpu_arch}.bc)
+  list(APPEND ALL_BITCODE_OUTPUTS_NO_DEVICE_GLOBALS
+    ${_BC_NO_DEVICE_GLOBALS})
+
+  add_custom_command(
+    OUTPUT ${_UNOPT_BC_NO_DEVICE_GLOBALS}
+    COMMAND ${LLVM_LINK} ${_BITCODE_OBJECTS_NO_DEVICE_GLOBALS}
+            -o ${_UNOPT_BC_NO_DEVICE_GLOBALS}
+    DEPENDS ${_BITCODE_OBJECTS_NO_DEVICE_GLOBALS}
+    COMMENT "Linking device bitcode (no device_globals) for ${gpu_arch}"
+    VERBATIM
+  )
+
+  add_custom_command(
+    OUTPUT ${_BC_NO_DEVICE_GLOBALS}
+    COMMAND ${LLVM_OPT} -O3 -mtriple=amdgcn-amd-amdhsa -mcpu=${gpu_arch}
+            ${_UNOPT_BC_NO_DEVICE_GLOBALS} -o ${_BC_NO_DEVICE_GLOBALS}
+    DEPENDS ${_UNOPT_BC_NO_DEVICE_GLOBALS}
+    COMMENT "Optimizing device bitcode (no device_globals) for ${gpu_arch}"
+    VERBATIM
+  )
+
   message(STATUS "Device bitcode for ${gpu_arch}: ${BITCODE_OUTPUT_${gpu_arch}}")
 endforeach()
 
 add_custom_target(rocshmem_device_bitcode ALL
-  DEPENDS ${ALL_BITCODE_OUTPUTS}
+  DEPENDS ${ALL_BITCODE_OUTPUTS} ${ALL_BITCODE_OUTPUTS_NO_DEVICE_GLOBALS}
 )
 
 message(STATUS "Device bitcode will be built for architectures: ${BITCODE_GPU_ARCHS}")
