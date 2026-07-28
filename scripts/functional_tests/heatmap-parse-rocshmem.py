@@ -116,12 +116,29 @@ for dir, file_names in files_in_dir.items():
                 values = line1.rstrip().split()
                 #print(values)
 
-                volume1 = int(values[0])
-                size1 = int(values[1])
-                msgcount1 = int(values[2])
-                avg_time1 = float(values[3])
-                avg_bw1 = float(values[4])
-                msg_rate1 = float(values[5])
+                if len(values) == 5:
+                    volume1 = 0
+                    size1 = int(values[0])
+                    msgcount1 = int(values[1])
+                    avg_time1 = float(values[2])
+                    avg_bw1 = float(values[3])
+                    msg_rate1 = float(values[4])
+                elif len(values) == 6:
+                    volume1 = int(values[0])
+                    size1 = int(values[1])
+                    msgcount1 = int(values[2])
+                    avg_time1 = float(values[3])
+                    avg_bw1 = float(values[4])
+                    msg_rate1 = float(values[5])
+                elif len(values) == 8:
+                    volume1 = int(values[0])
+                    size1 = int(values[1])
+                    msgcount1 = int(values[2])
+                    avg_time1 = float(values[3])
+                    avg_bw1 = float(values[4])
+                    #align_rccl_algbw = float(values[5])
+                    #align_rccl_busbw = float(values[6])
+                    msg_rate1 = float(values[7])
 
                 if volume1 < minmsgsize:
                     continue

@@ -1107,10 +1107,12 @@ bool Tester::peLaunchesKernel() {
   return is_launcher;
 }
 
-void Tester::AlignAlgBwWithRccl(TesterArguments args, uint64_t size, double time_us, size_t *volume, double *bandwidth_gbs) {
-  char* align_algbw_with_rccl = getenv("ROCSHMEM_ALIGN_ALGBW_WITH_RCCL");
+bool Tester::AlignBwWithRccl(TesterArguments args, uint64_t size, double time_us, size_t *volume, double *AlgBw_align_rccl, double *BusBw_align_rccl) {
+  char* align_algbw_with_rccl = getenv("ROCSHMEM_ALIGN_BW_WITH_RCCL");
   bool _align_algbw_with_rccl = false;
   bool is_match = false;
+  size_t size_factor_rccl = 1;
+  double bus_factor_rccl = 1;
 
   if (align_algbw_with_rccl != nullptr) {
     std::string value(align_algbw_with_rccl);
@@ -1119,25 +1121,29 @@ void Tester::AlignAlgBwWithRccl(TesterArguments args, uint64_t size, double time
   }
 
   if (!_align_algbw_with_rccl) {
-    return;
+    return false;
   }
 
-  _type = (TestType)args.algorithm;
-  switch (_type) {
-    case TeamBroadcastTestType:
-    case TeamReductionTestType:
-    case TeamBroadcastmemOnStreamTestType:
-    case ReduceOnStreamTestType:
-      bw_factor = 1;
-      size_factor = 1;
+  TestType type = (TestType)args.algorithm;
+  switch (type) {
+    case TeamReductionTestType: // ALLReduce
+    case ReduceOnStreamTestType: // ALLReduce
+      bus_factor_rccl = ((double)(2*(args.numprocs - 1)))/((double)args.numprocs);
       is_match = true;
       break;
-    case TeamFCollectTestType:   //AllGather
+    case TeamBroadcastTestType:
+    case TeamBroadcastmemOnStreamTestType:
+      is_match = true;
+      break;
+    case TeamFCollectTestType:   // AllGather
     case TeamAllToAllTestType:
     case TeamAllToAllvTestType:
     case TeamAlltoallmemOnStreamTestType:
-      bw_factor = args.numprocs; //n_pes
-      size_factor = 1;
+    case TeamReduceScatterTestType:
+      // rocSHMEM's size is the contribution/block size of one PE, while
+      // rccl-tests prints the full send/receive buffer size.
+      size_factor_rccl = args.numprocs;
+      bus_factor_rccl = ((double)(args.numprocs - 1))/((double)args.numprocs);
       is_match = true;
       break;
     default:
@@ -1145,11 +1151,15 @@ void Tester::AlignAlgBwWithRccl(TesterArguments args, uint64_t size, double time
   }
 
   if (is_match) {
-    size_t total_size = size_factor * size * num_timed_msgs; // 总消息大小
-    double time_s = time_us / 1e6;   // 总时间
-    *volume = total_size / num_loops; // 对应rccl用例中的size
-    *bandwidth_gbs = static_cast<double>(bw_factor * (total_size)) / time_s / 1.0E9;
+    size_t total_size = size_factor_rccl * size * num_timed_msgs; // total size of data transferred
+    double time_s = time_us / 1.0E6; // total time in seconds
+
+    *volume = total_size / num_loops;  // volume of data transferred, align with rccl's size
+    *AlgBw_align_rccl = static_cast<double>(total_size) / time_s / 1.0E9;
+    *BusBw_align_rccl = *AlgBw_align_rccl * bus_factor_rccl;
   }
+
+  return is_match;
 }
 
 void Tester::print(uint64_t size) {
@@ -1182,26 +1192,46 @@ void Tester::print(uint64_t size) {
   int float_precision = 2;
 
   // Align bandwidth with RCCL
-  AlignAlgBwWithRccl(args, size, time_us, &volume, &bandwidth_gbs);
+  double AlgBw_align_rccl = 0;
+  double BusBw_align_rccl = 0;
+  bool is_rccl_match = AlignBwWithRccl(args, size, time_us, &volume, &AlgBw_align_rccl, &BusBw_align_rccl);
+
+  int rccl_field_width = field_width + 7;
 
   if (_print_header) {
-    printf("\n%-*s%-*s%-*s%*s%*s%*s",
+    printf("\n%-*s%-*s%-*s%*s%*s%*s%*s%*s\n",
            15, "# Volume (B)",
            15, "Msg Size (B)",
            15, "# of timed Msgs",
            field_width, "Latency (us)",
            field_width, "Bandwidth (GB/s)",
-           field_width + 1, "Msg Rate (Msg/s)\n");
+           rccl_field_width, "AlgBwAlignRccl (GB/s)",
+           rccl_field_width, "BusBwAlignRccl (GB/s)",
+           field_width + 1, "Msg Rate (Msg/s)");
     _print_header = 0;
   }
 
-  printf("%-*lu%-*lu%-*zu%*.*f%*.*f%*.*f\n",
-         15, volume,
-         15, size,
-         15, num_timed_msgs,
-         field_width, float_precision, latency,
-         field_width, float_precision, bandwidth_gbs,
-         field_width, float_precision, msg_rate);
+  if (is_rccl_match) {
+    printf("%-*lu%-*lu%-*zu%*.*f%*.*f%*.*f%*.*f%*.*f\n",
+           15, volume,
+           15, size,
+           15, num_timed_msgs,
+           field_width, float_precision, latency,
+           field_width, float_precision, bandwidth_gbs,
+           rccl_field_width, float_precision, AlgBw_align_rccl,
+           rccl_field_width, float_precision, BusBw_align_rccl,
+           field_width, float_precision, msg_rate);
+  } else {
+    printf("%-*lu%-*lu%-*zu%*.*f%*.*f%*s%*s%*.*f\n",
+           15, volume,
+           15, size,
+           15, num_timed_msgs,
+           field_width, float_precision, latency,
+           field_width, float_precision, bandwidth_gbs,
+           rccl_field_width, "N/A",
+           rccl_field_width, "N/A",
+           field_width, float_precision, msg_rate);
+  }
 
   fflush(stdout);
 }
