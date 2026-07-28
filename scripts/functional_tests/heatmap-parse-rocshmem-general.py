@@ -28,7 +28,7 @@ files_in_dir = {}
 files = 0
 mode = "--both"  # 默认 both
 out_file = "rocshmem_test" # 默认输出文件
-show_mode = "--s" # 默认按msgsize显示, --v按volume显示
+show_mode = "--v" # 默认按volume显示, --s按msgsize显示
 
 for arg in sys.argv[1:]:
     if arg in ["--lat", "--bw", "--both"]:
@@ -79,6 +79,8 @@ class Measurement:
     msgcount: int
     avg_time: float
     avg_bw: float
+    align_rccl_algbw: float
+    align_rccl_busbw: float
     msg_rate: float
 
 @dataclass
@@ -212,7 +214,7 @@ for dir, file_names in files_in_dir.items():
                     continue
 
                 parts = line.split()
-                if len(parts) < 6:
+                if len(parts) < 5:
                     continue
 
                 valid = True
@@ -223,17 +225,38 @@ for dir, file_names in files_in_dir.items():
                 if not valid:
                     continue
 
-                volume1 = int(parts[0])
-                size1 = int(parts[1])
-                msgcount1 = int(parts[2])
-                avg_time1 = float(parts[3])
-                avg_bw1 = float(parts[4])
-                msg_rate1 = float(parts[5])
+                if len(parts) == 5:
+                    volume1 = 0
+                    size1 = int(parts[0])
+                    msgcount1 = int(parts[1])
+                    avg_time1 = float(parts[2])
+                    avg_bw1 = float(parts[3])
+                    msg_rate1 = float(parts[4])
+                    align_rccl_algbw1 = 0
+                    align_rccl_busbw1 = 0
+                elif len(parts) == 6:
+                    volume1 = int(parts[0])
+                    size1 = int(parts[1])
+                    msgcount1 = int(parts[2])
+                    avg_time1 = float(parts[3])
+                    avg_bw1 = float(parts[4])
+                    msg_rate1 = float(parts[5])
+                    align_rccl_algbw1 = 0
+                    align_rccl_busbw1 = 0
+                elif len(parts) == 8:
+                    volume1 = int(parts[0])
+                    size1 = int(parts[1])
+                    msgcount1 = int(parts[2])
+                    avg_time1 = float(parts[3])
+                    avg_bw1 = float(parts[4])
+                    align_rccl_algbw1 = float(parts[5])
+                    align_rccl_busbw1 = float(parts[6])
+                    msg_rate1 = float(parts[7])
 
                 if volume1 < minmsgsize:
                     continue
 
-                datapoint = Measurement(volume1, size1, msgcount1, avg_time1, avg_bw1, msg_rate1)
+                datapoint = Measurement(volume1, size1, msgcount1, avg_time1, avg_bw1, align_rccl_algbw1, align_rccl_busbw1, msg_rate1)
                 this_series.data.append(datapoint)
         all_data.append(this_series)
 
@@ -279,9 +302,9 @@ for dir, file_names in files_in_dir.items():
                 if mode == "--lat":
                     header = f"{x_str[i]}\nLat"
                 elif mode == "--bw":
-                    header = f"{x_str[i]}\nBw"
+                    header = f"{x_str[i]}\nBw/AlgBw/BusBw"
                 else:
-                    header = f"{x_str[i]}\nLat/Bw"
+                    header = f"{x_str[i]}\nBw/AlgBw/BusBw/Lat"
                 worksheet.write(pad_top, i+pad_left+3, header, cell_format)
 
         top_start = pad_top + 1 + dataset_count
@@ -312,10 +335,14 @@ for dir, file_names in files_in_dir.items():
             msg_size = x[i]
             lat = None
             bw = None
+            align_rccl_algbw = None
+            align_rccl_busbw = None
             for pt in data_series.data:
                 if (show_mode == "--s" and pt.msgsize == msg_size) or (show_mode == "--v" and pt.volume == msg_size):
                     lat = pt.avg_time
                     bw = pt.avg_bw
+                    align_rccl_algbw = pt.align_rccl_algbw
+                    align_rccl_busbw = pt.align_rccl_busbw
                     break
 
             # ====================== 最终显示格式 ======================
@@ -323,11 +350,14 @@ for dir, file_names in files_in_dir.items():
                 val = f"{lat:.2f}" if lat is not None else ""
                 worksheet.write(top_start, i+pad_left+3, val, wrap_format)
             elif mode == "--bw":
-                val = f"{bw:.2f}" if bw is not None else ""
+                if bw is not None:
+                    val = f"{bw:.2f}\n{align_rccl_algbw:.2f}\n{align_rccl_busbw:.2f}"
+                else:
+                    val = ""
                 worksheet.write(top_start, i+pad_left+3, val, wrap_format)
             else:
                 if lat is not None and bw is not None:
-                    val = f"{lat:.2f}\n{bw:.2f}"
+                    val = f"{bw:.2f}\n{align_rccl_algbw:.2f}\n{align_rccl_busbw:.2f}\n{lat:.2f}"
                 elif lat is not None:
                     val = f"Lat:{lat:.2f}"
                 elif bw is not None:
