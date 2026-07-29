@@ -17,39 +17,49 @@ endif()
 ###############################################################################
 # DEVICE-ONLY STATIC LIBRARY
 ###############################################################################
-# Bundle all architecture-specific bitcode produced by DeviceBitcode.cmake into
-# a HIP offload object, then combine it with the one device-state definition TU.
-set(_bundle_targets "")
-foreach(_arch ${BITCODE_GPU_ARCHS})
-  list(APPEND _bundle_targets "hip-amdgcn-amd-amdhsa--${_arch}")
+# Preserve the full target's per-translation-unit HIP member topology.  aicc's
+# final GPU image (including scratch/private-segment behaviour) depends on this
+# topology.  Strip only the host bundle from every member; device_globals.cpp
+# remains one normal HIP TU because its host constructor registers the module's
+# device-global setters and defines the hidden force-link anchor.
+get_target_property(ROCSHMEM_ALL_SOURCES rocshmem SOURCES)
+set(_device_member_dir "${CMAKE_CURRENT_BINARY_DIR}/rocshmem_device_members")
+set(_device_member_outputs "")
+set(_device_member_count 0)
+foreach(_source IN LISTS ROCSHMEM_ALL_SOURCES)
+  get_filename_component(_source_name "${_source}" NAME)
+  if(_source_name STREQUAL "device_globals.cpp")
+    continue()
+  endif()
+  math(EXPR _device_member_count "${_device_member_count} + 1")
+  list(APPEND _device_member_outputs
+    "${_device_member_dir}/${_device_member_count}_${_source_name}.o")
 endforeach()
-list(JOIN _bundle_targets "," _bundle_targets_arg)
-list(JOIN ALL_BITCODE_OUTPUTS_NO_DEVICE_GLOBALS "," _bundle_inputs_arg)
 
-find_program(CLANG_OFFLOAD_BUNDLER clang-offload-bundler
-  PATHS ${ROCM_PATH}/llvm/bin ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin
-  NO_DEFAULT_PATH REQUIRED)
-
-set(ROCSHMEM_DEVICE_OBJECT "${CMAKE_BINARY_DIR}/librocshmem_device.o")
+find_program(BASH_EXECUTABLE bash REQUIRED)
 add_custom_command(
-  OUTPUT ${ROCSHMEM_DEVICE_OBJECT}
-  COMMAND ${CLANG_OFFLOAD_BUNDLER} -type=o
-          -targets=${_bundle_targets_arg}
-          -inputs=${_bundle_inputs_arg}
-          -outputs=${ROCSHMEM_DEVICE_OBJECT}
-  DEPENDS ${ALL_BITCODE_OUTPUTS_NO_DEVICE_GLOBALS}
-  COMMENT "Bundling rocSHMEM device bitcode"
+  OUTPUT ${_device_member_outputs}
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${_device_member_dir}
+  COMMAND ${CMAKE_COMMAND} -E env
+          ROCSHMEM_DEVICE_ARCHIVE_TOOLCHAIN_ROOT=${ROCM_PATH}/llvm/bin
+          ${BASH_EXECUTABLE}
+          ${CMAKE_SOURCE_DIR}/scripts/extract_device_only_members.sh
+          $<TARGET_FILE:rocshmem>
+          ${_device_member_dir}
+          ${_device_member_count}
+  DEPENDS rocshmem
+          ${CMAKE_SOURCE_DIR}/scripts/extract_device_only_members.sh
+  COMMENT "Extracting per-TU rocSHMEM device-only archive members"
   VERBATIM)
 
-add_library(rocshmem_device STATIC
-  ${ROCSHMEM_DEVICE_OBJECT}
-  ${CMAKE_SOURCE_DIR}/src/device_globals.cpp)
-add_library(roc::rocshmem_device ALIAS rocshmem_device)
-
-set_source_files_properties(${ROCSHMEM_DEVICE_OBJECT} PROPERTIES
+set_source_files_properties(${_device_member_outputs} PROPERTIES
   GENERATED TRUE
   EXTERNAL_OBJECT TRUE)
-add_dependencies(rocshmem_device rocshmem_device_bitcode)
+
+add_library(rocshmem_device STATIC
+  ${_device_member_outputs}
+  ${CMAKE_SOURCE_DIR}/src/device_globals.cpp)
+add_library(roc::rocshmem_device ALIAS rocshmem_device)
 
 target_compile_options(rocshmem_device PRIVATE -fgpu-rdc)
 target_include_directories(rocshmem_device PRIVATE
@@ -60,13 +70,14 @@ target_include_directories(rocshmem_device PRIVATE
 target_link_libraries(rocshmem_device PRIVATE
   hip::device
   $<$<BOOL:${HAVE_EXTERNAL_MPI}>:MPI::MPI_CXX>)
+target_link_options(rocshmem_device INTERFACE
+  -Wl,-u,rocshmem_force_link_device_module)
 
 ###############################################################################
 # HOST-ONLY SHARED LIBRARY
 ###############################################################################
 # Derive the host source set from the fully populated rocshmem target so that
 # conditional backend sources cannot drift from this library.
-get_target_property(ROCSHMEM_ALL_SOURCES rocshmem SOURCES)
 list(REMOVE_ITEM ROCSHMEM_ALL_SOURCES
   device_globals.cpp
   ${CMAKE_SOURCE_DIR}/src/device_globals.cpp
