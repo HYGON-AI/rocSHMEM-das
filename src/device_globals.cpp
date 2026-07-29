@@ -5,6 +5,15 @@
 #include "device_module_registry.hpp"
 #include "util.hpp"
 
+// Static consumers reference this hidden symbol with -Wl,-u.  This forces the
+// one host-bearing archive member into the final link so its module-local
+// device-global registration constructor runs.  All other members of the
+// split device archive contain device bundles only.
+extern "C" __attribute__((visibility("hidden"), used)) void
+rocshmem_force_link_device_module() {
+  return;
+}
+
 // This file is intentionally module-local: every HIP device module needs its
 // own device globals and setters whose HIP symbol tokens refer to that module.
 // The setters are registered with the process-wide registry implemented in
