@@ -731,16 +731,15 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
 // ==============================================================================
 // BUFFER RESOURCE INTRINSICS
 // ==============================================================================
-#if 0
 using i32x4_t = int32_t __attribute__((ext_vector_type(4)));
 
-__device__ __uint128_t llvm_amdgcn_raw_buffer_load_b128(
+__device__ i32x4_t llvm_amdgcn_raw_buffer_load_b128(
     i32x4_t srsrc, uint32_t voffset, uint32_t soffset,
-    uint32_t aux) __asm("llvm.amdgcn.raw.buffer.load.i128");
+    uint32_t aux) __asm("llvm.amdgcn.raw.buffer.load.v4i32");
 
 __device__ void llvm_amdgcn_raw_buffer_store_b128(
-    __uint128_t vdata, i32x4_t srsrc, uint32_t voffset, uint32_t soffset,
-    uint32_t aux) __asm("llvm.amdgcn.raw.buffer.store.i128");
+    i32x4_t vdata, i32x4_t srsrc, uint32_t voffset, uint32_t soffset,
+    uint32_t aux) __asm("llvm.amdgcn.raw.buffer.store.v4i32");
 
 __device__ uint64_t llvm_amdgcn_raw_buffer_load_b64(
     i32x4_t srsrc, uint32_t voffset, uint32_t soffset,
@@ -833,7 +832,7 @@ struct AsmAccess;
 // ==============================================================================
 template <CachePolicy LoadPolicy, CachePolicy StorePolicy>
 struct AsmAccess<16, LoadPolicy, StorePolicy> {
-  using type = __int128_t;
+  using type = i32x4_t;
 
   static __device__ __forceinline__ type load(void* src) {
     if constexpr (LoadPolicy == CachePolicy::Standard) {
@@ -928,8 +927,7 @@ struct AsmAccess<16, LoadPolicy, StorePolicy> {
                                                       type val) {
     i32x4_t rsrc = make_buffer_resource(ptr, buf_size);
     constexpr uint32_t aux = cache_policy_aux(StorePolicy);
-    llvm_amdgcn_raw_buffer_store_b128(static_cast<__uint128_t>(val),
-                                      rsrc, offset, 0, aux);
+    llvm_amdgcn_raw_buffer_store_b128(val, rsrc, offset, 0, aux);
   }
 };
 
@@ -1552,8 +1550,6 @@ __device__ __forceinline__ void wait_on_vmem_and_lds([[maybe_unused]] int waits)
   }
 #endif
 }
-
-#endif // 0
 
 }  // namespace rocshmem
 
