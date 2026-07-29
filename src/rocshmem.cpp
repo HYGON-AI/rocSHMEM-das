@@ -162,6 +162,7 @@ static BackendType select_backend_type(MPI_Comm comm,
   return BackendType::IPC_BACKEND;
 }
 #endif
+
 static void setFilesLimit() {
   rlimit filesLimit;
   if (getrlimit(RLIMIT_NOFILE, &filesLimit) != 0) {
