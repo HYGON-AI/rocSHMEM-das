@@ -559,50 +559,82 @@ __device__ void IPCContext::internal_get_broadcast(
 }
 
 /*
- * Latency/bandwidth balanced broadcast for medium-sized messages.
+ * Chunk-pipelined chain broadcast for large messages.
  *
- * Ranks are rotated so that the root has virtual rank zero.  In round k,
- * every rank that already owns the data sends it to one new rank, doubling
- * the number of owners.  A team-wide synchronization closes each round; this
- * is intentionally stronger than a workgroup barrier because a newly reached
- * PE must not forward dst until the preceding remote PUT is globally visible.
- * For eight PEs this takes three rounds and reduces root traffic from 7*N to
- * 3*N bytes.
+ * Ranks are rotated so that the root has virtual rank zero.  The message is
+ * split into chunks and forwarded along the virtual-rank chain.  In a given
+ * round, each link carries a different chunk, so all active links can make
+ * progress concurrently.  A team-wide synchronization closes each round and
+ * guarantees that a received chunk is visible before it is forwarded.
+ *
+ * Unlike a full-message binomial tree, the root sends each byte only once.
  */
 template <typename T>
-__device__ void IPCContext::internal_tree_broadcast(
+__device__ void IPCContext::internal_chain_broadcast(
     T *dst, const T *src, int nelems, int pe_root, int pe_start, int stride,
     int pe_size, int64_t *p_sync) {  // NOLINT(runtime/int)
+  // Compute virtual rank: root=0, enables circular chain topology
   int my_rank = (constmem.my_pe - pe_start) / stride;
   int root_rank = (pe_root - pe_start) / stride;
+
   int virtual_rank = my_rank - root_rank;
   if (virtual_rank < 0) {
     virtual_rank += pe_size;
   }
 
+  // Root fetches data from source into local dst buffer
   if (virtual_rank == 0) {
     get_wg(dst, src, nelems, pe_root);
   }
 
-  for (int distance = 1; distance < pe_size; distance <<= 1) {
-    if (virtual_rank < distance) {
-      int peer_virtual_rank = virtual_rank + distance;
-      if (peer_virtual_rank < pe_size) {
-        int peer_rank = peer_virtual_rank + root_rank;
-        if (peer_rank >= pe_size) {
-          peer_rank -= pe_size;
-        }
-        int peer = pe_start + peer_rank * stride;
-        const T *forward_src = (virtual_rank == 0) ? src : dst;
-        // Blocking WG PUT drains every participating lane before the receiver
-        // can leave the following team synchronization and forward dst.
-        put_wg(dst, forward_src, nelems, peer);
+  // Split message into chunks for pipelined forwarding
+  constexpr int CHUNK_NELEMS = ROCSHMEM_CHUNK_BYTES / sizeof(T);
+  int num_chunks = (nelems + CHUNK_NELEMS - 1) / CHUNK_NELEMS;
+
+  // Determine downstream neighbor in the chain (-1 if last node)
+  int next_pe = -1;
+  if (virtual_rank < pe_size - 1) {
+    int next_rank = virtual_rank + 1 + root_rank;
+    if (next_rank >= pe_size) {
+      next_rank -= pe_size;
+    }
+    next_pe = pe_start + next_rank * stride;
+  }
+
+  // Pipeline: forward chunks along the chain with overlap
+  for (int chunk = 0; chunk < num_chunks; chunk++) {
+    // Progress signal: chunk N is ready when p_sync[0] >= N+1
+    int64_t ready = chunk + 1;
+
+    // Non-root nodes wait for upstream to send this chunk
+    if (virtual_rank > 0) {
+      if (is_thread_zero_in_block()) {
+        wait_until(&p_sync[0], ROCSHMEM_CMP_GE, ready);
       }
+      __syncthreads();
     }
 
-    // Completes remote stores and prevents a receiver from forwarding early.
-    internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync);
+    // Compute current chunk boundaries
+    int offset = chunk * CHUNK_NELEMS;
+    int count = min(CHUNK_NELEMS, nelems - offset);
+
+    // Forward this chunk to downstream neighbor
+    if (next_pe != -1) {
+      // Root reads from src, other nodes forward from received dst
+      const T *forward_src = (virtual_rank == 0) ? src + offset : dst + offset;
+      put_wg(dst + offset, forward_src, count, next_pe);
+
+      // Signal completion to downstream node
+      if (is_thread_zero_in_block()) {
+        fence(next_pe);
+        internal_putmem(&p_sync[0], &ready, sizeof(ready), next_pe);
+      }
+      __syncthreads();
+    }
   }
+
+  // Global barrier ensures all PEs have completed reception
+  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync + 1);
 }
 
 template <typename T>
@@ -634,7 +666,7 @@ __device__ void IPCContext::internal_broadcast(T *dst, const T *src, int nelems,
                            pe_size);
     internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync);
   } else {
-    internal_tree_broadcast(dst, src, nelems, pe_root, pe_start, stride, pe_size, p_sync);
+    internal_chain_broadcast(dst, src, nelems, pe_root, pe_start, stride, pe_size, p_sync);
   }
 
   // if (constmem.num_pes < 4) {
@@ -668,7 +700,40 @@ __device__ void IPCContext::alltoallv([[maybe_unused]] rocshmem_team_t team,
                                       [[maybe_unused]] const size_t dest_displs[],
                                       [[maybe_unused]] T *source, [[maybe_unused]] const size_t source_nelems[],
                                       [[maybe_unused]] const size_t source_displs[]) {
-  LOGD_ERROR_ABORT("ipc:alltoallv not implemented");
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+  const int pe_size = team_obj->num_pes;
+  const int my_rank = team_obj->my_pe;
+  const int wave_id = get_flat_block_id() / WF_SIZE;
+  const int num_waves = (get_flat_block_size() + WF_SIZE - 1) / WF_SIZE;
+
+  // Uniform alltoallv is common in communication benchmarks and frameworks;
+  // route it through the vectorized alltoall path. Nonuniform counts and
+  // displacements continue through the fully general path below.
+  const size_t uniform_count = source_nelems[0];
+  bool uniform = uniform_count == dest_nelems[0];
+  for (int rank = 0; rank < pe_size && uniform; rank++) {
+    uniform = source_nelems[rank] == uniform_count &&
+              dest_nelems[rank] == uniform_count &&
+              source_displs[rank] == static_cast<size_t>(rank) * uniform_count &&
+              dest_displs[rank] == static_cast<size_t>(rank) * uniform_count;
+  }
+  if (uniform) {
+    alltoall(team, dest, source, static_cast<int>(uniform_count));
+    return;
+  }
+
+  // source_nelems/displs describe the block sent to each destination.  The
+  // matching destination displacement is indexed by the sender rank.
+  for (int remote_rank = wave_id; remote_rank < pe_size; remote_rank += num_waves) {
+    const int pe = team_obj->get_pe_in_world(remote_rank);
+    const size_t count = source_nelems[remote_rank];
+    put_nbi_wave(dest + dest_displs[my_rank], source + source_displs[remote_rank], count, pe);
+  }
+
+  internal_sync_wg(constmem.my_pe,
+                   team_obj->tinfo_wrt_world->pe_start,
+                   team_obj->tinfo_wrt_world->stride, pe_size,
+                   team_obj->alltoall_pSync);
 }
 
 template <typename T>
@@ -1753,4 +1818,3 @@ __device__ inline int IPCContext::tile_min_reduce_wg([[maybe_unused]] rocshmem_t
 }  // namespace rocshmem
 
 #endif  // LIBRARY_SRC_IPC_CONTEXT_TMPL_DEVICE_HPP_
-

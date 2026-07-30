@@ -74,7 +74,8 @@ TEAM_ALLTOALLV_DEF_GEN(unsigned long long, ulonglong)
  *****************************************************************************/
 
 template <typename T1>
-__global__ void TeamAlltoallvTest(int loop, int skip,
+// This is a maximum launch bound; callers may use any smaller block size.
+__global__ __launch_bounds__(512) void TeamAlltoallvTest(int loop, int skip,
                                   long long int *start_time,
                                   long long int *end_time,
                                   T1 *dest,
@@ -85,14 +86,25 @@ __global__ void TeamAlltoallvTest(int loop, int skip,
                                   const size_t source_displs[],
                                   [[maybe_unused]] ShmemContextType ctx_type,
                                   rocshmem_team_t *teams) {
+  const int wg_id = get_flat_grid_id();
+  const int n_pes = rocshmem_team_n_pes(teams[wg_id]);
+  // Each workgroup owns a separate team, metadata slice, and data slice so
+  // concurrent collectives never share synchronization state.
+  dest_nelems += wg_id * n_pes;
+  dest_displs += wg_id * n_pes;
+  source_nelems += wg_id * n_pes;
+  source_displs += wg_id * n_pes;
+  const size_t wg_elems = source_nelems[0] * n_pes;
+  dest += wg_id * wg_elems;
+  source += wg_id * wg_elems;
 
   __syncthreads();
 
   for (int i = 0; i < loop + skip; i++) {
     if (i == skip && hipThreadIdx_x == 0) {
-      start_time[0] = wall_clock64();
+      start_time[wg_id] = wall_clock64();
     }
-    wg_team_alltoallv<T1>(teams[0],
+    wg_team_alltoallv<T1>(teams[wg_id],
                           dest, dest_nelems, dest_displs,
                           source, source_nelems, source_displs);
   }
@@ -100,7 +112,7 @@ __global__ void TeamAlltoallvTest(int loop, int skip,
   __syncthreads();
 
   if (hipThreadIdx_x == 0) {
-    end_time[0] = wall_clock64();
+    end_time[wg_id] = wall_clock64();
   }
 }
 
@@ -113,25 +125,21 @@ TeamAlltoallvTester<T1>::TeamAlltoallvTester(TesterArguments args)
   my_pe = rocshmem_team_my_pe(ROCSHMEM_TEAM_WORLD);
   n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
 
-  if (args.num_wgs > 1) {
-    printf("Alltoallv only supports a single workgroup.\n");
-    rocshmem_global_exit(1);
-  }
-
   // Number of elements per work group
   int num_elems_wg = (args.max_msg_size / sizeof(T1)) * n_pes;
 
   // Total number of elements in the GPU kernel
-  int total_elems = num_elems_wg;
+  int total_elems = num_elems_wg * args.num_wgs;
   int buff_size   = total_elems * sizeof(T1);
 
   source_buf = (T1 *)alloc_test_buffer(buff_size, args.local_buf_type);
   dest_buf   = (T1 *)alloc_test_buffer(buff_size);
 
-  CHECK_HIP(hipMalloc(&source_displs, n_pes * sizeof(size_t)));
-  CHECK_HIP(hipMalloc(&dest_displs  , n_pes * sizeof(size_t)));
-  CHECK_HIP(hipMalloc(&source_nelems, n_pes * sizeof(size_t)));
-  CHECK_HIP(hipMalloc(&dest_nelems  , n_pes * sizeof(size_t)));
+  const size_t metadata_bytes = args.num_wgs * n_pes * sizeof(size_t);
+  CHECK_HIP(hipMalloc(&source_displs, metadata_bytes));
+  CHECK_HIP(hipMalloc(&dest_displs  , metadata_bytes));
+  CHECK_HIP(hipMalloc(&source_nelems, metadata_bytes));
+  CHECK_HIP(hipMalloc(&dest_nelems  , metadata_bytes));
 
   char* value = nullptr;
 
@@ -140,7 +148,7 @@ TeamAlltoallvTester<T1>::TeamAlltoallvTester(TesterArguments args)
   }
 
   CHECK_HIP(hipMalloc(&team_alltoallv_world_dup,
-                      sizeof(rocshmem_team_t) * num_teams));
+                      sizeof(rocshmem_team_t) * args.num_wgs));
 }
 
 template <typename T1>
@@ -158,7 +166,7 @@ template <typename T1>
 void TeamAlltoallvTester<T1>::preLaunchKernel() {
   bw_factor = n_pes;
 
-  for (int team_i = 0; team_i < num_teams; team_i++) {
+  for (int team_i = 0; team_i < args.num_wgs; team_i++) {
     team_alltoallv_world_dup[team_i] = ROCSHMEM_TEAM_INVALID;
     rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0,
                                  &team_alltoallv_world_dup[team_i]);
@@ -176,12 +184,16 @@ void TeamAlltoallvTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize,
   int num_elems = size / sizeof(T1);
   size_t disp = 0;
 
-  for (int i = 0; i < n_pes; i++) {
-    source_nelems[i] = num_elems;
-    dest_nelems[i]   = num_elems;
-    source_displs[i] = disp;
-    dest_displs[i]   = disp;
-    disp += num_elems;
+  for (int wg = 0; wg < args.num_wgs; wg++) {
+    disp = 0;
+    for (int i = 0; i < n_pes; i++) {
+      const int idx = wg * n_pes + i;
+      source_nelems[idx] = num_elems;
+      dest_nelems[idx]   = num_elems;
+      source_displs[idx] = disp;
+      dest_displs[idx]   = disp;
+      disp += num_elems;
+    }
   }
 
   hipLaunchKernelGGL(TeamAlltoallvTest<T1>, gridSize, blockSize, shared_bytes,
@@ -197,7 +209,7 @@ void TeamAlltoallvTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize,
 
 template <typename T1>
 void TeamAlltoallvTester<T1>::postLaunchKernel() {
-  for (int team_i = 0; team_i < num_teams; team_i++) {
+  for (int team_i = 0; team_i < args.num_wgs; team_i++) {
     rocshmem_team_destroy(team_alltoallv_world_dup[team_i]);
   }
 }
@@ -205,22 +217,22 @@ void TeamAlltoallvTester<T1>::postLaunchKernel() {
 template <typename T1>
 void TeamAlltoallvTester<T1>::resetBuffers(size_t size) {
   int num_elems = size / sizeof(T1);
-  int buff_size = num_elems * sizeof(T1) * n_pes;
+  int buff_size = num_elems * sizeof(T1) * n_pes * args.num_wgs;
   int idx = 0;
 
-  for(int pe = 0; pe < n_pes; pe++) {
-    for(int i = 0; i < num_elems; i++) {
-      idx = pe * num_elems + i;
-      if constexpr (std::is_same<T1, char>::value ||
-                    std::is_same<T1, signed char>::value ||
-                    std::is_same<T1, unsigned char>::value) {
-        source_buf[idx] = static_cast<T1>('a' + my_pe + pe);
-      }
-      else if constexpr (std::is_floating_point<T1>::value) {
-        source_buf[idx] = static_cast<T1>(3.14 + my_pe + pe);
-      }
-      else if constexpr (std::is_integral<T1>::value) {
-        source_buf[idx] = static_cast<T1>(my_pe + pe);
+  for (int wg = 0; wg < args.num_wgs; wg++) {
+    for(int pe = 0; pe < n_pes; pe++) {
+      for(int i = 0; i < num_elems; i++) {
+        idx = (wg * n_pes + pe) * num_elems + i;
+        if constexpr (std::is_same<T1, char>::value ||
+                      std::is_same<T1, signed char>::value ||
+                      std::is_same<T1, unsigned char>::value) {
+          source_buf[idx] = static_cast<T1>('a' + my_pe + pe);
+        } else if constexpr (std::is_floating_point<T1>::value) {
+          source_buf[idx] = static_cast<T1>(3.14 + my_pe + pe);
+        } else if constexpr (std::is_integral<T1>::value) {
+          source_buf[idx] = static_cast<T1>(my_pe + pe);
+        }
       }
     }
   }
@@ -232,16 +244,20 @@ template <typename T1>
 void TeamAlltoallvTester<T1>::verifyResults(size_t size) {
   int num_elems = size / sizeof(T1);
 
-  for(int pe = 0; pe < n_pes; pe++) {
-    T1* dst = (T1*) ((char*)dest_buf + (dest_displs[pe] * sizeof(T1)));
-    T1* src = (T1*) &source_buf[pe * num_elems];
+  for (int wg = 0; wg < args.num_wgs; wg++) {
+    const size_t wg_base = static_cast<size_t>(wg) * n_pes * num_elems;
+    for (int pe = 0; pe < n_pes; pe++) {
+      const int meta = wg * n_pes + pe;
+      T1* dst = dest_buf + wg_base + dest_displs[meta];
+      T1* src = source_buf + wg_base + pe * num_elems;
 
-    for(size_t i = 0; i < static_cast<size_t>(dest_nelems[pe]); i++) {
-      if (dst[i] != src[i]) {
-        std::cerr << "Data validation error at idx " << i << std::endl;
-        std::cerr << "PE " << my_pe << " Got " << dest_buf[i]
-        << ", Expected " << source_buf[i] << std::endl;
-        exit(-1);
+      for (size_t i = 0; i < dest_nelems[meta]; i++) {
+        if (dst[i] != src[i]) {
+          std::cerr << "Data validation error at idx " << i << std::endl;
+          std::cerr << "PE " << my_pe << " Got " << dst[i]
+                    << ", Expected " << src[i] << std::endl;
+          exit(-1);
+        }
       }
     }
   }

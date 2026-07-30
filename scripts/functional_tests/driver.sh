@@ -1024,9 +1024,11 @@ TestPerfColl() {
   ExecPerfTest  "alltoallv"               $RANKS       $MAX_MESSAGE_SIZE
   ExecPerfTest  "teambroadcast"           $RANKS       $MAX_MESSAGE_SIZE
   ExecPerfTest  "fcollect"                $RANKS       $MAX_MESSAGE_SIZE
-  # ExecPerfTest  "teamreduction"           $RANKS       $MAX_MESSAGE_SIZE
+  ExecPerfTest  "teamreduction"           $RANKS       $MAX_MESSAGE_SIZE
   ExecPerfTest  "alltoallmem_on_stream"   $RANKS       $MAX_MESSAGE_SIZE
   ExecPerfTest  "broadcastmem_on_stream"  $RANKS       $MAX_MESSAGE_SIZE
+  ExecPerfTest  "teamreducescatter"       $RANKS       $MAX_MESSAGE_SIZE
+  ExecPerfTest  "reduce_on_stream"        $RANKS       $MAX_MESSAGE_SIZE
 }
 
 TestRMAPerf() {
@@ -1081,14 +1083,11 @@ ExecPerfTest() {
   
   local -a wg_options=(${ROCSHMEM_TEST_WGS:-16})
   local -a thread_options=(${ROCSHMEM_TEST_THDS:-128 256})
-
-  if [[ "$test_name" == "alltoallv" ]]; then
-    # alltoallv only supports one workgroup
-    wg_options=(1)
-  fi
   
   declare -A best_latency
   declare -A best_bandwidth
+  declare -A best_alg_bw
+  declare -A best_bus_bw
   declare -A best_latency_config
   declare -A best_bandwidth_config
   
@@ -1115,48 +1114,83 @@ ExecPerfTest() {
       
       local results=$(awk -v max="$max_msg_size" '
         /Msg Size.*Latency.*Bandwidth/ { in_table=1; next }
-        in_table && /^[0-9]/ && $2 <= max { print $2 ":" $4 ":" $5 }
+        in_table && /^[0-9]/ && $2 <= max {
+          if (NF >= 7) {
+            print $1 ":" $4 ":" $5 ":" $6 ":" $7
+          } else {
+            print $1 ":" $4 ":" $5 "::"
+          }
+        }
       ' "$log_file")
       
       while IFS= read -r line; do
         [ -z "$line" ] && continue
-        
-        IFS=':' read -r msg_size latency bandwidth <<< "$line"
-        
-        if [ -z "${best_latency[$msg_size]}" ] || \
-           awk -v a="$latency" -v b="${best_latency[$msg_size]}" 'BEGIN {exit !(a < b)}'; then
-          best_latency[$msg_size]="$latency"
-          best_latency_config[$msg_size]="${wg}:${threads}"
+
+        IFS=':' read -r volume latency bandwidth alg_bw bus_bw <<< "$line"
+
+        if [ -z "${best_latency[$volume]}" ] || \
+           awk -v a="$latency" -v b="${best_latency[$volume]}" 'BEGIN {exit !(a < b)}'; then
+          best_latency[$volume]="$latency"
+          best_latency_config[$volume]="${wg}:${threads}"
         fi
-        
-        if [ -z "${best_bandwidth[$msg_size]}" ] || \
-           awk -v a="$bandwidth" -v b="${best_bandwidth[$msg_size]}" 'BEGIN {exit !(a > b)}'; then
-          best_bandwidth[$msg_size]="$bandwidth"
-          best_bandwidth_config[$msg_size]="${wg}:${threads}"
+
+        if [ -z "${best_bandwidth[$volume]}" ] || \
+           awk -v a="$bandwidth" -v b="${best_bandwidth[$volume]}" 'BEGIN {exit !(a > b)}'; then
+          best_bandwidth[$volume]="$bandwidth"
+          best_bandwidth_config[$volume]="${wg}:${threads}"
+          best_alg_bw[$volume]="$alg_bw"
+          best_bus_bw[$volume]="$bus_bw"
         fi
       done <<< "$results"
     done
   done
   
   local result_file="$LOG_DIR/${test_name}_n${num_ranks}_${max_msg_size}B_best.log"
-  
+
+  local has_extra_cols=0
+  for volume in "${!best_alg_bw[@]}"; do
+    if [ -n "${best_alg_bw[$volume]}" ] && [ "${best_alg_bw[$volume]}" != "" ]; then
+      has_extra_cols=1
+      break
+    fi
+  done
+
   {
     echo ""
-    echo "======================================================================================"
-    printf "  %-15s   %-15s   %-15s   %-15s   %-15s\n" \
-      "Msg Size" "Best Lat(us)" "Lat(WG:Threads)" "Best BW(GB/s)" "BW(WG:Threads)"
-    echo "--------------------------------------------------------------------------------------"
-    
-    for msg_size in $(echo "${!best_latency[@]}" | tr ' ' '\n' | sort -n); do
-      printf "  %-15s   %-15s   %-15s   %-15s   %-15s\n" \
-        "$msg_size" \
-        "${best_latency[$msg_size]}" \
-        "${best_latency_config[$msg_size]}" \
-        "${best_bandwidth[$msg_size]}" \
-        "${best_bandwidth_config[$msg_size]}"
-    done
-    
-    echo "======================================================================================"
+    echo "========================================================================================="
+    if [ $has_extra_cols -eq 1 ]; then
+      printf "  %-14s  %-22s  %-14s  %-14s  %-20s\n" \
+        "Volume (B)" "Best BW(GB/s)" "AlgBw(GB/s)" "BusBw(GB/s)" "Best Lat(us)"
+      echo "-----------------------------------------------------------------------------------------"
+
+      for volume in $(echo "${!best_latency[@]}" | tr ' ' '\n' | sort -n); do
+        local bw_str="${best_bandwidth[$volume]} (${best_bandwidth_config[$volume]})"
+        local alg_str="${best_alg_bw[$volume]}"
+        local bus_str="${best_bus_bw[$volume]}"
+        local lat_str="${best_latency[$volume]} (${best_latency_config[$volume]})"
+        printf "  %-14s  %-22s  %-14s  %-14s  %-20s\n" \
+          "$volume" \
+          "$bw_str" \
+          "$alg_str" \
+          "$bus_str" \
+          "$lat_str"
+      done
+    else
+      printf "  %-14s  %-22s  %-20s\n" \
+        "Volume (B)" "Best BW(GB/s)" "Best Lat(us)"
+      echo "-----------------------------------------------------------------------------------------"
+
+      for volume in $(echo "${!best_latency[@]}" | tr ' ' '\n' | sort -n); do
+        local bw_str="${best_bandwidth[$volume]} (${best_bandwidth_config[$volume]})"
+        local lat_str="${best_latency[$volume]} (${best_latency_config[$volume]})"
+        printf "  %-14s  %-22s  %-20s\n" \
+          "$volume" \
+          "$bw_str" \
+          "$lat_str"
+      done
+    fi
+
+    echo "========================================================================================="
   } | tee "$result_file"
 }
 
