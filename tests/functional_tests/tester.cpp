@@ -26,6 +26,7 @@
 
 #include <hip/hip_runtime.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <functional>
 #include <iostream>
@@ -1108,55 +1109,68 @@ bool Tester::peLaunchesKernel() {
 }
 
 bool Tester::AlignBwWithRccl(TesterArguments args, uint64_t size, double time_us, size_t *volume, double *AlgBw_align_rccl, double *BusBw_align_rccl) {
-  char* align_algbw_with_rccl = getenv("ROCSHMEM_ALIGN_BW_WITH_RCCL");
-  bool _align_algbw_with_rccl = false;
-  bool is_match = false;
-  size_t size_factor_rccl = 1;
-  double bus_factor_rccl = 1;
+  constexpr size_t kAlignFactor = 4;
 
-  if (align_algbw_with_rccl != nullptr) {
-    std::string value(align_algbw_with_rccl);
-    for (char& c : value) c = std::tolower(c);
-    _align_algbw_with_rccl = (value == "1" || value == "true" || value == "on" || value == "yes");
-  }
+  auto is_env_enabled = [](const char* env_name) -> bool {
+    const char* env_value = getenv(env_name);
+    if (!env_value) return false;
 
-  if (!_align_algbw_with_rccl) {
+    std::string value(env_value);
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c){ return std::tolower(c); });
+
+    return (value == "1" || value == "true" || value == "on" || value == "yes");
+  };
+
+  if (!is_env_enabled("ROCSHMEM_ALIGN_BW_WITH_RCCL")) {
     return false;
   }
 
-  TestType type = (TestType)args.algorithm;
+  struct RcclAlignmentParams {
+    size_t size_factor{1};
+    size_t volume_factor{1};
+    double bus_factor{1.0};
+  };
+
+  TestType type = static_cast<TestType>(args.algorithm);
+  RcclAlignmentParams params;
+  bool is_match = true;
   switch (type) {
-    case TeamReductionTestType: // ALLReduce
-    case ReduceOnStreamTestType: // ALLReduce
-      bus_factor_rccl = ((double)(2*(args.numprocs - 1)))/((double)args.numprocs);
-      is_match = true;
+    case TeamReductionTestType:     // ALLReduce
+    case ReduceOnStreamTestType:    // ALLReduce
+      params.bus_factor = 2.0 * (args.numprocs - 1) / args.numprocs;
       break;
+
     case TeamBroadcastTestType:
     case TeamBroadcastmemOnStreamTestType:
-      is_match = true;
       break;
-    case TeamFCollectTestType:   // AllGather
+
+    case TeamFCollectTestType:      // AllGather
+    case TeamReduceScatterTestType:
+      params.size_factor = args.numprocs;
+      params.volume_factor = kAlignFactor * args.numprocs;
+      params.bus_factor = static_cast<double>(args.numprocs - 1) / args.numprocs;
+      break;
+
     case TeamAllToAllTestType:
     case TeamAllToAllvTestType:
     case TeamAlltoallmemOnStreamTestType:
-    case TeamReduceScatterTestType:
-      // rocSHMEM's size is the contribution/block size of one PE, while
-      // rccl-tests prints the full send/receive buffer size.
-      size_factor_rccl = args.numprocs;
-      bus_factor_rccl = ((double)(args.numprocs - 1))/((double)args.numprocs);
-      is_match = true;
+      params.size_factor = args.numprocs;
+      params.volume_factor = args.numprocs;
+      params.bus_factor = static_cast<double>(args.numprocs - 1) / args.numprocs;
       break;
+
     default:
+      is_match = false;
       break;
   }
 
   if (is_match) {
-    size_t total_size = size_factor_rccl * size * num_timed_msgs; // total size of data transferred
-    double time_s = time_us / 1.0E6; // total time in seconds
+    const size_t total_size = params.size_factor * size * num_timed_msgs; // total size of data transferred
+    const double time_s = time_us  / 1.0E6; // total time in seconds
 
-    *volume = total_size / num_loops;  // volume of data transferred, align with rccl's size
+    *volume = total_size / num_loops * params.volume_factor; // volume of data transferred, align with rccl's size
     *AlgBw_align_rccl = static_cast<double>(total_size) / time_s / 1.0E9;
-    *BusBw_align_rccl = *AlgBw_align_rccl * bus_factor_rccl;
+    *BusBw_align_rccl = *AlgBw_align_rccl * params.bus_factor;
   }
 
   return is_match;
