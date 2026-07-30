@@ -375,7 +375,7 @@ class IPCContext : public Context {
                                          int pe_root);  // NOLINT(runtime/int)
 
   template <typename T>
-  __device__ void internal_tree_broadcast(T *dst, const T *src, int nelems,
+  __device__ void internal_chain_broadcast(T *dst, const T *src, int nelems,
                                           int pe_root, int pe_start,
                                           int stride, int pe_size,
                                           int64_t *p_sync);  // NOLINT(runtime/int)
