@@ -79,19 +79,21 @@ TEAM_FLOAT_REDUCE_SCATTER_DEF_GEN(double, double)
  * DEVICE TEST KERNEL
  *****************************************************************************/
 template <typename T1, ROCSHMEM_OP T2>
-__global__ void TeamReduceScatterTest(int loop, int skip,
+// This is a maximum launch bound; callers may use any smaller block size.
+__global__ __launch_bounds__(512) void TeamReduceScatterTest(int loop, int skip,
                                       long long int *start_time,
                                       long long int *end_time, T1 *s_buf,
                                       T1 *r_buf, size_t size,
                                       [[maybe_unused]] TestType type,
                                       ShmemContextType ctx_type,
-                                      rocshmem_team_t *teams) {
+                                      rocshmem_team_t *teams, int n_pes) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
 
   rocshmem_wg_team_create_ctx(teams[wg_id], ctx_type, &ctx);
 
-  s_buf += wg_id * size;
+  // Each workgroup owns one full reduce-scatter input: one block per PE.
+  s_buf += wg_id * size * n_pes;
   r_buf += wg_id * size;
 
   __syncthreads();
@@ -171,11 +173,12 @@ void TeamReduceScatterTester<T1, T2>::launchKernel(dim3 gridSize,
                                                     dim3 blockSize, int loop,
                                                     uint64_t size) {
   size_t shared_bytes = 0;
+  const size_t num_elems = size / sizeof(T1);
 
   hipLaunchKernelGGL(HIP_KERNEL_NAME(TeamReduceScatterTest<T1, T2>), gridSize,
                      blockSize, shared_bytes, stream, loop, args.skip,
-                     start_time, end_time, s_buf, r_buf, size, _type,
-                     _shmem_context, team_reduce_scatter_world_dups);
+                     start_time, end_time, s_buf, r_buf, num_elems, _type,
+                     _shmem_context, team_reduce_scatter_world_dups, n_pes);
 
   num_msgs = (loop + args.skip) * gridSize.x;
   num_timed_msgs = loop * gridSize.x;
