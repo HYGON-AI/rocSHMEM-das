@@ -159,7 +159,8 @@ __device__ void Context::get_nbi(T *dest, const T *source, size_t nelems,
 
 template <typename T>
 __device__ void Context::alltoall(rocshmem_team_t team, T *dest,
-                                  const T *source, int nelems) {
+                                  const T *source, int nelems,
+                                  int elem_offset, int elem_count) {
   if (nelems == 0) {
     return;
   }
@@ -168,7 +169,7 @@ __device__ void Context::alltoall(rocshmem_team_t team, T *dest,
     ctxStats.incStat(NUM_ALLTOALL);
   }
 
-  DISPATCH(alltoall<T>(team, dest, source, nelems));
+  DISPATCH(alltoall<T>(team, dest, source, nelems, elem_offset, elem_count));
 }
 
 template <typename T>

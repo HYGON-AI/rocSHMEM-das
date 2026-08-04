@@ -787,8 +787,9 @@ __device__ void GDAContext::internal_broadcast(T *dst, const T *src,
 
 template <typename T>
 __device__ void GDAContext::alltoall(rocshmem_team_t team, T *dst,
-                                     const T *src, int nelems) {
-  alltoall_linear_thread_puts(team, dst, src, nelems);
+                                     const T *src, int nelems,
+                                     int elem_offset, int elem_count) {
+  alltoall_linear_thread_puts(team, dst, src, nelems, elem_offset, elem_count);
 }
 
 template <typename T>
@@ -949,7 +950,8 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
 
 template <typename T>
 __device__ void GDAContext::alltoall_linear(rocshmem_team_t team, T *dst,
-                                            const T *src, int nelems) {
+                                            const T *src, int nelems,
+                                            int elem_offset, int elem_count) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
 
   int pe_start = team_obj->tinfo_wrt_world->pe_start;
@@ -958,6 +960,9 @@ __device__ void GDAContext::alltoall_linear(rocshmem_team_t team, T *dst,
   long *pSync = team_obj->alltoall_pSync;
   int my_pe_in_team = team_obj->my_pe;
 
+  // Normalize: elem_count == -1 means "process the full [0, nelems) range".
+  if (elem_count < 0) elem_count = nelems;
+
   int wf_id = get_flat_block_id() / WF_SIZE;
   int wf_count = (int) ceil((double)get_flat_block_size() / (double)WF_SIZE);
 
@@ -965,8 +970,9 @@ __device__ void GDAContext::alltoall_linear(rocshmem_team_t team, T *dst,
   // Have each PE put their designated data to the other PEs
   for (int j = wf_id; j < pe_size; j+= wf_count) {
     int dest_pe = team_obj->get_pe_in_world(j);
-    internal_putmem_nbi_wave(&dst[my_pe_in_team * nelems], &src[j * nelems],
-      nelems * sizeof(T), dest_pe, dest_pe, wf_info);
+    internal_putmem_nbi_wave(&dst[my_pe_in_team * nelems + elem_offset],
+      &src[j * nelems + elem_offset],
+      elem_count * sizeof(T), dest_pe, dest_pe, wf_info);
   }
 
   for (int j = wf_id; j < pe_size; j+= wf_count) {
@@ -980,13 +986,16 @@ __device__ void GDAContext::alltoall_linear(rocshmem_team_t team, T *dst,
 
 template <typename T>
 __device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team,
-    T *dst, const T *src, int nelems) {
+    T *dst, const T *src, int nelems, int elem_offset, int elem_count) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
 
   int pe_size = team_obj->num_pes;
   long *pSync = team_obj->alltoall_pSync;
   int my_pe_in_team = team_obj->my_pe;
   uint64_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
+
+  // Normalize: elem_count == -1 means "process the full [0, nelems) range".
+  if (elem_count < 0) elem_count = nelems;
 
   int tid = get_flat_block_id();
   int step_size = min(get_flat_block_size(), WF_SIZE);
@@ -1001,8 +1010,8 @@ __device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team,
     qp_indices[j] = qp_index;
     uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
     qps[qp_index].put_nbi_single(
-      reinterpret_cast<char*>(&dst[my_pe_in_team * nelems]) + base_heap_offset,
-      &src[j * nelems], nelems * sizeof(T), false);
+      reinterpret_cast<char*>(&dst[my_pe_in_team * nelems + elem_offset]) + base_heap_offset,
+      &src[j * nelems + elem_offset], elem_count * sizeof(T), false);
     qps[qp_index].atomic_nofetch_single(
       reinterpret_cast<char *>(&pSync[alltoall_pSync_offset + my_pe_in_team]) +
       base_heap_offset, 1);

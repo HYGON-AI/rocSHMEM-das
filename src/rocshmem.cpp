@@ -38,6 +38,7 @@
 #include "build_info.hpp"
 #include "context_incl.hpp"
 #include "envvar.hpp"
+#include "host/collective_launcher.hpp"
 #include "log.hpp"
 #if defined(USE_GDA)
 #include "gda/backend_gda.hpp"
@@ -82,6 +83,11 @@ Backend *backend = nullptr;
 MPIInstance *mpi_instance = nullptr;
 TcpBootstrap *bootstr = nullptr;
 rocshmem_ctx_t ROCSHMEM_HOST_CTX_DEFAULT;
+
+static void destroy_cached_team(rocshmem_team_t team) {
+  backend->team_tracker.untrack(team);
+  backend->team_destroy(team);
+}
 
  /**
  * Begin Host Code
@@ -725,6 +731,10 @@ __host__ void * rocshmem_ptr(const void * dest, int pe){
    */
   backend->destroy_remaining_ctxs();
 
+  // Release launcher-owned duplicate teams before the regular team tracker
+  // and backend are torn down.
+  CollectiveLauncher::release_all(destroy_cached_team);
+
   /*
    * Destroy all the teams that the user
    * created but did not manually destroy
@@ -957,8 +967,12 @@ __host__ void rocshmem_team_destroy(rocshmem_team_t team) {
     return;
   }
 
-  backend->team_tracker.untrack(team);
+  // Duplicate teams are implementation details owned by the launcher. They
+  // must be removed before their parent team and without re-entering this
+  // public function.
+  CollectiveLauncher::release_team(team, destroy_cached_team);
 
+  backend->team_tracker.untrack(team);
   backend->team_destroy(team);
 }
 

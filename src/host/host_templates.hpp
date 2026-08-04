@@ -29,6 +29,7 @@
 #include "host_helpers.hpp"
 #include "log.hpp"
 #include "memory/window_info.hpp"
+#include "collective_launcher.hpp"
 #include "team.hpp"
 
 #include <utility>
@@ -441,33 +442,37 @@ __host__ int HostInterface::reduce_on_stream(rocshmem_team_t team,
                                               int nreduce,
                                               hipStream_t stream)
 {
-  // Use dynamic block size determination:
-  // - Query optimal block size using occupancy API
-  // - Limit block size to size (number of bytes) to avoid over-subscription
-  // - Always use 1 block (single workgroup collective)
+  size_t byte_count = static_cast<size_t>(nreduce) * sizeof(T);
+  if (CollectiveLauncher::use_single_wg(team, byte_count)) {
+    // Small-message path: one-block reduce kernel.
+    CollectiveLauncher::enqueue_single_wg<rocshmem_reduce_on_stream_kernel<T, Op>>(
+        team, dest, source, static_cast<size_t>(nreduce), stream);
+    return hipGetLastError();
+  }
 
-  int optimal_block_size = 0;
-  int grid_size = 0;
-  CHECK_HIP(hipOccupancyMaxPotentialBlockSize(&grid_size, 
-                                              &optimal_block_size,
-                                              rocshmem_reduce_on_stream_kernel<T, Op>, 0,
-                                              0));
-
-  // Limit block size to size (bytes) to avoid over-subscription
-  int num_threads_per_block = (optimal_block_size > nreduce)
-                                  ? nreduce
-                                  : optimal_block_size;
-
-  // Launch kernel to do reduce with given stream
-  dim3 gridSize(1);
-  dim3 blockSize(num_threads_per_block);
-  rocshmem_reduce_on_stream_kernel<T, Op><<<gridSize, blockSize, 0, stream>>>(team,
-                                                                              dest,
-                                                                              source,
-                                                                              nreduce);
-  hipError_t launch_status = hipGetLastError();
-  return launch_status;
-
+  // Large-message path: split contiguous elements across workgroups.
+  bool ok = CollectiveLauncher::enqueue_multi_wg(
+      team, byte_count, stream,
+      [dest, source, nreduce](rocshmem_team_t *dev_wg_teams,
+                               hipStream_t launch_stream, size_t num_wgs) {
+        size_t chunk_bytes = CollectiveLauncher::kChunkSize;
+        size_t elems_per_chunk = chunk_bytes / sizeof(T);
+        if (elems_per_chunk == 0) elems_per_chunk = 1;
+        size_t actual_chunk_count =
+            (static_cast<size_t>(nreduce) + elems_per_chunk - 1) /
+            elems_per_chunk;
+        constexpr int kThreads = CollectiveLauncher::kMaxThreads;
+        int blocks = static_cast<int>(num_wgs);
+        rocshmem_reduce_on_stream_multi_wg_kernel<T, Op>
+            <<<blocks, kThreads, 0, launch_stream>>>(
+                dev_wg_teams, dest, source, nreduce, elems_per_chunk,
+                actual_chunk_count);
+      });
+  if (!ok) {
+    CollectiveLauncher::enqueue_single_wg<rocshmem_reduce_on_stream_kernel<T, Op>>(
+        team, dest, source, static_cast<size_t>(nreduce), stream);
+  }
+  return hipGetLastError();
 }
 
 template <typename T>

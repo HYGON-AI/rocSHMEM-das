@@ -23,6 +23,7 @@
  *****************************************************************************/
 
 #include "host.hpp"
+#include "collective_launcher.hpp"
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "rocshmem/rocshmem_SIG_OP.hpp"
@@ -33,6 +34,7 @@
 #include "log.hpp"
 #include "team.hpp"
 
+#include <algorithm>
 #include <cassert>
 
 namespace rocshmem {
@@ -420,58 +422,58 @@ __host__ void HostInterface::alltoallmem_on_stream(rocshmem_team_t team,
                                                    const void *source,
                                                    size_t size,
                                                    hipStream_t stream) {
-  // Use dynamic block size determination:
-  // - Query optimal block size using occupancy API
-  // - Limit block size to size (number of bytes) to avoid over-subscription
-  // - Always use 1 block (single workgroup collective)
-  int optimal_block_size = 0;
-  int grid_size = 0;
-  CHECK_HIP(hipOccupancyMaxPotentialBlockSize(&grid_size, &optimal_block_size,
-                                              rocshmem_alltoallmem_kernel, 0,
-                                              0));
-
-  // Limit block size to size (bytes) to avoid over-subscription
-  int num_threads_per_block = (optimal_block_size > static_cast<int>(size))
-                                  ? static_cast<int>(size)
-                                  : optimal_block_size;
-
-  // Launch kernel to do alltoall with given stream                                  
-  dim3 gridSize(1);
-  dim3 blockSize(num_threads_per_block);
-  rocshmem_alltoallmem_kernel<<<gridSize, blockSize, 0, stream>>>(team, dest,
-                                                                  source, size);
+  if (CollectiveLauncher::use_single_wg(team, size)) {
+    CollectiveLauncher::enqueue_single_wg<rocshmem_alltoallmem_kernel>(
+        team, dest, source, size, stream);
+    return;
+  }
+  bool ok = CollectiveLauncher::enqueue_multi_wg(
+      team, size, stream,
+      [dest, source, size](rocshmem_team_t *dev_wg_teams,
+                            hipStream_t launch_stream, size_t num_wgs) {
+        int nelems = static_cast<int>(size);
+        int threads = CollectiveLauncher::kMaxThreads;
+        rocshmem_alltoall_multi_wg_kernel<char>
+            <<<static_cast<int>(num_wgs), threads, 0, launch_stream>>>(
+                dev_wg_teams, static_cast<char *>(dest),
+                static_cast<const char *>(source), nelems);
+      });
+  if (!ok) {
+    CollectiveLauncher::enqueue_single_wg<rocshmem_alltoallmem_kernel>(
+        team, dest, source, size, stream);
+  }
 }
 
 __host__ void HostInterface::broadcastmem_on_stream(rocshmem_team_t team,
                                                     void *dest,
                                                     const void *source,
-                                                    size_t nelems, int pe_root,
+                                                    size_t nelems,
+                                                    int pe_root,
                                                     hipStream_t stream) {
-  // Use dynamic block size determination:
-  // - Query optimal block size using occupancy API
-  // - Limit block size to nelems (number of bytes) to avoid over-subscription
-  // - Always use 1 block (single workgroup collective)
-  int optimal_block_size = 0;
-  int grid_size = 0;
-  CHECK_HIP(hipOccupancyMaxPotentialBlockSize(&grid_size,
-                                              &optimal_block_size,
-                                              rocshmem_broadcastmem_kernel,
-                                              0,
-                                              0));
+  if (CollectiveLauncher::use_single_wg(team, nelems)) {
+    CollectiveLauncher::enqueue_single_wg<rocshmem_broadcastmem_kernel>(
+        team, dest, source, nelems, stream, pe_root);
+    return;
+  }
 
-  // Limit block size to nelems (bytes) to avoid over-subscription
-  int num_threads_per_block = (optimal_block_size > static_cast<int>(nelems))
-                                  ? static_cast<int>(nelems)
-                                  : optimal_block_size;
-
-  // Launch kernel to do broadcast with given stream
-  dim3 gridSize(1);
-  dim3 blockSize(num_threads_per_block);
-  rocshmem_broadcastmem_kernel<<<gridSize, blockSize, 0, stream>>>(team,
-                                                                   dest,
-                                                                   source,
-                                                                   nelems,
-                                                                   pe_root);
+  bool ok = CollectiveLauncher::enqueue_multi_wg(
+      team, nelems, stream,
+      [dest, source, pe_root, nelems](rocshmem_team_t *dev_wg_teams,
+                                       hipStream_t launch_stream,
+                                       size_t num_wgs) {
+        size_t chunk_size = CollectiveLauncher::kChunkSize;
+        size_t chunk_count = (nelems + chunk_size - 1) / chunk_size;
+        constexpr int kThreads = CollectiveLauncher::kMaxThreads;
+        int blocks = static_cast<int>(num_wgs);
+        rocshmem_broadcastmem_multi_wg_kernel
+            <<<blocks, kThreads, 0, launch_stream>>>(
+                dev_wg_teams, dest, source, nelems, chunk_size, chunk_count,
+                pe_root);
+      });
+  if (!ok) {
+    CollectiveLauncher::enqueue_single_wg<rocshmem_broadcastmem_kernel>(
+        team, dest, source, nelems, stream, pe_root);
+  }
 }
 
 __host__ void HostInterface::getmem_on_stream(void *dest, const void *source,

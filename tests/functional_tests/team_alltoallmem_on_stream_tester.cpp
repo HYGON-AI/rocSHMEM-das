@@ -46,8 +46,8 @@ TeamAlltoallmemOnStreamTester::TeamAlltoallmemOnStreamTester(TesterArguments arg
     num_teams = args.num_wgs;
   }
 
-  int num_bytes_wg = args.max_msg_size * n_pes;
-  int total_bytes = num_bytes_wg * num_teams;
+  size_t num_bytes_wg = args.max_msg_size * static_cast<size_t>(n_pes);
+  size_t total_bytes = num_bytes_wg * static_cast<size_t>(num_teams);
   buf_size = total_bytes;
 
   source_buf = static_cast<char *>(alloc_test_buffer(buf_size, args.local_buf_type));
@@ -137,8 +137,12 @@ void TeamAlltoallmemOnStreamTester::resetBuffers(size_t size) {
     }
   }
 
-  // Clear destination buffer
-  std::memset(dest_buf, 0, buf_size);
+  // Clear only the region used by the current message size. Clearing buf_size
+  // here touches the maximum-size allocation for every tested size and can
+  // take minutes with many PEs and teams before the timed operation starts.
+  size_t bytes_used = size * static_cast<size_t>(n_pes) *
+                      static_cast<size_t>(num_teams);
+  std::memset(dest_buf, 0, bytes_used);
 }
 
 void TeamAlltoallmemOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize,
@@ -209,4 +213,3 @@ void TeamAlltoallmemOnStreamTester::verifyResults(size_t size) {
     }
   }
 }
-

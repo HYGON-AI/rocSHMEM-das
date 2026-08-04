@@ -349,7 +349,14 @@ __device__ void ROContext::broadcast(rocshmem_team_t team, T *dest,
 
 template <typename T>
 __device__ void ROContext::alltoall(rocshmem_team_t team, T *dest,
-                                    const T *source, int nelems) {
+                                    const T *source, int nelems,
+                                    int elem_offset, int elem_count) {
+  // RO (reverse offload) path executes the whole collective on the CPU side
+  // via build_queue_element and does not support elem slicing.  The multi-wg
+  // kernel only runs on the IPC backend, so this path always receives the
+  // default offset=0/count=-1.  Normalize and fall through with the full
+  // range.
+  if (elem_count < 0) elem_count = nelems;
   if (!is_thread_zero_in_block()) {
     __syncthreads();
     return;
