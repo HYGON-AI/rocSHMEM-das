@@ -232,7 +232,8 @@ class Context {
 
   template <typename T>
   __device__ void alltoall(rocshmem_team_t team, T* dest, const T* source,
-                           int nelems);
+                           int nelems, int elem_offset = 0,
+                           int elem_count = -1);
 
   template <typename T>
   __device__ void alltoallv(rocshmem_team_t team,

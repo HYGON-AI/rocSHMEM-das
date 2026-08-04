@@ -787,15 +787,18 @@ __device__ void IPCContext::internal_broadcast(T *dst, const T *src, int nelems,
 
 template <typename T>
 __device__ void IPCContext::alltoall(rocshmem_team_t team, T *dst,
-                                     const T *src, int nelems) {
+                                     const T *src, int nelems,
+                                     int elem_offset, int elem_count) {
+  // Normalize: elem_count == -1 means "process the full [0, nelems) range".
+  if (elem_count < 0) elem_count = nelems;
 #if defined(USE_SDMA)
-  if (sizeof(T) * nelems < 512 || ipcImpl_.sdmaImpl_.sdmaEnabled)
+  if (sizeof(T) * elem_count < 512 || ipcImpl_.sdmaImpl_.sdmaEnabled)
 #else
-  if (sizeof(T) * nelems < 512)
+  if (sizeof(T) * elem_count < 512)
 #endif
-    alltoall_linear_thread_puts(team, dst, src, nelems);
+    alltoall_linear_thread_puts(team, dst, src, nelems, elem_offset, elem_count);
   else
-    alltoall_linear(team, dst, src, nelems);
+    alltoall_linear(team, dst, src, nelems, elem_offset, elem_count);
 }
 
 template <typename T>
@@ -842,7 +845,8 @@ __device__ void IPCContext::alltoallv([[maybe_unused]] rocshmem_team_t team,
 
 template <typename T>
 __device__ void IPCContext::alltoall_linear(rocshmem_team_t team, T *dst,
-                                            const T *src, int nelems) {
+                                            const T *src, int nelems,
+                                            int elem_offset, int elem_count) {
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
 
   int pe_start = team_obj->tinfo_wrt_world->pe_start;
@@ -851,9 +855,12 @@ __device__ void IPCContext::alltoall_linear(rocshmem_team_t team, T *dst,
   long *pSync = team_obj->alltoall_pSync;
   int my_pe_in_team = team_obj->my_pe;
 
+  // Normalize: elem_count == -1 means "process the full [0, nelems) range".
+  if (elem_count < 0) elem_count = nelems;
+
   // pipeline chunking for large messages
   constexpr int CHUNK_NELEMS = ROCSHMEM_CHUNK_BYTES / sizeof(T);
-  const bool use_pipeline = (nelems > CHUNK_NELEMS);
+  const bool use_pipeline = (elem_count > CHUNK_NELEMS);
 
   int wf_id = get_flat_block_id() / WF_SIZE;
   int wf_count = (get_flat_block_size() + WF_SIZE - 1) / WF_SIZE;
@@ -861,17 +868,18 @@ __device__ void IPCContext::alltoall_linear(rocshmem_team_t team, T *dst,
   if (!use_pipeline) {
     for (int j = wf_id; j < pe_size; j += wf_count) {
       int dest_pe = team_obj->get_pe_in_world(j);
-      put_nbi_wave(&dst[my_pe_in_team * nelems], &src[j * nelems], nelems, dest_pe);
+      put_nbi_wave(&dst[my_pe_in_team * nelems + elem_offset],
+                   &src[j * nelems + elem_offset], elem_count, dest_pe);
     }
   } else {
-    for (int c_start = 0; c_start < nelems; c_start += CHUNK_NELEMS) {
-      int c_end = min(c_start + CHUNK_NELEMS, nelems);
+    for (int c_start = 0; c_start < elem_count; c_start += CHUNK_NELEMS) {
+      int c_end = min(c_start + CHUNK_NELEMS, elem_count);
       int c_nelems = c_end - c_start;
 
       for (int j = wf_id; j < pe_size; j += wf_count) {
         int dest_pe = team_obj->get_pe_in_world(j);
-        put_nbi_wave(&dst[my_pe_in_team * nelems + c_start],
-                     &src[j * nelems + c_start],
+        put_nbi_wave(&dst[my_pe_in_team * nelems + elem_offset + c_start],
+                     &src[j * nelems + elem_offset + c_start],
                      c_nelems, dest_pe);
       }
     }
@@ -888,13 +896,16 @@ __device__ void IPCContext::alltoall_linear(rocshmem_team_t team, T *dst,
 
 template <typename T>
 __device__ void IPCContext::alltoall_linear_thread_puts(rocshmem_team_t team,
-    T *dst, const T *src, int nelems) {
+    T *dst, const T *src, int nelems, int elem_offset, int elem_count) {
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
 
   int pe_size = team_obj->num_pes;
   long *pSync = team_obj->alltoall_pSync;
   int my_pe_in_team = team_obj->my_pe;
   size_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
+
+  // Normalize: elem_count == -1 means "process the full [0, nelems) range".
+  if (elem_count < 0) elem_count = nelems;
 
   int tid = get_flat_block_id();
   int step_size = min(get_flat_block_size(), WF_SIZE);
@@ -904,8 +915,8 @@ __device__ void IPCContext::alltoall_linear_thread_puts(rocshmem_team_t team,
   for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
     put_nbi(
-      &dst[my_pe_in_team * nelems],
-      &src[j * nelems], nelems, dest_pe);
+      &dst[my_pe_in_team * nelems + elem_offset],
+      &src[j * nelems + elem_offset], elem_count, dest_pe);
   }
   for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);

@@ -1001,6 +1001,17 @@ __global__ ATTR_NO_INLINE void rocshmem_alltoallmem_kernel(rocshmem_team_t team,
                                                            size_t size);
 
 /**
+ * @brief Multi-workgroup alltoall kernel.
+ *
+ * Workgroups split the per-peer element range as evenly as possible and use
+ * independent duplicate teams. Leading workgroups receive one extra element
+ * when nelems is not divisible by the workgroup count.
+ */
+template <typename T>
+__global__ ATTR_NO_INLINE void rocshmem_alltoall_multi_wg_kernel(
+    rocshmem_team_t *teams, T *dest, const T *source, int nelems);
+
+/**
  * @brief kernel for performing a reduce on stream operation.
  *
  * @param[in] team     The team participating in the collective.
@@ -1016,6 +1027,12 @@ __global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_kernel(rocshmem_team_t 
                                                                 T *dest,
                                                                 const T *source,
                                                                 int nreduce);
+
+/** @brief Multi-workgroup reduce kernel using chunked element ranges. */
+template <typename T, ROCSHMEM_OP Op>
+__global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_multi_wg_kernel(
+    rocshmem_team_t *teams, T *dest, const T *source, int nreduce,
+    size_t elems_per_chunk, size_t chunk_count);
 
 /**
  * @brief kernel for performing a broadcast collective operation.
@@ -1033,6 +1050,11 @@ __global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_kernel(rocshmem_team_t 
 __global__ ATTR_NO_INLINE void rocshmem_broadcastmem_kernel(
     rocshmem_team_t team, void *dest, const void *source, size_t nelems,
     int pe_root);
+
+/** @brief Multi-workgroup broadcast kernel using chunked byte ranges. */
+__global__ ATTR_NO_INLINE void rocshmem_broadcastmem_multi_wg_kernel(
+    rocshmem_team_t *teams, void *dest, const void *source, size_t nelems,
+    size_t chunk_size, size_t chunk_count, int pe_root);
 
 /**
  * @brief perform a collective barrier between all PEs in the system.
