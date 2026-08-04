@@ -375,6 +375,38 @@ __device__ int IPCContext::reduce(rocshmem_team_t team, T *dest,
   bool use_direct = (provided_pWrk >= direct_pWrk) &&
                     (provided_pSync >= direct_pSync) &&
                     (nreduce <= DIRECT_MAX_NELEMS);
+  const bool use_reduce_scatter_allgather =
+      !use_direct && (nreduce % PE_size == 0) &&
+      (nreduce / PE_size >= 1024);
+
+  if (use_reduce_scatter_allgather) {
+    const int block_count = nreduce / PE_size;
+    const int team_rank = team_obj->my_pe;
+    T *local_block = dest + team_rank * block_count;
+    int status = reduce_scatter_wg<T, Op>(team, local_block, source,
+                                          block_count);
+    if (status != ROCSHMEM_SUCCESS) {
+      return status;
+    }
+
+    // Specialized allgather for the allreduce result. local_block already
+    // occupies its final slot in dest, so avoid a redundant self-copy and
+    // send the complete block once to each remote PE.
+    const int wave_id = get_flat_block_id() / WF_SIZE;
+    const int num_waves = (get_flat_block_size() + WF_SIZE - 1) / WF_SIZE;
+    for (int remote_rank = wave_id; remote_rank < PE_size; remote_rank += num_waves) {
+      if (remote_rank != team_rank) {
+        const int remote_pe = team_obj->get_pe_in_world(remote_rank);
+        put_nbi_wave(dest + team_rank * block_count, local_block, block_count, remote_pe);
+      }
+    }
+    __syncthreads();
+    internal_sync_wg(constmem.my_pe,
+                     team_obj->tinfo_wrt_world->pe_start,
+                     team_obj->tinfo_wrt_world->stride, PE_size,
+                     team_obj->alltoall_pSync);
+    return ROCSHMEM_SUCCESS;
+  }
 
   if (use_direct) {
     internal_direct_allreduce<T, Op>(dest, source, nreduce, team_obj);
