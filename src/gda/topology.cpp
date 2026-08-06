@@ -1042,6 +1042,39 @@ namespace rocshmem
             closestIdx = idx;
         }
 
+	// Load balance: prefer unused NICs to avoid multiple GPUs competing for the same NIC
+        if (closestIdx >= 0 && assignedCount[closestIdx] > 0) {
+          auto unusedAddressList = ibvAddressList;
+          bool hasUnusedNic = false;
+          for (size_t j = 0; j < unusedAddressList.size(); j++) {
+            if (unusedAddressList[j].empty() || assignedCount[j] != 0) {
+              unusedAddressList[j].clear();
+            } else {
+              hasUnusedNic = true;
+            }
+          }
+
+          if (hasUnusedNic) {
+            std::set<int> unusedClosest = GetNearestDevicesInTree(hipPciBusId, unusedAddressList);
+            if (!unusedClosest.empty()) {
+              closestIdx = *unusedClosest.begin();
+            } else {
+              int minUnusedDistance = std::numeric_limits<int>::max();
+              int closestUnusedIdx = -1;
+              for (size_t j = 0; j < unusedAddressList.size(); j++) {
+                if (!unusedAddressList[j].empty()) {
+                  int distance = GetBusIdDistance(hipPciBusId, unusedAddressList[j]);
+                  if (distance >= 0 && distance < minUnusedDistance) {
+                    minUnusedDistance = distance;
+                    closestUnusedIdx = static_cast<int>(j);
+                  }
+                }
+              }
+              if (closestUnusedIdx >= 0) closestIdx = closestUnusedIdx;
+            }
+          }
+        }
+
         // The following will only use distance between bus IDs
         // to determine the closest NIC to GPU if the PCIe tree approach fails
         if (closestIdx < 0) {
