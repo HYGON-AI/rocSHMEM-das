@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Hygon Information Technology Co., Ltd.
+// SPDX-License-Identifier: MIT
+
 #include "device_module_registry.hpp"
 
 #include "backend_bc.hpp"
