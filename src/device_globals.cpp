@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Hygon Information Technology Co., Ltd.
+// SPDX-License-Identifier: MIT
+
 #include "rocshmem/rocshmem.hpp"
 #include "backend_bc.hpp"
 #include "constmem.hpp"

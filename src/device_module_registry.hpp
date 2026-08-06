@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Hygon Information Technology Co., Ltd.
+// SPDX-License-Identifier: MIT
+
 #ifndef ROCSHMEM_DEVICE_MODULE_REGISTRY_HPP
 #define ROCSHMEM_DEVICE_MODULE_REGISTRY_HPP
 
