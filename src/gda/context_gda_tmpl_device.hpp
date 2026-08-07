@@ -749,8 +749,55 @@ __device__ void GDAContext::internal_get_broadcast(T *dst, const T *src,
     int nelems, int pe_root, ActiveWFInfo &wf_info) {  // NOLINT(runtime/int)
   if (constmem.my_pe == pe_root) {
     memcpy_wg<MemcpyKind::Put>(dst, const_cast<T *>(src), nelems * sizeof(T));
-  } else {
-    internal_getmem_wg(dst, src, nelems * sizeof(T), pe_root, pe_root, wf_info);
+    return;
+  }
+
+  const size_t nbytes = static_cast<size_t>(nelems) * sizeof(T);
+  int local_pe{-1};
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe_root, &local_pe)) {
+    const uint64_t offset = reinterpret_cast<const char *>(src) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
+    ipcImpl_.ipcCopy_wg<MemcpyKind::GetBlocking>(dst, ipcImpl_.ipc_bases[local_pe] + offset, nbytes, local_pe);
+    return;
+  }
+
+  // QP rows are mapped round-robin across merged NICs.  Stripe a large
+  // inter-node message over the useful QP rows, submit every chunk first,
+  // and only then wait for completion.
+  if (is_thread_zero_in_block()) {
+    constexpr size_t MIN_BYTES_PER_RAIL = 64 * 1024;
+    uint32_t desired_rails = static_cast<uint32_t>((nbytes + MIN_BYTES_PER_RAIL - 1) / MIN_BYTES_PER_RAIL);
+    if (desired_rails == 0) desired_rails = 1;
+    desired_rails = min(desired_rails, num_qps_per_pe);
+
+    // Share the available rows among concurrently active workgroups to avoid
+    // multiplying the outstanding reads by gridDim.x.
+    const uint32_t active_wgs = static_cast<uint32_t>(gridDim.x);
+    uint32_t rails = (desired_rails + active_wgs - 1) / active_wgs;
+    if (rails == 0) rails = 1;
+    rails = min(rails, num_qps_per_pe);
+
+    const size_t chunk = (nbytes + rails - 1) / rails;
+    const uint64_t src_offset = reinterpret_cast<const char *>(src) - base_heap[constmem.my_pe];
+    char *dst_bytes = reinterpret_cast<char *>(dst);
+
+    for (uint32_t rail = 0; rail < rails; rail++) {
+      const size_t begin = static_cast<size_t>(rail) * chunk;
+      if (begin >= nbytes) break;
+      const size_t length = ((nbytes - begin) < chunk) ? (nbytes - begin) : chunk;
+      const uint32_t qp_row = (static_cast<uint32_t>(blockIdx.x) + rail * active_wgs) % num_qps_per_pe;
+      const uint32_t qp_index = qp_row * constmem.num_pes + pe_root;
+      qps[qp_index].get_nbi(dst_bytes + begin,
+                            base_heap[pe_root] + src_offset + begin,
+                            length, wf_info);
+    }
+
+    for (uint32_t rail = 0; rail < rails; rail++) {
+      const size_t begin = static_cast<size_t>(rail) * chunk;
+      if (begin >= nbytes) break;
+      const uint32_t qp_row = (static_cast<uint32_t>(blockIdx.x) + rail * active_wgs) % num_qps_per_pe;
+      const uint32_t qp_index = qp_row * constmem.num_pes + pe_root;
+      qps[qp_index].quiet(wf_info);
+    }
   }
 }
 
@@ -766,8 +813,7 @@ __device__ void GDAContext::broadcast(rocshmem_team_t team, T *dst,
 
   // Passed pe_root is relative to team, convert to world root
   int pe_root_world = team_obj->get_pe_in_world(pe_root);
-  internal_broadcast<T>(dst, src, nelems, pe_root_world, pe_start, stride,
-               pe_size, p_sync);
+  internal_broadcast<T>(dst, src, nelems, pe_root_world, pe_start, stride, pe_size, p_sync);
 }
 
 template <typename T>
@@ -775,15 +821,131 @@ __device__ void GDAContext::internal_broadcast(T *dst, const T *src,
     int nelems, int pe_root, int pe_start, int stride, int pe_size,
     long *p_sync) {  // NOLINT(runtime/int)
   ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
-  if (constmem.num_pes < 4) { //TODO: optimized for IPC
-    internal_put_broadcast(dst, src, nelems, pe_root, pe_start, stride,
-      pe_size, wf_info);
-  } else {
+  if (constmem.num_pes < 4) {
+    internal_put_broadcast(dst, src, nelems, pe_root, pe_start, stride, pe_size, wf_info);
+    internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync, wf_info);
+    return;
+  }
+
+  // Attempt multi-proxy broadcast for large messages with multiple nodes
+  if (internal_proxy_broadcast<T>(dst, src, nelems, pe_root, pe_start,
+                                  stride, pe_size, p_sync, wf_info)) {
+    return;  // Proxy broadcast handled the operation
+  }
+
+  // Hierarchical broadcast: choose one leader in each IPC island.  Only the
+  // leader fetches the message from the root (striped across merged NICs for
+  // an inter-node root); all other local PEs consume the leader's copy over
+  // IPC.  This avoids sending the full message once per GPU across the fabric.
+  int node_leader = constmem.my_pe;
+  for (int rank = 0; rank < pe_size; rank++) {
+    const int peer = pe_start + rank * stride;
+    int local_pe{-1};
+    if (peer == constmem.my_pe ||
+        ipcImpl_.isIpcAvailable(constmem.my_pe, peer, &local_pe)) {
+      node_leader = peer;
+      break;
+    }
+  }
+
+  const size_t nbytes = static_cast<size_t>(nelems) * sizeof(T);
+
+  if (constmem.my_pe == pe_root) {
+    memcpy_wg<MemcpyKind::Put>(dst, const_cast<T *>(src), nbytes);
+  } else if (constmem.my_pe == node_leader) {
     internal_get_broadcast(dst, src, nelems, pe_root, wf_info);
   }
 
-  // Synchronize on completion of broadcast
+  // Node leaders must finish the inter-node phase before local IPC readers
+  // consume their destination buffers.
   internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync, wf_info);
+
+  if (constmem.my_pe != node_leader && constmem.my_pe != pe_root) {
+    internal_getmem_wg(dst, dst, nbytes, node_leader, node_leader, wf_info);
+  }
+
+  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync, wf_info);
+}
+
+template <typename T>
+__device__ bool GDAContext::internal_proxy_broadcast(T *dst, const T *src,
+    int nelems, int pe_root, int pe_start, int stride, int pe_size,
+    long *p_sync, ActiveWFInfo &wf_info) {  // NOLINT(runtime/int)
+
+  constexpr size_t MIN_BYTES_PER_PROXY = 64 * 1024;
+  const size_t nbytes = static_cast<size_t>(nelems) * sizeof(T);
+  const int local_shm_size = constmem.ipc_shm_size;
+
+  // Multi-proxy hierarchical broadcast.  One PE per local GPU/NIC transfers
+  // one segment between nodes; IPC stages the root data and fans the segments
+  // out locally.  Restrict this path to complete, contiguous node groups so
+  // proxy slot N names the same local GPU/NIC on every node.
+  const bool use_proxy_bcast =
+      nbytes >= kHierarchicalMinBytes && stride == 1 && local_shm_size > 1 &&
+      constmem.ipc_stride == 1 && pe_start % local_shm_size == 0 &&
+      pe_size % local_shm_size == 0 && pe_size > local_shm_size;
+  if (!use_proxy_bcast) {
+    return false;
+  }
+
+  // Calculate optimal proxy count: balance parallelism vs overhead per proxy
+  const size_t useful_proxies = (nbytes + MIN_BYTES_PER_PROXY - 1) / MIN_BYTES_PER_PROXY;
+  const int proxies = min(local_shm_size, static_cast<int>(useful_proxies));
+  const int local_slot = constmem.my_pe - constmem.ipc_first_pe;
+  const int root_rank = pe_root - pe_start;
+  const int root_node_first = pe_start + (root_rank / local_shm_size) * local_shm_size;
+  const bool on_root_node = constmem.ipc_first_pe == root_node_first;
+  const size_t chunk = (nbytes + proxies - 1) / proxies;
+  char *dst_bytes = reinterpret_cast<char *>(dst);
+  const char *src_bytes = reinterpret_cast<const char *>(src);
+
+  // Root keeps its complete result.  The other root-node proxies stage only
+  // their segment in dst, making a symmetric source address available to
+  // the corresponding proxy on every remote node.
+  if (constmem.my_pe == pe_root) {
+    memcpy_wg<MemcpyKind::Put>(dst_bytes, const_cast<char *>(src_bytes), nbytes);
+  } else if (on_root_node && local_slot < proxies) {
+    const size_t begin = static_cast<size_t>(local_slot) * chunk;
+    if (begin < nbytes) {
+      const size_t length = min(chunk, nbytes - begin);
+      internal_getmem_wg(dst_bytes + begin, src_bytes + begin, length,
+                         pe_root, pe_root, wf_info);
+    }
+  }
+
+  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync, wf_info);
+
+  // Every remote-node proxy fetches one disjoint segment.  Since NIC
+  // selection is unique per local PE, the node drives its available NICs in
+  // parallel instead of funneling all traffic through one leader GPU.
+  if (!on_root_node && local_slot < proxies) {
+    const size_t begin = static_cast<size_t>(local_slot) * chunk;
+    if (begin < nbytes) {
+      const size_t length = min(chunk, nbytes - begin);
+      const int source_proxy = root_node_first + local_slot;
+      const uint32_t qp_row = static_cast<uint32_t>(blockIdx.x) % num_qps_per_pe;
+      const int qp_index = qp_row * constmem.num_pes + source_proxy;
+      internal_getmem_wg(dst_bytes + begin, dst_bytes + begin, length,
+                         source_proxy, qp_index, wf_info);
+    }
+  }
+
+  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync, wf_info);
+
+  // Assemble the complete result from this node's local proxy buffers.
+  for (int slot = 0; slot < proxies; slot++) {
+    if (slot == local_slot) continue;
+    const size_t begin = static_cast<size_t>(slot) * chunk;
+    if (begin >= nbytes) break;
+    const size_t length = min(chunk, nbytes - begin);
+    const int local_proxy = constmem.ipc_first_pe + slot;
+    internal_getmem_wg(dst_bytes + begin, dst_bytes + begin, length,
+                       local_proxy, local_proxy, wf_info);
+  }
+
+  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync, wf_info);
+
+  return true;  // Proxy broadcast completed successfully
 }
 
 template <typename T>
@@ -1045,7 +1207,7 @@ __device__ void GDAContext::fcollect(rocshmem_team_t team, T *dst,
 
 template <typename T>
 __device__ void GDAContext::fcollect_linear(rocshmem_team_t team, T *dst,
-    const T *src, int nelems) {
+                                            const T *src, int nelems) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
 
   int pe_start = team_obj->tinfo_wrt_world->pe_start;
@@ -1055,21 +1217,35 @@ __device__ void GDAContext::fcollect_linear(rocshmem_team_t team, T *dst,
   int my_pe_in_team = team_obj->my_pe;
 
   ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
-  // Have each PE put their designated data to the other PEs
-  for (int j = 0; j < pe_size; j++) {
-    int dest_pe = team_obj->get_pe_in_world(j);
+
+  if (pe_size >= 4 && static_cast<size_t>(nelems) * sizeof(T) >= kHierarchicalMinBytes) {
+    // FCollect is a concatenation of one broadcast per source rank.  Reusing
+    // the hierarchical broadcast path makes each source cross a node boundary
+    // once, followed by IPC fan-out inside the destination node, instead of
+    // sending the same source segment independently to every remote PE.
+    for (int rank = 0; rank < pe_size; rank++) {
+      const int root = team_obj->get_pe_in_world(rank);
+      internal_broadcast(dst + rank * nelems, src, nelems, root, pe_start, stride, pe_size, pSync);
+    }
+    return;
+  }
+
+  // Small messages avoid the extra two synchronization phases per source.
+  for (int rank = 0; rank < pe_size; rank++) {
+    int dest_pe = team_obj->get_pe_in_world(rank);
     internal_putmem_nbi_wg(&dst[my_pe_in_team * nelems], src,
-      nelems * sizeof(T), dest_pe, dest_pe, wf_info);
+                           nelems * sizeof(T), dest_pe, dest_pe, wf_info);
   }
 
   if (is_thread_zero_in_block()) {
-    // Iterate through 0th qp of each PE
-    for (int j = 0; j < pe_size; j++) {
-      int dest_pe = team_obj->get_pe_in_world(j);
-      qps[dest_pe].quiet(wf_info);
+    for (int rank = 0; rank < pe_size; rank++) {
+      int dest_pe = team_obj->get_pe_in_world(rank);
+      int local_pe{-1};
+      if (!ipcImpl_.isIpcAvailable(constmem.my_pe, dest_pe, &local_pe)) {
+        qps[dest_pe].quiet(wf_info);
+      }
     }
   }
-  // wait until everyone has obtained their designated data
   internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, pSync, wf_info);
 }
 
