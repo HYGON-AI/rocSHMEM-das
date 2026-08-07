@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Hygon Information Technology Co., Ltd.
+// SPDX-License-Identifier: MIT
+
 #include "gda/queue_pair.hpp"
 #include "util.hpp"
 #include "containers/free_list_impl.hpp"

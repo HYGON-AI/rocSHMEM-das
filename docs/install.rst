@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Hygon Information Technology Co., Ltd.
+# SPDX-License-Identifier: MIT
+
 .. meta::
   :description: Instruction on how to install rocSHMEM.
   :keywords: rocSHMEM, ROCm, install, build, dependencies, MPI, UCX, Open MPI
