@@ -153,6 +153,10 @@ class GDAContext : public Context {
   template <typename T, ROCSHMEM_OP Op>
   __device__ int reduce_scatter_wg(rocshmem_team_t team, T *dest, const T *source,
                                    int nreduce);
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int hybrid_reduce_scatter_wg(GDATeam *team_obj, T *dest, const T *source,
+                                          int nreduce, int PE_start, int stride,
+                                          int PE_size, int team_rank);
 
   template <typename T>
   __device__ void broadcast(rocshmem_team_t team, T *dest, const T *source,

@@ -644,85 +644,260 @@ __device__ int GDAContext::reduce(rocshmem_team_t team, T *dest,
  * Reduce-scatter: PE r receives the element-wise reduction of
  * source[r*nreduce .. (r+1)*nreduce - 1] across all PEs into dest[0..nreduce-1].
  *
- * Only workgroup 0 (is_block_zero_in_grid) runs the reduction algorithm;
- * all workgroups participate in the per-chunk barrier_wg so the barrier
- * call counts match.  This prevents concurrent accumulation races when
- * multiple workgroups share the same team pSync/pWrk/dest buffers.
+ * The operation uses team-owned pWrk and pSync. Concurrent workgroups must
+ * use distinct team instances and input/output buffers. All threads in the
+ * invoking workgroup must participate in the operation and matching barriers.
  */
 template <typename T, ROCSHMEM_OP Op>
 __device__ int GDAContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
                                              const T *source, int nreduce) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
-
-  int PE_size   = team_obj->tinfo_wrt_world->size;
-  int PE_start  = team_obj->tinfo_wrt_world->pe_start;
-  int stride    = team_obj->tinfo_wrt_world->stride;
+  int PE_size = team_obj->tinfo_wrt_world->size;
+  int PE_start = team_obj->tinfo_wrt_world->pe_start;
+  int stride = team_obj->tinfo_wrt_world->stride;
+  int my_pe = constmem.my_pe;
   int team_rank = (my_pe - PE_start) / stride;
 
+  const int local_size = constmem.ipc_shm_size;
+  int local_target_pe{-1};
+  const bool has_ipc = ipcImpl_.isIpcAvailable(my_pe, my_pe, &local_target_pe);
+  const bool use_hybrid = has_ipc && local_size > 1 && stride == 1 &&
+      constmem.ipc_stride == 1 && PE_start % local_size == 0 &&
+      PE_size > local_size && PE_size % local_size == 0 && nreduce > 1024;
+
+  if (use_hybrid) {
+    return hybrid_reduce_scatter_wg<T, Op>(team_obj, dest, source, nreduce,
+                                           PE_start, stride, PE_size, team_rank);
+  }
+
   long *pSync = team_obj->reduce_pSync;
-  T    *pWrk  = reinterpret_cast<T *>(team_obj->pWrk);
-
+  T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
   ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
-
-  int wg_id   = get_flat_block_id();
+  int wg_id = get_flat_block_id();
   int wg_size = get_flat_block_size();
-
-  int pWrk_elems = (int)(ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double) / sizeof(T));
+  int pWrk_elems = static_cast<int>(ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double) / sizeof(T));
   int chunk_size = max(1, pWrk_elems / PE_size);
-  int n_chunks   = (nreduce + chunk_size - 1) / chunk_size;
+  int n_chunks = (nreduce + chunk_size - 1) / chunk_size;
   int64_t flag_val = 1;
   int finish = PE_start + stride * PE_size;
 
+  // pWrk holds one incoming contribution per PE, so process large inputs in chunks.
   for (int c = 0; c < n_chunks; c++) {
-    if (is_block_zero_in_grid()) {
-      int offset = c * chunk_size;
-      int count  = min(chunk_size, nreduce - offset);
+    int offset = c * chunk_size;
+    int count = min(chunk_size, nreduce - offset);
 
-      // Seed dest[offset..offset+count) from my own contribution.
-      for (int j = wg_id; j < count; j += wg_size) {
-        dest[offset + j] = source[team_rank * nreduce + offset + j];
+    // Seed this PE's output block with its local contribution.
+    for (int j = wg_id; j < count; j += wg_size) {
+      dest[offset + j] = source[team_rank * nreduce + offset + j];
+    }
+    __syncthreads();
+
+    /*
+     * Send each remote PE this PE's contribution to that remote PE's output
+     * block. The payload and ready flag use the same RC QP, so the receiver
+     * cannot observe the flag before the payload is remotely visible.
+     */
+    for (int pe = PE_start; pe < finish; pe += stride) {
+      if (pe != my_pe) {
+        int remote_rank = (pe - PE_start) / stride;
+        int qp_index = get_qp_index(pe, wf_info);
+        internal_putmem_nbi_wg(&pWrk[team_rank * chunk_size],
+                           source + remote_rank * nreduce + offset,
+                           count * sizeof(T), pe, qp_index, wf_info);
+        if (is_thread_zero_in_block()) {
+          internal_putmem(&pSync[team_rank], &flag_val, sizeof(*pSync),
+                          pe, qp_index, wf_info);
+        }
+      }
+    }
+    threadfence_system();
+    __syncthreads();
+
+    // Wait for every remote contribution, then reduce it into dest.
+    for (int pe = PE_start; pe < finish; pe += stride) {
+      if (pe != my_pe) {
+        int remote_rank = (pe - PE_start) / stride;
+        if (is_thread_zero_in_block()) {
+          wait_until(&pSync[remote_rank], ROCSHMEM_CMP_EQ, flag_val);
+        }
+        __syncthreads();
+        gda_compute_reduce<T, Op>(&pWrk[remote_rank * chunk_size],
+                                  dest + offset, count, wg_id, wg_size);
+        threadfence_system();
+      }
+    }
+    __syncthreads();
+
+    // Reset synchronization slots before the next chunk reuses them.
+    for (int j = wg_id; j < PE_size; j += wg_size) {
+      pSync[j] = ROCSHMEM_SYNC_VALUE;
+    }
+    threadfence_system();
+    __syncthreads();
+
+    // Ensure all PEs finish this chunk before pWrk and pSync are reused.
+    barrier_wg(team);
+  }
+
+  return ROCSHMEM_SUCCESS;
+}
+
+/*
+ * Hierarchical reduce-scatter for teams spanning multiple IPC islands.
+ * Each local slot first reduces matching source blocks from its IPC peers
+ * into pWrk, then matching slots exchange and reduce those partial blocks
+ * through an inter-node ring. Large ring blocks are striped over two rails.
+ *
+ * The caller must provide a contiguous team composed of equally sized IPC
+ * islands. Concurrent workgroups must use distinct team-owned pWrk/pSync and
+ * input/output buffers. All threads in the workgroup must participate.
+ */
+template <typename T, ROCSHMEM_OP Op>
+__device__ int GDAContext::hybrid_reduce_scatter_wg(
+    GDATeam *team_obj, T *dest, const T *source, int nreduce,
+    int PE_start, int stride, int PE_size, int team_rank) {
+
+  const int my_pe = constmem.my_pe;
+  const int local_size = constmem.ipc_shm_size;
+  const int local_slot = ipcImpl_.shm_rank;
+  const int node_id = team_rank / local_size;
+  const int num_nodes = PE_size / local_size;
+
+  T *p_wrk = reinterpret_cast<T *>(team_obj->pWrk);
+  long *p_sync = team_obj->reduce_pSync;
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
+  const int tid = get_flat_block_id();
+  const int wg_size = get_flat_block_size();
+  const int scratch_elems = static_cast<int>(ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double) / sizeof(T));
+  const int chunk_size = max(1, scratch_elems / num_nodes);
+  rocshmem_team_t team = reinterpret_cast<rocshmem_team_t>(team_obj);
+
+  const int left_node = (node_id - 1 + num_nodes) % num_nodes;
+  const int right_node = (node_id + 1) % num_nodes;
+  const int left_pe = PE_start + (left_node * local_size + local_slot) * stride;
+  const int right_pe = PE_start + (right_node * local_size + local_slot) * stride;
+
+  for (int offset = 0; offset < nreduce; offset += chunk_size) {
+    const int count = min(chunk_size, nreduce - offset);
+
+    // Stage 1: slot s reduces, through IPC, one output block per node.  The
+    // num_nodes partial blocks form this slot's input to the node-level ring.
+    for (int target_node = 0; target_node < num_nodes; ++target_node) {
+      const int target_rank = target_node * local_size + local_slot;
+      T *partial = p_wrk + target_node * chunk_size;
+      const T *target_src = source + target_rank * nreduce + offset;
+
+      // Fuse all IPC-peer reductions per element.  This removes one full
+      // block barrier per local peer and keeps the accumulator in registers.
+      using VecT = std::conditional_t<std::is_same_v<T, float>, float4,
+                   std::conditional_t<std::is_same_v<T, double>, double2,
+                   std::conditional_t<std::is_same_v<T, int>, int4,
+                   std::conditional_t<std::is_same_v<T, unsigned int>, uint4, T>>>>;
+      constexpr int vec_width = sizeof(VecT) / sizeof(T);
+      constexpr bool vectorizable = !std::is_same_v<VecT, T>;
+      bool used_vector_path = false;
+
+      if constexpr (vectorizable) {
+        if ((nreduce % vec_width) == 0 && (offset % vec_width) == 0 &&
+            (count % vec_width) == 0) {
+          const int vectors = count / vec_width;
+          for (int i = tid; i < vectors; i += wg_size) {
+            VecT result = reinterpret_cast<const VecT *>(target_src)[i];
+            T *result_elem = reinterpret_cast<T *>(&result);
+            for (int slot = 0; slot < local_size; ++slot) {
+              if (slot == local_slot) continue;
+              const char *peer_raw = get_local_ptr(source, slot);
+              const T *peer_src = reinterpret_cast<const T *>(peer_raw) +
+                                  target_rank * nreduce + offset;
+              VecT value = reinterpret_cast<const VecT *>(peer_src)[i];
+              T *value_elem = reinterpret_cast<T *>(&value);
+              for (int v = 0; v < vec_width; ++v) {
+                OpWrap<Op>::Calc(value_elem + v, result_elem + v, 0);
+              }
+            }
+            reinterpret_cast<VecT *>(partial)[i] = result;
+          }
+          used_vector_path = true;
+        }
+      }
+
+      if (!used_vector_path) {
+        for (int i = tid; i < count; i += wg_size) {
+          T result = target_src[i];
+          for (int slot = 0; slot < local_size; ++slot) {
+            if (slot == local_slot) continue;
+            const char *peer_raw = get_local_ptr(source, slot);
+            T *peer_src = reinterpret_cast<T *>(const_cast<char *>(peer_raw)) +
+                          target_rank * nreduce + offset;
+            OpWrap<Op>::Calc(peer_src + i, &result, 0);
+          }
+          partial[i] = result;
+        }
+      }
+      __syncthreads();
+    }
+
+    // Stage 2: run the inter-node ring between matching local slots.
+    for (int step = 0; step < num_nodes - 1; ++step) {
+      const int send_idx = (node_id - step - 1 + num_nodes) % num_nodes;
+      const int recv_idx = (node_id - step - 2 + num_nodes) % num_nodes;
+      const size_t send_bytes = static_cast<size_t>(count) * sizeof(T);
+      const int signal_qp = get_qp_index(right_pe, wf_info);
+
+      // Stripe large blocks across at most two rails.
+      constexpr size_t min_bytes_per_rail = 128 * 1024;
+      constexpr uint32_t max_collective_rails = 2;
+      uint32_t rails = static_cast<uint32_t>((send_bytes + min_bytes_per_rail - 1) / min_bytes_per_rail);
+      rails = max(1U, min(rails, min(num_qps_per_pe, max_collective_rails)));
+
+      if (rails == 1) {
+        internal_putmem_nbi_wg(dest + offset,
+                               p_wrk + send_idx * chunk_size, send_bytes,
+                               right_pe, signal_qp, wf_info);
+      } else if (is_thread_zero_in_block()) {
+        const size_t rail_bytes = (send_bytes + rails - 1) / rails;
+        const uint64_t remote_offset = reinterpret_cast<char *>(dest + offset) - base_heap[constmem.my_pe];
+        const char *send_src = reinterpret_cast<const char *>(p_wrk + send_idx * chunk_size);
+        for (uint32_t rail = 0; rail < rails; ++rail) {
+          const size_t begin = static_cast<size_t>(rail) * rail_bytes;
+          if (begin >= send_bytes) break;
+          const size_t length = min(rail_bytes, send_bytes - begin);
+          const uint32_t qp_row = (static_cast<uint32_t>(blockIdx.x) + rail) % num_qps_per_pe;
+          const uint32_t qp_index = qp_row * constmem.num_pes + right_pe;
+          qps[qp_index].put_nbi(base_heap[right_pe] + remote_offset + begin,
+                                send_src + begin, length, wf_info);
+        }
+        for (uint32_t rail = 0; rail < rails; ++rail) {
+          const size_t begin = static_cast<size_t>(rail) * rail_bytes;
+          if (begin >= send_bytes) break;
+          const uint32_t qp_row = (static_cast<uint32_t>(blockIdx.x) + rail) % num_qps_per_pe;
+          const uint32_t qp_index = qp_row * constmem.num_pes + right_pe;
+          qps[qp_index].quiet(wf_info);
+        }
+      }
+      __syncthreads();
+      if (is_thread_zero_in_block()) {
+        // Publish ready only after every payload rail completes.
+        const int64_t ready = 1;
+        internal_putmem(p_sync + node_id, &ready, sizeof(*p_sync), right_pe, signal_qp, wf_info);
+        wait_until(p_sync + left_node, ROCSHMEM_CMP_EQ, 1L);
       }
       __syncthreads();
 
-      // Send my contribution for each remote PE's output block, then signal.
-      for (int i = PE_start; i < finish; i += stride) {
-        if (i != my_pe) {
-          int remote_rank = (i - PE_start) / stride;
-          internal_putmem_wg(&pWrk[team_rank * chunk_size],
-                             reinterpret_cast<const void *>(
-                                 source + remote_rank * nreduce + offset),
-                             count * sizeof(T), i, i, wf_info);
-          if (is_thread_zero_in_block()) {
-            fence();
-            internal_putmem(&pSync[team_rank], &flag_val, sizeof(*pSync), i, i, wf_info);
-          }
+      // Accumulate the received block before forwarding it.
+      gda_compute_reduce<T, Op>(dest + offset, p_wrk + recv_idx * chunk_size, count, tid, wg_size);
+
+      // The last ring step produces this node's final block; publish it before the existing team barrier.
+      if (step == num_nodes - 2) {
+        for (int i = tid; i < count; i += wg_size) {
+          dest[offset + i] = p_wrk[node_id * chunk_size + i];
         }
+      }
+      if (is_thread_zero_in_block()) {
+        p_sync[left_node] = ROCSHMEM_SYNC_VALUE;
       }
       threadfence_system();
       __syncthreads();
-
-      // Wait for each remote PE s, then accumulate into dest.
-      for (int i = PE_start; i < finish; i += stride) {
-        if (i != my_pe) {
-          int remote_rank = (i - PE_start) / stride;
-          if (is_thread_zero_in_block()) {
-            wait_until(&pSync[remote_rank], ROCSHMEM_CMP_EQ, flag_val);
-          }
-          __syncthreads();
-          gda_compute_reduce<T, Op>(&pWrk[remote_rank * chunk_size],
-                                    dest + offset, count, wg_id, wg_size);
-          threadfence_system();
-        }
-      }
-      __syncthreads();
-
-      // Reset pSync before reuse.
-      for (int j = wg_id; j < PE_size; j += wg_size) {
-        pSync[j] = ROCSHMEM_SYNC_VALUE;
-      }
-      threadfence_system();
-      __syncthreads();
-      // Sync with workgroup 0 of other PEs
       barrier_wg(team);
     }
   }
