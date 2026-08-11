@@ -374,6 +374,151 @@ __device__ void gda_compute_reduce(T *src, T *dst, int size, int wg_id, int wg_s
   __syncthreads();
 }
 
+/**
+ * @brief Fused IPC-aware vectorized reduction with single write optimization
+ *
+ * Performs an optimized reduction operation across IPC (Inter-Process Communication)
+ * peers within the same node. This function reduces data from all local GPUs
+ * (sharing memory via IPC) and writes the final result exactly once to minimize
+ * memory bandwidth consumption.
+ */
+template <typename T, ROCSHMEM_OP Op>
+__device__ void GDAContext::internal_fused_ipc_reduce(
+    T *dst, const T *src, int source_offset, int count, int local_size,
+    int local_slot, int wg_id, int wg_size) {
+  using VecT = std::conditional_t<std::is_same_v<T, float>, float4,
+               std::conditional_t<std::is_same_v<T, double>, double2,
+               std::conditional_t<std::is_same_v<T, int>, int4,
+               std::conditional_t<std::is_same_v<T, unsigned int>, uint4, T>>>>;
+  constexpr int vec_width = sizeof(VecT) / sizeof(T);
+  constexpr bool vectorizable = !std::is_same_v<VecT, T>;
+  bool used_vector_path = false;
+
+  if constexpr (vectorizable) {
+    const T *segment_src = src + source_offset;
+    const bool aligned = (reinterpret_cast<uintptr_t>(segment_src) % alignof(VecT)) == 0 &&
+                         (reinterpret_cast<uintptr_t>(dst) % alignof(VecT)) == 0;
+    if (aligned && (source_offset % vec_width) == 0 && (count % vec_width) == 0) {
+      const int vectors = count / vec_width;
+      for (int i = wg_id; i < vectors; i += wg_size) {
+        VecT result = reinterpret_cast<const VecT *>(segment_src)[i];
+        T *result_elem = reinterpret_cast<T *>(&result);
+        for (int slot = 0; slot < local_size; ++slot) {
+          if (slot == local_slot) continue;
+          const T *peer_src = reinterpret_cast<const T *>(get_local_ptr(src, slot)) + source_offset;
+          VecT value = reinterpret_cast<const VecT *>(peer_src)[i];
+          T *value_elem = reinterpret_cast<T *>(&value);
+          for (int v = 0; v < vec_width; ++v) {
+            OpWrap<Op>::Calc(value_elem + v, result_elem + v, 0);
+          }
+        }
+        reinterpret_cast<VecT *>(dst)[i] = result;
+      }
+      used_vector_path = true;
+    }
+  }
+
+  // Scalar fallback path for unaligned or unsupported types
+  // Processes one element at a time with correct semantics but lower throughput
+  if (!used_vector_path) {
+    for (int i = wg_id; i < count; i += wg_size) {
+      T result = src[source_offset + i];
+      for (int slot = 0; slot < local_size; ++slot) {
+        if (slot == local_slot) continue;
+        const T *peer_src = reinterpret_cast<const T *>(get_local_ptr(src, slot)) + source_offset;
+        OpWrap<Op>::Calc(const_cast<T *>(peer_src + i), &result, 0);
+      }
+      dst[i] = result;
+    }
+  }
+  __syncthreads();
+}
+
+/*
+ * Hierarchical allreduce for teams spanning multiple IPC islands.
+ * Local proxies first reduce disjoint segments across their IPC peers. The
+ * first node then combines matching segments from every node, remote proxies
+ * fetch the final segments, and each PE assembles the complete result locally.
+ *
+ * The team must contain contiguous, equally sized IPC islands. Concurrent
+ * workgroups must use distinct team-owned pWrk/pSync and input/output buffers.
+ */
+template <typename T, ROCSHMEM_OP Op>
+__device__ void GDAContext::internal_proxy_allreduce(T *dst, const T *src, int nelems, GDATeam *team_obj,
+                                                     ActiveWFInfo &wf_info) {
+  const int pe_start = team_obj->tinfo_wrt_world->pe_start;
+  const int pe_size = team_obj->tinfo_wrt_world->size;
+  const int local_size = constmem.ipc_shm_size;
+  const int local_slot = ipcImpl_.shm_rank;
+  const int node_count = pe_size / local_size;
+  const int root_node_first = pe_start;
+  const bool on_root_node = constmem.ipc_first_pe == root_node_first;
+  long *p_sync = team_obj->reduce_pSync;
+  T *p_wrk = reinterpret_cast<T *>(team_obj->pWrk);
+  const int wg_id = get_flat_block_id();
+  const int wg_size = get_flat_block_size();
+  constexpr size_t MIN_BYTES_PER_PROXY = 64 * 1024;
+  const size_t nbytes = static_cast<size_t>(nelems) * sizeof(T);
+  const size_t useful_proxies = (nbytes + MIN_BYTES_PER_PROXY - 1) / MIN_BYTES_PER_PROXY;
+  const int proxies = static_cast<int>(min(static_cast<size_t>(local_size), useful_proxies));
+  const int proxy_chunk = (nelems + proxies - 1) / proxies;
+
+  if (local_slot < proxies) {
+    const int begin = local_slot * proxy_chunk;
+    const int count = min(proxy_chunk, nelems - begin);
+    internal_fused_ipc_reduce<T, Op>(dst + begin, src, begin, count, local_size, local_slot, wg_id, wg_size);
+  }
+
+  // Publish local partials before a remote proxy fetches them.
+  threadfence_system();
+  __syncthreads();
+  internal_sync_wg(constmem.my_pe, pe_start, 1, pe_size, p_sync, wf_info);
+
+  // The first node's proxies reduce matching partials from all other nodes.
+  if (on_root_node && local_slot < proxies) {
+    const int begin = local_slot * proxy_chunk;
+    const int count = min(proxy_chunk, nelems - begin);
+    const int tile_elems = max(1, static_cast<int>(ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double) / sizeof(T)));
+    for (int node = 1; node < node_count; node++) {
+      const int remote_proxy = pe_start + node * local_size + local_slot;
+      for (int offset = 0; offset < count; offset += tile_elems) {
+        const int tile = min(tile_elems, count - offset);
+        const uint32_t qp_row = static_cast<uint32_t>(blockIdx.x) % num_qps_per_pe;
+        const int qp_index = qp_row * constmem.num_pes + remote_proxy;
+        internal_getmem_wg(p_wrk, dst + begin + offset, static_cast<size_t>(tile) * sizeof(T), remote_proxy, qp_index, wf_info);
+        gda_compute_reduce<T, Op>(p_wrk, dst + begin + offset, tile, wg_id, wg_size);
+      }
+    }
+  }
+
+  internal_sync_wg(constmem.my_pe, pe_start, 1, pe_size, p_sync, wf_info);
+
+  // Matching proxies fetch their final segment from the reduction node.
+  if (!on_root_node && local_slot < proxies) {
+    const int begin = local_slot * proxy_chunk;
+    const int count = min(proxy_chunk, nelems - begin);
+    const int root_proxy = root_node_first + local_slot;
+    const uint32_t qp_row = static_cast<uint32_t>(blockIdx.x) % num_qps_per_pe;
+    const int qp_index = qp_row * constmem.num_pes + root_proxy;
+    internal_getmem_wg(dst + begin, dst + begin, static_cast<size_t>(count) * sizeof(T), root_proxy, qp_index, wf_info);
+  }
+
+  internal_sync_wg(constmem.my_pe, pe_start, 1, pe_size, p_sync, wf_info);
+
+  // Assemble the complete result from local proxy segments.
+  for (int slot = 0; slot < proxies; slot++) {
+    if (slot == local_slot) continue;
+    const int begin = slot * proxy_chunk;
+    const int count = min(proxy_chunk, nelems - begin);
+    const int local_proxy = constmem.ipc_first_pe + slot;
+    internal_getmem_wg(dst + begin, dst + begin,
+                       static_cast<size_t>(count) * sizeof(T), local_proxy,
+                       local_proxy, wf_info);
+  }
+
+  internal_sync_wg(constmem.my_pe, pe_start, 1, pe_size, p_sync, wf_info);
+}
+
 template <typename T, ROCSHMEM_OP Op>
 __device__ void GDAContext::internal_direct_allreduce(T *dst, const T *src,
     int nelems, GDATeam *team_obj, ActiveWFInfo &wf_info) {  // NOLINT(runtime/int)
@@ -521,16 +666,17 @@ __device__ void GDAContext::internal_ring_allreduce(T *dst, const T *src,
       off_send = (((my_pe_in_team + 1 - iter + 2 * PE_size) % PE_size) * chunk_size);
       off_recv = (((my_pe_in_team - iter + 2 * PE_size) % PE_size) * chunk_size);
 
-      internal_putmem_wg(reinterpret_cast<void *>(&pWrk[off_send]),
+      // Keep the payload and its completion signal on the same RC QP.  RC
+      // ordering makes the payload remotely visible before the signal, and
+      // avoids quieting every QP in the context at every ring step.
+      int qp_index = get_qp_index(send_pe, wf_info);
+      internal_putmem_nbi_wg(reinterpret_cast<void *>(&pWrk[off_send]),
         reinterpret_cast<void *>(&dst[off_send + off_seg]),
-        chunk_size * sizeof(T), send_pe, send_pe, wf_info);
+        chunk_size * sizeof(T), send_pe, qp_index, wf_info);
 
       if (is_thread_zero_in_block()) {
-        fence();
-
         wait_val = seg + 100;
-        internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
-          send_pe, wf_info);
+        internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe, qp_index, wf_info);
 #if defined(__gfx936__) || defined (__gfx938__)
         __threadfence_system();
 #endif /* __gfx936__ */
@@ -544,15 +690,14 @@ __device__ void GDAContext::internal_ring_allreduce(T *dst, const T *src,
     // Loop 2 in the example above
     for (int iter = PE_size - 1; iter < 2 * PE_size - 2; iter++) {
       off_send = (((my_pe_in_team + 1 - iter + 2 * PE_size) % PE_size) * chunk_size);
+      int qp_index = get_qp_index(send_pe, wf_info);
       internal_putmem_nbi_wg(reinterpret_cast<void *>(&dst[off_send + off_seg]),
         reinterpret_cast<void *>(&dst[off_send + off_seg]),
-        chunk_size * sizeof(T), send_pe, send_pe, wf_info);
+        chunk_size * sizeof(T), send_pe, qp_index, wf_info);
 
       if (is_thread_zero_in_block()) {
-        fence();
         wait_val = seg + 100;
-        internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
-          send_pe, wf_info);
+        internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe, qp_index, wf_info);
 #if defined(__gfx936__) || defined (__gfx938__)
         __threadfence_system();
 #endif /* __gfx936__ */
@@ -584,13 +729,27 @@ __device__ int GDAContext::reduce(rocshmem_team_t team, T *dest,
 
   ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
 
+  constexpr size_t PROXY_ALLREDUCE_MIN_BYTES = 256 * 1024;
+  const int local_size = constmem.ipc_shm_size;
+  const int pe_start = team_obj->tinfo_wrt_world->pe_start;
+  const int stride = team_obj->tinfo_wrt_world->stride;
+  const bool use_proxy_allreduce = static_cast<size_t>(nreduce) * sizeof(T) >= PROXY_ALLREDUCE_MIN_BYTES &&
+      stride == 1 && local_size > 1 && constmem.ipc_stride == 1 &&
+      pe_start % local_size == 0 && PE_size % local_size == 0 &&
+      PE_size > local_size;
+
+  if (use_proxy_allreduce) {
+    internal_proxy_allreduce<T, Op>(dest, source, nreduce, team_obj, wf_info);
+    barrier_wg(team);
+    return ROCSHMEM_SUCCESS;
+  }
+
   // Messages above DIRECT_MAX use ring. default 8192 (8KB).
   constexpr int DIRECT_MAX_NELEMS = 8192;
 
   bool use_direct = (provided_pWrk >= direct_pWrk) &&
                     (provided_pSync >= direct_pSync) &&
                     (nreduce <= DIRECT_MAX_NELEMS);
-
   if (use_direct) {
     internal_direct_allreduce<T, Op>(dest, source, nreduce, team_obj, wf_info);
   } else {
@@ -757,7 +916,6 @@ __device__ int GDAContext::hybrid_reduce_scatter_wg(
     GDATeam *team_obj, T *dest, const T *source, int nreduce,
     int PE_start, int stride, int PE_size, int team_rank) {
 
-  const int my_pe = constmem.my_pe;
   const int local_size = constmem.ipc_shm_size;
   const int local_slot = ipcImpl_.shm_rank;
   const int node_id = team_rank / local_size;
@@ -774,7 +932,6 @@ __device__ int GDAContext::hybrid_reduce_scatter_wg(
 
   const int left_node = (node_id - 1 + num_nodes) % num_nodes;
   const int right_node = (node_id + 1) % num_nodes;
-  const int left_pe = PE_start + (left_node * local_size + local_slot) * stride;
   const int right_pe = PE_start + (right_node * local_size + local_slot) * stride;
 
   for (int offset = 0; offset < nreduce; offset += chunk_size) {
@@ -785,56 +942,8 @@ __device__ int GDAContext::hybrid_reduce_scatter_wg(
     for (int target_node = 0; target_node < num_nodes; ++target_node) {
       const int target_rank = target_node * local_size + local_slot;
       T *partial = p_wrk + target_node * chunk_size;
-      const T *target_src = source + target_rank * nreduce + offset;
-
-      // Fuse all IPC-peer reductions per element.  This removes one full
-      // block barrier per local peer and keeps the accumulator in registers.
-      using VecT = std::conditional_t<std::is_same_v<T, float>, float4,
-                   std::conditional_t<std::is_same_v<T, double>, double2,
-                   std::conditional_t<std::is_same_v<T, int>, int4,
-                   std::conditional_t<std::is_same_v<T, unsigned int>, uint4, T>>>>;
-      constexpr int vec_width = sizeof(VecT) / sizeof(T);
-      constexpr bool vectorizable = !std::is_same_v<VecT, T>;
-      bool used_vector_path = false;
-
-      if constexpr (vectorizable) {
-        if ((nreduce % vec_width) == 0 && (offset % vec_width) == 0 &&
-            (count % vec_width) == 0) {
-          const int vectors = count / vec_width;
-          for (int i = tid; i < vectors; i += wg_size) {
-            VecT result = reinterpret_cast<const VecT *>(target_src)[i];
-            T *result_elem = reinterpret_cast<T *>(&result);
-            for (int slot = 0; slot < local_size; ++slot) {
-              if (slot == local_slot) continue;
-              const char *peer_raw = get_local_ptr(source, slot);
-              const T *peer_src = reinterpret_cast<const T *>(peer_raw) +
-                                  target_rank * nreduce + offset;
-              VecT value = reinterpret_cast<const VecT *>(peer_src)[i];
-              T *value_elem = reinterpret_cast<T *>(&value);
-              for (int v = 0; v < vec_width; ++v) {
-                OpWrap<Op>::Calc(value_elem + v, result_elem + v, 0);
-              }
-            }
-            reinterpret_cast<VecT *>(partial)[i] = result;
-          }
-          used_vector_path = true;
-        }
-      }
-
-      if (!used_vector_path) {
-        for (int i = tid; i < count; i += wg_size) {
-          T result = target_src[i];
-          for (int slot = 0; slot < local_size; ++slot) {
-            if (slot == local_slot) continue;
-            const char *peer_raw = get_local_ptr(source, slot);
-            T *peer_src = reinterpret_cast<T *>(const_cast<char *>(peer_raw)) +
-                          target_rank * nreduce + offset;
-            OpWrap<Op>::Calc(peer_src + i, &result, 0);
-          }
-          partial[i] = result;
-        }
-      }
-      __syncthreads();
+      const int source_offset = target_rank * nreduce + offset;
+      internal_fused_ipc_reduce<T, Op>(partial, source, source_offset, count, local_size, local_slot, tid, wg_size);
     }
 
     // Stage 2: run the inter-node ring between matching local slots.
