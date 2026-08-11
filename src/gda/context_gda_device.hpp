@@ -346,6 +346,15 @@ class GDAContext : public Context {
       GDATeam *team_obj, int n_seg, int seg_size, int chunk_size,
       ActiveWFInfo &wf_info);
 
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ void internal_proxy_allreduce(T *dst, const T *src, int nelems,
+      GDATeam *team_obj, ActiveWFInfo &wf_info);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ void internal_fused_ipc_reduce(T *dst, const T *src,
+      int source_offset, int count, int local_size, int local_slot,
+      int wg_id, int wg_size);
+
   __device__ void internal_putmem(void *dest, const void *source,
       size_t nelems, int pe, int qp_index, ActiveWFInfo &wf_info);
 
