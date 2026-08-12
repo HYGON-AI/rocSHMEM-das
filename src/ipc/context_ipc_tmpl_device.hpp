@@ -472,7 +472,6 @@ __device__ int IPCContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
   long *pSync = team_obj->reduce_pSync;
   const int thread_id = get_flat_block_id();
   const int block_size = get_flat_block_size();
-  const int pe_finish = pe_start + stride * pe_size;
   const int scratch_elems = static_cast<int>(ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double) / sizeof(T));
   const int scratch_slots = max(1, pe_size - 1);
   const int chunk_size = max(1, scratch_elems / scratch_slots);
@@ -483,16 +482,20 @@ __device__ int IPCContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
   // and its own dest/source buffers, so all WGs run the collective in
   // parallel without any cross-WG serialisation.
 
-  // Per-call generation avoids clearing data/ack flags between chunks/calls.
-  if (is_thread_zero_in_block()) {
-    ++pSync[2 * pe_size];
-  }
-  __syncthreads();
-  const int64_t flag_val = pSync[2 * pe_size];
-
   const int n_chunks = (nreduce + chunk_size - 1) / chunk_size;
 
-  for (int offset = 0; offset < nreduce; offset += chunk_size) {
+  // Reserve one generation per chunk. Reusing a generation within a call lets
+  // a previous chunk's data/ack flag satisfy the next chunk's wait early.
+  if (is_thread_zero_in_block()) {
+    pSync[2 * pe_size] += n_chunks;
+  }
+  __syncthreads();
+  const int64_t first_flag = pSync[2 * pe_size] - n_chunks + 1;
+
+  int chunk_index = 0;
+  for (int offset = 0; offset < nreduce;
+       offset += chunk_size, ++chunk_index) {
+    const int64_t flag_val = first_flag + chunk_index;
     const int count = min(chunk_size, nreduce - offset);
 
     // ------------------------------------------------------------------
@@ -513,7 +516,7 @@ __device__ int IPCContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
         }
       }
     } else {
-      for (int pe = pe_start; pe < pe_finish; pe += stride) {
+      for (int pe = pe_start; pe < pe_start + stride * pe_size; pe += stride) {
         if (pe != constmem.my_pe) {
           const int remote_rank = (pe - pe_start) / stride;
           const int scratch_slot = team_rank - (team_rank > remote_rank);
@@ -607,13 +610,25 @@ __device__ int IPCContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
     __syncthreads();
 
     // ------------------------------------------------------------------
-    // Phase 4: chunk-level ACK when scratch will be reused for the next
-    // chunk.  The team barrier guarantees every PE has finished reading
-    // scratch data for the current chunk before any PE overwrites it.
+    // Phase 4: point-to-point completion ACK. Receiver rank R notifies every
+    // sender through slot [pe_size + R] after consuming its scratch payload.
+    // A sender waits for all receiver ACKs before reusing pWrk in the next
+    // chunk/call. This provides the safety of a team barrier without forcing
+    // unrelated peers through the barrier protocol.
     // ------------------------------------------------------------------
-    if (n_chunks > 1) {
-      barrier_wg(team);
+    if (is_thread_zero_in_block()) {
+      for (int remote_rank = 0; remote_rank < pe_size; ++remote_rank) {
+        if (remote_rank == team_rank) continue;
+        const int pe = pe_start + remote_rank * stride;
+        internal_putmem(pSync + pe_size + team_rank, &flag_val,
+                        sizeof(*pSync), pe);
+      }
+      for (int remote_rank = 0; remote_rank < pe_size; ++remote_rank) {
+        if (remote_rank == team_rank) continue;
+        wait_until(pSync + pe_size + remote_rank, ROCSHMEM_CMP_EQ, flag_val);
+      }
     }
+    __syncthreads();
   }
 
   return ROCSHMEM_SUCCESS;
