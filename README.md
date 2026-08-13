@@ -46,4 +46,4 @@ HCU adaptations, modifications, and original contributions by Hygon Information 
 
 Modified by Hygon Information Technology Co., Ltd.
 
-Original copyright notices and license terms from the upstream rocSHMEM project are retained. See [LICENSE](LICENSE) for details.
+Original copyright notices and license terms from the upstream rocSHMEM project are retained. See [LICENSE](LICENSE.md) for details.
