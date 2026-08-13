@@ -31,3 +31,19 @@ The RO and GDA backend is provided as-is with limited support from AMD or AMD Re
 
 For information on how to install and use rocSHMEM,
 [please see our documentation](https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/).
+
+## License
+
+This repository is based on the following fixed upstream baseline:
+
+- Upstream project: rocSHMEM
+- Upstream repository: https://github.com/ROCm/rocm-systems/commits/develop/projects/rocshmem
+- Upstream branch: `develop`
+- Upstream commit: `56bfb136442db24689bd399b5851b7f112b9bf70`
+- Upstream license: `MIT`
+
+HCU adaptations, modifications, and original contributions by Hygon Information Technology Co., Ltd. are licensed under the MIT License.
+
+Modified by Hygon Information Technology Co., Ltd.
+
+Original copyright notices and license terms from the upstream rocSHMEM project are retained. See [LICENSE](LICENSE) for details.
