@@ -280,6 +280,8 @@ for dir, file_names in files_in_dir.items():
     dataset_count = 0
     pre_pad_top = 0
     dataset_count_one_op = 0
+    pad_left = 2
+    pad_top = 0
     for data_series in all_data:
         if prev_op != data_series.op:
             # ===================== 修改并扩大前一个op的行 =====================
