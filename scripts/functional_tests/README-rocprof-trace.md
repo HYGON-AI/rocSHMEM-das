@@ -31,23 +31,19 @@ mkdir -p ./prof
 # rocprofv2 采样简单示例
 rocprofv2 \
     --sys-trace \
-    -d ./prof \
+    -o "./prof/trace" \
     ./your_executable [程序参数]
 ```
 
-#### mpirun 多rank采样
+#### mpirun 节点内多rank采样
 ```bash
-rm -rf ./prof  # 先清理历史采集数据，避免混杂
+rm -rf ./prof && mkdir -p ./prof
 mpirun --allow-run-as-root -np 4 -x PATH -x LD_LIBRARY_PATH \
 bash -c '
-    # 兼容OpenMPI / PMI两套rank环境变量
-    if [[ -n "$OMPI_COMM_WORLD_RANK" ]]; then
-        RANK="$OMPI_COMM_WORLD_RANK"
-    else
-        RANK="${PMI_RANK:-0}"
-    fi
-
+    # 兼容OpenMPI/PMI两套rank环境变量
+    RANK=${OMPI_COMM_WORLD_RANK:-${PMI_RANK:-0}}
     OUTDIR="./prof/rank_${RANK}"
+
     mkdir -p "$OUTDIR"
     echo "PROF START rank=$RANK outdir=$OUTDIR"
 
@@ -56,14 +52,50 @@ bash -c '
         -o "$OUTDIR/trace" \
         ./tests/functional_tests/rocshmem_functional_tests \
         -a 76 -w 1 -z 128 -s 1048576 -noverif
-    echo "PROF FINISH rank=$RANK"
+
+    rc=$?
+    echo "PROF FINISH rank=$RANK rc=$rc"
+    exit "$rc"
 '
+```
+
+#### mpirun 节点间多rank采样
+```bash
+rm -rf ./prof && mkdir -p ./prof
+
+mpirun -n 16 \
+  --allow-run-as-root \
+  --mca coll_hcoll_enable 0 \
+  -H bw1:8,bw2:8 \
+  -x ROCM_PATH=/opt/dtk \
+  -x ROCSHMEM_BACKEND=gda \
+  -x LD_LIBRARY_PATH \
+  -x PATH \
+  -x ROCSHMEM_TEST_UUID=125 \
+  -x ROCSHMEM_IB_GID_INDEX=1 \
+  -x ROCSHMEM_HEAP_SIZE=8589934592 \
+  bash -c '
+    RANK=${OMPI_COMM_WORLD_RANK:-${PMI_RANK:-0}}
+    OUTDIR="./prof/rank_${RANK}"
+
+    mkdir -p "$OUTDIR"
+    echo "PROF START rank=$RANK host=$(hostname) outdir=$OUTDIR"
+
+    /opt/dtk/rocprofiler/bin/rocprofv2 \
+        --sys-trace \
+        -o "$OUTDIR/trace" \
+        ./tests/functional_tests/rocshmem_functional_tests \
+        -a 19 -w 1 -z 128 -s 1048576 -noverif
+
+    rc=$?
+    echo "PROF FINISH rank=$RANK host=$(hostname) rc=$rc"
+    exit "$rc"
+  '
 ```
 
 ### 3.2 参数说明
 ```
 --sys-trace                开启全套追踪：HIP + HSA + Kernel
--d,--output-directory      指定trace日志输出根目录
 -o,--output-name           指定输出文件前缀（如 -o ./prof/rank_0/trace 生成 trace_*_*.txt）
 ```
 
@@ -127,6 +159,9 @@ pip3 install pandas
 
 2. **部分rank缺少hsa_api_trace.txt**
 脚本仅打印警告，正常解析剩余日志，不会整体中断。
+
+3. **节点间采样报错 `metrics .xml open error '/share/profiler/counters/derived_counters.xml'`**
+未传 `-x ROCM_PATH=/opt/dtk` 时，rocprofv2 按编译时默认路径 `/share/profiler/` 查找，而非 DTK 实际路径 `/opt/dtk/share/profiler/`。添加该参数即可解决。
 
 ## 8. 进阶方案：rocprofv2 原生输出 Perfetto 文件
 > ⚠️ 当前 DTK 环境缺少关键依赖包，此方案暂不可用。待依赖补齐后可作为首选方案，省去文本解析步骤。

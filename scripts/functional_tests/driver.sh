@@ -272,7 +272,9 @@ ExecTest_SLR() {
   fi
 
   # Add environment variables and application
-  cmd+=("env" "${env_vars[@]}" "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap})
+  cmd+=("env" "${env_vars[@]}" "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS")
+  [[ -n "${NOVERIF:-}" ]] && cmd+=(-noverif)
+  cmd+=(-localbuftype "${LOCALBUFTYPE:-heap}")
 
   if [[ "" != "$MAX_MSG_SIZE" ]]
   then
@@ -403,12 +405,19 @@ ExecTest_MPI() {
 
   # Use MPI Parameters when provided via environment variable (overrides all default launcher params)
   if [[ -n "${ROCSHMEM_TEST_MPI_PARAMS:-}" ]]; then
-    cmd=( "$LAUNCHER" -n "$NUM_RANKS" $ROCSHMEM_TEST_MPI_PARAMS )
+    read -ra mpi_params <<< "$ROCSHMEM_TEST_MPI_PARAMS"
+    cmd=("$LAUNCHER" -n "$NUM_RANKS" "${mpi_params[@]}")
   fi
 
   # Construct Test Command
   TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_z"$NUM_THREADS"
-  cmd+=( "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap} ${ROCSHMEM_TEST_ARGS:-} )
+  cmd+=("$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS")
+  [[ -n "${NOVERIF:-}" ]] && cmd+=(-noverif)
+  cmd+=(-localbuftype "${LOCALBUFTYPE:-heap}")
+  if [[ -n "${ROCSHMEM_TEST_ARGS:-}" ]]; then
+    read -ra extra_args <<< "$ROCSHMEM_TEST_ARGS"
+    cmd+=("${extra_args[@]}")
+  fi
   if [[ "" != "$MAX_MSG_SIZE" ]]
   then
     # Check if in volume mode
@@ -1082,8 +1091,10 @@ ExecPerfTest() {
   local num_ranks=$2
   local max_msg_size=$3
   
-  local -a wg_options=(${ROCSHMEM_TEST_WGS:-16})
-  local -a thread_options=(${ROCSHMEM_TEST_THDS:-128 256})
+  local -a wg_options
+  read -ra wg_options <<< "${ROCSHMEM_TEST_WGS:-16}"
+  local -a thread_options
+  read -ra thread_options <<< "${ROCSHMEM_TEST_THDS:-128 256}"
   
   declare -A best_latency
   declare -A best_bandwidth
@@ -1095,8 +1106,8 @@ ExecPerfTest() {
   echo "--------------------------------------------------------------------------------------"
   echo "Performance Test: $test_name"
   echo "Ranks: $num_ranks, Max Msg Size: $max_msg_size"
-  echo "Workgroups: ${wg_options[@]}"
-  echo "Threads: ${thread_options[@]}"
+  echo "Workgroups: ${wg_options[*]}"
+  echo "Threads: ${thread_options[*]}"
   echo "--------------------------------------------------------------------------------------"
   
   for wg in "${wg_options[@]}"; do
@@ -1113,7 +1124,8 @@ ExecPerfTest() {
         continue
       fi
       
-      local results=$(awk -v max="$max_msg_size" '
+      local results
+      results=$(awk -v max="$max_msg_size" '
         /Msg Size.*Latency.*Bandwidth/ { in_table=1; next }
         in_table && /^[0-9]/ && $2 <= max {
           if (NF >= 7) {
@@ -1196,8 +1208,7 @@ ExecPerfTest() {
 }
 
 ValidateInput() {
-  INPUT_COUNT=$1
-  ALL_ARGS=("$@") 
+  INPUT_COUNT=$1 
 
   if [[ "$*" == *"--show-cases"* ]]; then
     echo "Functional Test Cases:"
@@ -1322,7 +1333,9 @@ PrintfNetWorkInfo() {
   has_ibstat_cmd=false; command -v ibstat &>/dev/null && has_ibstat_cmd=true
   has_ethtool_cmd=false; command -v ethtool &>/dev/null && has_ethtool_cmd=true
 
-  for nic in $(ls /sys/class/net 2>/dev/null | grep -v '^lo$'); do
+  for nic_path in /sys/class/net/*; do
+    nic=$(basename "$nic_path")
+    [[ "$nic" == "lo" ]] && continue
     ip_info="Unknown!"
     if $has_ip_cmd; then
       ip_info=$(ip -4 addr show $nic 2>/dev/null | grep -oP 'inet \K[\d.]+')
@@ -1404,7 +1417,8 @@ PrintfNetWorkInfo() {
 
 PrintEnvInfo() {
   local env_log="$LOG_DIR/env_info.log"
-  local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+  local timestamp
+  timestamp=$(date "+%Y-%m-%d %H:%M:%S")
   
   # 确保日志目录存在
   mkdir -p "$LOG_DIR" || { echo "Error: Failed to create log directory $LOG_DIR"; return 1; }
@@ -1571,7 +1585,7 @@ case $TEST in
     TestTiles
     ;;
     "perf"*|"perf-mlx5"*)
-    TEST_OPTS=($TEST)
+    read -ra TEST_OPTS <<< "$TEST"
     NAME=${TEST_OPTS[1]}
     if [ ${#TEST_OPTS[@]} -ge 3 ]; then
       RANKS=${TEST_OPTS[2]}
@@ -1594,7 +1608,7 @@ case $TEST in
     #######################################################################################
     # Allow passing in a test config as "<test_name> <ranks> <workgroups> <threads> [max_msg_size]"
     # e.g. "putnbi 2 8 1024 65536" or "amo_fadd 2 1 64"
-    TEST_OPTS=($TEST)
+    read -ra TEST_OPTS <<< "$TEST"
     NAME=${TEST_OPTS[0]}
     if [ ${#TEST_OPTS[@]} -eq 4 ] || [ ${#TEST_OPTS[@]} -eq 5 ]; then
       RANKS=${TEST_OPTS[1]}
