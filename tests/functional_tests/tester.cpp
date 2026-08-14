@@ -90,6 +90,14 @@
 #include "host_team_sync_barrier_tester.hpp"
 #include "broadcast_wave_tester.hpp"
 #include "alltoall_wave_tester.hpp"
+#if defined(USE_GDA)
+#include "qp_ping_pong_tester.hpp"
+#include "qp_put_nbi_tester.hpp"
+#endif
+#if defined(USE_SDMA)
+#include "sdma_ping_pong_tester.hpp"
+#include "sdma_put_nbi_tester.hpp"
+#endif
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -170,7 +178,16 @@ Tester::Tester(TesterArguments args) : args(args) {
       case WGPutNBITestType:
       case WGPutSignalTestType:
       case WGPutSignalNBITestType:
+      case QpPutNbiTestType:
+      case SdmaPutNbiTestType:
         max_msg_size = args.max_volume_size / args.num_wgs;
+        break;
+      case PingPongTestType:
+      case QpPingPongTestType:
+      case SdmaPingPongTestType:
+        if (args.op_type == 2) {
+          max_msg_size = args.max_volume_size / args.num_wgs;
+        }
         break;
       case TeamBroadcastTestType:
       case TeamBroadcastmemOnStreamTestType:
@@ -695,7 +712,8 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
         testers.push_back(new AMOStandardTester<int>(args));
       break;
     case PingPongTestType:
-      test_name = "PingPong";
+      test_name = (args.num_wgs > 1) ? "PingPong (W>1: bidir BW)"
+                                     : "PingPong";
       testers.push_back(new PingPongTester(args));
       break;
     case PingAllTestType:
@@ -1007,6 +1025,28 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Tile Allgather Workgroup-Collective";
       testers.push_back(new TileAllgatherTester(args));
       break;
+#if defined(USE_GDA)
+    case QpPingPongTestType:
+      test_name = (args.num_wgs > 1) ? "QP-Direct PingPong (W>1: bidir BW)"
+                                     : "QP-Direct PingPong";
+      testers.push_back(new QpPingPongTester(args));
+      break;
+    case QpPutNbiTestType:
+      test_name = "QP-Direct Put NBI";
+      testers.push_back(new QpPutNbiTester(args));
+      break;
+#endif
+#if defined(USE_SDMA)
+    case SdmaPingPongTestType:
+      test_name = (args.num_wgs > 1) ? "SDMA-Direct PingPong (W>1: bidir BW)"
+                                     : "SDMA-Direct PingPong";
+      testers.push_back(new SdmaPingPongTester(args));
+      break;
+    case SdmaPutNbiTestType:
+      test_name = "SDMA-Direct Put NBI";
+      testers.push_back(new SdmaPutNbiTester(args));
+      break;
+#endif
     default:
       test_name = "Empty";
       break;
@@ -1181,6 +1221,8 @@ bool Tester::peLaunchesKernel() {
     case TileAllgatherWGTestType:
     case BroadcastWaveTestType:
     case AllToAllWaveTestType:
+    case QpPingPongTestType:
+    case SdmaPingPongTestType:
       is_launcher = true;
       break;
     case HostPutmemTestType:

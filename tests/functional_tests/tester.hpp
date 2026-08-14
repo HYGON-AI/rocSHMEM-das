@@ -197,6 +197,10 @@
   X(FcollectWave,              152)  \
   X(ReduceWave,                153)  \
   X(TeamReduceScatterWave,     154)  \
+  X(QpPingPong,                155)  \
+  X(QpPutNbi,                  156)  \
+  X(SdmaPingPong,              157)  \
+  X(SdmaPutNbi,                158)  \
   X(DefaultCtx_WAVEPutNBI_DP,  500)  \
   X(DefaultCtx_AMO_Add_DP,     501)  \
   X(WAVEPutNBI_DP,             502)  \
@@ -205,7 +209,6 @@
   X(TeamReduceScatterOnStream, 505)  \
   X(TeamFCollectOnStream,      506)
 
-  
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {
   ROCSHMEM_FOREACH_TEST_TYPE(_ROCSHMEM_ENUM_ENTRY)
