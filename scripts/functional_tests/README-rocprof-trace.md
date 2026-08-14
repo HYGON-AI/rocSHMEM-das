@@ -117,13 +117,7 @@ prof/
 ## 4. 步骤2：使用仓库内置脚本转换Trace
 > 转换脚本已上传至代码仓库，直接使用，无需复制创建。
 
-### 4.1 添加执行权限（首次使用执行一次）
-> 以下命令默认在仓库根目录（`rocshmem/`）下执行；若已 `cd scripts/functional_tests/`，去掉前缀直接用 `./rocprof_trace_convert.sh`。
-```bash
-chmod +x ./scripts/functional_tests/rocprof_trace_convert.sh
-```
-
-### 4.2 运行转换脚本
+### 4.1 运行转换脚本
 传入采样生成的trace根目录（本例为`./prof`）
 ```bash
 bash ./scripts/functional_tests/rocprof_trace_convert.sh ./prof
