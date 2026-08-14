@@ -6,4 +6,4 @@ set -e
 
 script_path=$(dirname "$(realpath $0)")
 
-source $script_path/gda -DGDA_SHCA=ON $*
+source "$script_path/gda" -DGDA_SHCA=ON "$@"
