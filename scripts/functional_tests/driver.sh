@@ -170,6 +170,9 @@ declare -A TEST_NUMBERS=(
   ["fcollect_wave"]="152"
   ["reduce_wave"]="153"
   ["teamreducescatterwave"]="154"
+  ["tile_reduce"]="155"
+  ["tile_reduce_wave"]="156"
+  ["tile_reduce_wg"]="157"
 
   ["defaultctx_waveputnbi_dp"]="500"
   ["defaultctx_amo_add_dp"]="501"
@@ -1060,6 +1063,12 @@ TestTiles() {
   ExecTest  "tile_allgather_wave"       4       1            $WAVE_SIZE
   ExecTest  "tile_allgather_wg"         2       4            $WAVE_SIZE
   ExecTest  "tile_allgather_wg"         4       4            $WAVE_SIZE
+  ExecTest  "tile_reduce"               2       1            1
+  ExecTest  "tile_reduce"               4       1            1
+  ExecTest  "tile_reduce_wave"          2       1            $WAVE_SIZE
+  ExecTest  "tile_reduce_wave"          4       1            $WAVE_SIZE
+  ExecTest  "tile_reduce_wg"            2       4            $WAVE_SIZE
+  ExecTest  "tile_reduce_wg"            4       4            $WAVE_SIZE
 }
 
 TestHeatMapRMA() {
