@@ -12,6 +12,189 @@
 # CTest SKIP return code
 SKIP_CODE=125
 
+prepare_mpi_launch_command() {
+  local -n cmd=$1
+  local -n num_ranks=$2
+
+  # Parse original command to extract key info
+  LAUNCHER="${cmd[0]}"
+
+  # Find --host/-H in original command to detect multi-node config
+  host_list=""
+  node_count=0
+  for ((i=0; i<${#cmd[@]}; i++)); do
+    if [[ "${cmd[$i]}" == "-H" ]] || [[ "${cmd[$i]}" == "--host" ]]; then
+      if [[ $((i+1)) -lt ${#cmd[@]} ]]; then
+        host_list="${cmd[$((i+1))]}"
+        IFS=',' read -ra hosts <<< "$host_list"
+        node_count=${#hosts[@]}
+      fi
+      break
+    elif [[ "${cmd[$i]}" == "--hostfile" ]]; then
+      if [[ $((i+1)) -lt ${#cmd[@]} ]]; then
+        hostfile="${cmd[$((i+1))]}"
+        if [[ -f "$hostfile" ]]; then
+          node_count=$(grep -v '^#' "$hostfile" | grep -v '^$' | wc -l)
+          host_list="from_file:$hostfile"
+        fi
+      fi
+      break
+    fi
+  done
+
+  # If no custom MPI params and no multi-node host, skip reconstruction
+  if [[ -z "${ROCSHMEM_TEST_MPI_PARAMS:-}" ]] && [[ $node_count -le 1 ]]; then
+    return
+  fi
+
+  TEST_EXEC=""
+  TEST_ARGS=()
+  FOUND_APP=false
+  UUID_ARG=""
+  SKIP_NEXT_X=false
+
+  # Parse original command to extract key info (drop CMake defaults; keep only UUID + test exec/args)
+  for arg in "${cmd[@]:1}"; do
+    if ! $FOUND_APP; then
+      if [[ "$arg" == "-x" ]]; then
+        SKIP_NEXT_X=true
+        continue
+      elif $SKIP_NEXT_X; then
+        # Preserve ROCSHMEM_TEST_UUID env var (important!)
+        if [[ "$arg" == ROCSHMEM_TEST_UUID=* ]]; then
+          UUID_ARG="-x $arg"
+        fi
+        SKIP_NEXT_X=false
+      elif [[ "$arg" == *"rocshmem"* ]] || [[ -x "$arg" ]]; then
+        TEST_EXEC="$arg"
+        FOUND_APP=true
+      fi
+    else
+      TEST_ARGS+=("$arg")
+    fi
+  done
+
+  # Parse custom MPI params (if any) for optimization
+  mpi_params=()
+  if [[ -n "${ROCSHMEM_TEST_MPI_PARAMS:-}" ]]; then
+    read -ra mpi_params <<< "$ROCSHMEM_TEST_MPI_PARAMS"
+  fi
+
+  # If ROCSHMEM_TEST_MPI_PARAMS is set, re-scan it for host config (overrides cmd scan)
+  if [[ -n "${ROCSHMEM_TEST_MPI_PARAMS:-}" ]]; then
+    for ((i=0; i<${#mpi_params[@]}; i++)); do
+      param="${mpi_params[$i]}"
+      if [[ "$param" == "-H" ]] || [[ "$param" == "--host" ]]; then
+        if [[ $((i+1)) -lt ${#mpi_params[@]} ]]; then
+          host_list="${mpi_params[$((i+1))]}"
+          IFS=',' read -ra hosts <<< "$host_list"
+          node_count=${#hosts[@]}
+        fi
+        break
+      elif [[ "$param" == "--hostfile" ]]; then
+        if [[ $((i+1)) -lt ${#mpi_params[@]} ]]; then
+          hostfile="${mpi_params[$((i+1))]}"
+          if [[ -f "$hostfile" ]]; then
+            node_count=$(grep -v '^#' "$hostfile" | grep -v '^$' | wc -l)
+            host_list="from_file:$hostfile"
+          fi
+        fi
+        break
+      elif [[ "$param" == "-hosts" ]]; then
+        if [[ $((i+1)) -lt ${#mpi_params[@]} ]]; then
+          host_list="${mpi_params[$((i+1))]}"
+          IFS=',' read -ra hosts <<< "$host_list"
+          node_count=${#hosts[@]}
+        fi
+        break
+      fi
+    done
+  fi
+
+  # Auto-distribute ranks across nodes for multi-node runs
+  if [[ $node_count -gt 1 ]] && [[ $num_ranks -ge $node_count ]]; then
+    ranks_per_node=$((num_ranks / node_count))
+    remainder=$((num_ranks % node_count))
+
+    # Mode A: when using --hostfile
+    if [[ "$host_list" == from_file:* ]]; then
+      hostfile_path="${host_list#from_file:}"
+
+      if [[ -f "$hostfile_path" ]] && [[ -w "$hostfile_path" ]]; then
+        # Backup and modify hostfile to set ranks-per-node
+        cp "$hostfile_path" "${hostfile_path}.bak"
+
+        awk -v ppn="$ranks_per_node" '
+          /^[[:space:]]*#/ || /^[[:space:]]*$/ { print; next }
+          { print $1 " slots=" ppn }
+        ' "$hostfile_path".bak > "$hostfile_path"
+
+        # Auto-restore original hostfile on exit
+        restore_hostfile() { cp "${hostfile_path}.bak" "$hostfile_path" 2>/dev/null; rm -f "${hostfile_path}.bak"; }
+        trap restore_hostfile EXIT
+      else
+        # If hostfile not writable, use -npernode instead
+        if [[ ${#mpi_params[@]} -gt 0 ]]; then
+          mpi_params+=("-npernode" "$ranks_per_node")
+        else
+          cmd+=("-npernode" "$ranks_per_node")
+        fi
+      fi
+    else
+      # Mode B: rebuild host spec string when using -H/--host
+      new_host_spec=""
+      idx=0
+      IFS=',' read -ra host_array <<< "$host_list"
+
+      for host in "${host_array[@]}"; do
+        node_ranks=$ranks_per_node
+        # Spread remainder: first REMAINDER nodes get 1 extra rank
+        if [[ $idx -lt $remainder ]]; then
+          node_ranks=$((node_ranks + 1))
+        fi
+
+        if [[ "$host" == *":"* ]]; then
+          hostname="${host%%:*}"
+          new_host_spec="${new_host_spec}${hostname}:${node_ranks},"
+        else
+          new_host_spec="${new_host_spec}${host}:${node_ranks},"
+        fi
+        idx=$((idx + 1))
+      done
+      new_host_spec="${new_host_spec%,}"
+
+      if [[ ${#mpi_params[@]} -gt 0 ]]; then
+        # Update host spec in mpi_params array
+        for ((i=0; i<${#mpi_params[@]}; i++)); do
+          if [[ "${mpi_params[$i]}" == "-H" ]] || [[ "${mpi_params[$i]}" == "--host" ]]; then
+            if [[ $((i+1)) -lt ${#mpi_params[@]} ]]; then
+              mpi_params[$((i+1))]="$new_host_spec"
+            fi
+            break
+          fi
+        done
+      else
+        # Update host spec directly in cmd array
+        for ((i=0; i<${#cmd[@]}; i++)); do
+          if [[ "${cmd[$i]}" == "-H" ]] || [[ "${cmd[$i]}" == "--host" ]]; then
+            if [[ $((i+1)) -lt ${#cmd[@]} ]]; then
+              cmd[$((i+1))]="$new_host_spec"
+            fi
+            break
+          fi
+        done
+      fi
+    fi
+  fi
+
+  # Rebuild final command
+  if [[ ${#mpi_params[@]} -gt 0 ]]; then
+    # Custom MPI params provided: rebuild from scratch (drop CMake defaults, keep only UUID)
+    cmd=("$LAUNCHER" -n "$num_ranks" "${mpi_params[@]}" $UUID_ARG "$TEST_EXEC" "${TEST_ARGS[@]}")
+  fi
+  # If no custom MPI params but multi-node was detected, cmd is already updated in-place above
+}
+
 # Extract test name (first argument)
 TEST_NAME=$1
 shift
@@ -238,15 +421,19 @@ fi
 # Setup log directory and file (matching driver.sh behavior)
 # Use environment variable LOG_DIR if set, otherwise use current directory
 LOG_DIR=${ROCSHMEM_TEST_LOG_DIR:-${LOG_DIR:-.}}
-mkdir -p "$LOG_DIR"
+mkdir -p "$LOG_DIR/$BACKEND"
 
-LOG_FILE="$LOG_DIR/$TEST_NAME.log"
+LOG_FILE="$LOG_DIR/$BACKEND/$TEST_NAME.log"
 
-# Print command for debugging (matching driver.sh)
-echo "# $@" > "$LOG_FILE"
+BUILD_COMMAND=("$@")
 
-# Execute the actual test command and capture output
-"$@" >> "$LOG_FILE" 2>&1
+if [[ "$LAUNCHER_MODE" == "MPI" ]]; then
+  prepare_mpi_launch_command BUILD_COMMAND NUM_RANKS
+fi
+
+echo "# ${BUILD_COMMAND[*]}" > "$LOG_FILE"
+
+"${BUILD_COMMAND[@]}" >> "$LOG_FILE" 2>&1
 TEST_EXIT_CODE=$?
 
 # If test failed, show the log content (for CTest output)

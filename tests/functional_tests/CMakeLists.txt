@@ -186,19 +186,10 @@ if(BUILD_CTESTS)
         # Register all tests (this will populate both build-time and install-time)
         register_all_functional_tests()
 
-        # Apply YAML-based tier labels (build-time only)
+        # Apply YAML-based tier labels (build-time + install-time)
         set(_test_categories_yaml "${CMAKE_SOURCE_DIR}/tests/test_categories.yaml")
-        include(${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake OPTIONAL)
-        if(COMMAND apply_ctest_category_labels AND EXISTS "${_test_categories_yaml}")
-            # Apply tier labels to build-time tests
-            apply_ctest_category_labels("${_test_categories_yaml}")
-        endif()
-
-        # Apply tier labels to install-time CTest file
         include(${CMAKE_SOURCE_DIR}/tests/ApplyInstallTierLabels.cmake OPTIONAL)
-        if(COMMAND apply_install_tier_labels AND EXISTS "${_test_categories_yaml}")
-            apply_install_tier_labels("${INSTALL_CTEST_OUTPUT}" "${_test_categories_yaml}")
-        endif()
+        apply_tier_labels_build_and_install("${_test_categories_yaml}" "${INSTALL_CTEST_OUTPUT}")
 
         # Install the generated install-time CTest file
         rocm_install(FILES "${INSTALL_CTEST_OUTPUT}"

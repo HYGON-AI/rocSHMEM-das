@@ -1095,6 +1095,12 @@ ExecPerfTest() {
   read -ra wg_options <<< "${ROCSHMEM_TEST_WGS:-16}"
   local -a thread_options
   read -ra thread_options <<< "${ROCSHMEM_TEST_THDS:-128 256}"
+
+  if [[ $test_name == *"on_stream"* ]]; then
+    wg_options=(1)
+    thread_options=(64)
+    max_msg_size=1073741824
+  fi
   
   declare -A best_latency
   declare -A best_bandwidth
