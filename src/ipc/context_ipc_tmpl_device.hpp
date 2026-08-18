@@ -755,6 +755,15 @@ __device__ void IPCContext::internal_chain_broadcast(
 
   // Global barrier ensures all PEs have completed reception
   internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync + 1);
+
+  // The chunk-ready flag is reused by the next broadcast on this team.  Clear
+  // it after the completion barrier so a subsequent invocation cannot mistake
+  // the previous operation's progress for the current operation's progress.
+  if (is_thread_zero_in_block()) {
+    *p_sync = 0;
+    threadfence_system();
+  }
+  __syncthreads();
 }
 
 template <typename T>

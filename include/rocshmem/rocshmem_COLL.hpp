@@ -1052,10 +1052,10 @@ __global__ ATTR_NO_INLINE void rocshmem_broadcastmem_kernel(
     rocshmem_team_t team, void *dest, const void *source, size_t nelems,
     int pe_root);
 
-/** @brief Multi-workgroup broadcast kernel using chunked byte ranges. */
+/** @brief Multi-workgroup broadcast kernel using disjoint byte ranges. */
 __global__ ATTR_NO_INLINE void rocshmem_broadcastmem_multi_wg_kernel(
     rocshmem_team_t *teams, void *dest, const void *source, size_t nelems,
-    size_t chunk_size, size_t chunk_count, int pe_root);
+    int pe_root);
 
 /**
  * @brief perform a collective barrier between all PEs in the system.
