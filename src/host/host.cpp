@@ -462,14 +462,11 @@ __host__ void HostInterface::broadcastmem_on_stream(rocshmem_team_t team,
       [dest, source, pe_root, nelems](rocshmem_team_t *dev_wg_teams,
                                        hipStream_t launch_stream,
                                        size_t num_wgs) {
-        size_t chunk_size = CollectiveLauncher::kChunkSize;
-        size_t chunk_count = (nelems + chunk_size - 1) / chunk_size;
         constexpr int kThreads = CollectiveLauncher::kMaxThreads;
         int blocks = static_cast<int>(num_wgs);
         rocshmem_broadcastmem_multi_wg_kernel
             <<<blocks, kThreads, 0, launch_stream>>>(
-                dev_wg_teams, dest, source, nelems, chunk_size, chunk_count,
-                pe_root);
+                dev_wg_teams, dest, source, nelems, pe_root);
       });
   if (!ok) {
     CollectiveLauncher::enqueue_single_wg<rocshmem_broadcastmem_kernel>(

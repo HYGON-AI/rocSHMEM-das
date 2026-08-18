@@ -884,26 +884,24 @@ __global__ ATTR_NO_INLINE void rocshmem_alltoall_multi_wg_kernel(
  */
 __global__ ATTR_NO_INLINE void rocshmem_broadcastmem_multi_wg_kernel(
     rocshmem_team_t *teams, void *dest, const void *source, size_t nelems,
-    size_t chunk_size, size_t chunk_count, int pe_root) {
+    int pe_root) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
-  size_t stride = static_cast<size_t>(gridDim.x);
+  int num_wgs = static_cast<int>(gridDim.x);
+  size_t base_count = nelems / static_cast<size_t>(num_wgs);
+  size_t remainder = nelems % static_cast<size_t>(num_wgs);
+  size_t elem_count = base_count + (static_cast<size_t>(wg_id) < remainder ? 1 : 0);
+  size_t elem_offset = static_cast<size_t>(wg_id) * base_count +
+                       (static_cast<size_t>(wg_id) < remainder ? wg_id : remainder);
 
   rocshmem_wg_team_create_ctx(teams[wg_id], 0, &ctx);
 
   char *dest_bytes = static_cast<char *>(dest);
   const char *source_bytes = static_cast<const char *>(source);
-
-  for (size_t chunk = static_cast<size_t>(wg_id); chunk < chunk_count;
-       chunk += stride) {
-    size_t chunk_start = chunk * chunk_size;
-    size_t actual_chunk =
-        (chunk_start + chunk_size > nelems) ? nelems - chunk_start : chunk_size;
-    rocshmem_broadcast_wg<char>(ctx, teams[wg_id],
-                                 dest_bytes + chunk_start,
-                                 source_bytes + chunk_start,
-                                 static_cast<int>(actual_chunk), pe_root);
-  }
+  rocshmem_broadcast_wg<char>(ctx, teams[wg_id],
+                              dest_bytes + elem_offset,
+                              source_bytes + elem_offset,
+                              static_cast<int>(elem_count), pe_root);
 
   rocshmem_wg_ctx_destroy(&ctx);
 }
