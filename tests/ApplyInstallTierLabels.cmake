@@ -201,3 +201,29 @@ for cat_name, cat_config in categories.items():
 
     message(STATUS "Applied tier labels to ${_labeled_count}/${_num_tests} tests in ${install_file}")
 endfunction()
+
+# Convenience macro: apply tier labels to both build-time tests and install-time CTest file.
+# Reuses apply_install_tier_labels() for both paths:
+#   - build-time: writes test names to a temp file as commented add_test() lines,
+#     calls apply_install_tier_labels() to append set_tests_properties, then
+#     includes the temp file so labels are applied in-memory.
+#   - install-time: calls apply_install_tier_labels() directly on the install file.
+macro(apply_tier_labels_build_and_install yaml_file install_file)
+    if(COMMAND apply_install_tier_labels AND EXISTS "${yaml_file}")
+        set(_atli_build_tier_file "${CMAKE_CURRENT_BINARY_DIR}/BuildTierLabels.cmake")
+        set(_atli_build_tier_content "")
+        get_directory_property(_atli_all_tests TESTS)
+        foreach(_atli_test ${_atli_all_tests})
+            string(APPEND _atli_build_tier_content "# add_test(${_atli_test} dummy)\n")
+        endforeach()
+        file(WRITE "${_atli_build_tier_file}" "${_atli_build_tier_content}")
+        apply_install_tier_labels("${_atli_build_tier_file}" "${yaml_file}")
+        include("${_atli_build_tier_file}")
+        apply_install_tier_labels("${install_file}" "${yaml_file}")
+        # Clean up internal variables to avoid polluting caller's scope
+        unset(_atli_build_tier_file)
+        unset(_atli_build_tier_content)
+        unset(_atli_all_tests)
+        unset(_atli_test)
+    endif()
+endmacro()
