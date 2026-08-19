@@ -1604,6 +1604,12 @@ template <typename T>
 __device__ void GDAContext::internal_amo_add(void *dst, T value, int pe,
     int qp_index, ActiveWFInfo &wf_info) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_add not implemented for non-64bit types"); }//TODO:support for non-uint64t
+  int local_pe{-1};
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
+    ipcImpl_.ipcAMOAdd(reinterpret_cast<T *>(get_local_ptr(dst, local_pe)), value);
+    return;
+  }
+
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[constmem.my_pe];
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
@@ -1622,6 +1628,11 @@ template <typename T>
 __device__ T GDAContext::internal_amo_fetch_add(void *dst, T value, int pe,
     int qp_index, ActiveWFInfo &wf_info) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fadd not implemented for non-64bit types"); }//TODO:support for non-uint64t
+  int local_pe{-1};
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
+    return ipcImpl_.ipcAMOFetchAdd(reinterpret_cast<T *>(get_local_ptr(dst, local_pe)), value);
+  }
+
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[constmem.my_pe];
   T ret_val = 0;
   bool need_turn {true};
@@ -1642,6 +1653,11 @@ template <typename T>
 __device__ T GDAContext::internal_amo_swap(void *dst, T value, int pe,
     int qp_index, ActiveWFInfo &wf_info) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_set not implemented for non-64bit types"); }//TODO:support for non-uint64t
+  int local_pe{-1};
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
+    return ipcImpl_.ipcAMOSwap(reinterpret_cast<T *>(get_local_ptr(dst, local_pe)), value);
+  }
+
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[constmem.my_pe];
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
