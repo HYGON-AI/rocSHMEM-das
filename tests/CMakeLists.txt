@@ -107,6 +107,13 @@ if(BUILD_CTESTS AND (BUILD_FUNCTIONAL_TESTS OR BUILD_UNIT_TESTS))
                  COMPONENT tests
                  DESTINATION ${CMAKE_INSTALL_BINDIR}/rocshmem
                  RENAME CTestTestfile.cmake)
+
+    # Install the ctest runner script
+    configure_file(${CMAKE_SOURCE_DIR}/scripts/run_ctest.sh
+                   ${CMAKE_CURRENT_BINARY_DIR}/run_ctest.sh COPYONLY)
+    rocm_install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/run_ctest.sh
+                 COMPONENT tests
+                 DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
 endif()
 
 IF (BUILD_PYTHON_TESTS)

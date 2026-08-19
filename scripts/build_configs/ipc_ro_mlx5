@@ -1,0 +1,41 @@
+#!/bin/bash
+# Copyright (c) 2026 Hygon Information Technology Co., Ltd.
+# SPDX-License-Identifier: MIT
+
+
+set -e
+
+src_path=$(dirname "$(realpath $0)")/../../
+
+if [[ "${ASAN}" == true ]]; then
+    export HSA_XNACK=1
+fi
+
+cmake \
+    -DBUILD_CODE_COVERAGE=${CODE_COV:-OFF} \
+    -DCMAKE_BUILD_TYPE=${BUILD_TYPE:-Release} \
+    -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX:-~/rocshmem} \
+    -DCMAKE_VERBOSE_MAKEFILE=OFF \
+    -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+    -DBUILD_FUNCTIONAL_TESTS=ON \
+    -DBUILD_UNIT_TESTS=ON \
+    -DBUILD_EXAMPLES=ON \
+    -DBUILD_PYTHON_TESTS=ON \
+    -DBUILD_CTESTS=ON \
+    -DPROFILE=OFF \
+    -DUSE_GDA=ON \
+    -DGDA_MLX5=ON \
+    -DGDA_BNXT=OFF \
+    -DGDA_IONIC=OFF \
+    -DUSE_RO=ON \
+    -DUSE_IPC=ON \
+    -DUSE_THREADS=OFF \
+    -DUSE_WF_COAL=OFF \
+    -DUSE_HDP_FLUSH=OFF \
+    -DUSE_HDP_FLUSH_HOST_SIDE=OFF \
+    -DMONOLITHIC_PACKAGE=ON \
+    -DASAN=${ASAN:-OFF} \
+    $* $src_path
+cmake --build . --parallel 8
+cmake --install .
+
