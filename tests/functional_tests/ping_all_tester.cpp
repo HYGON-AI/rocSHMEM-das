@@ -1,5 +1,6 @@
 /******************************************************************************
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Hygon Information Technology Co., Ltd.
  *
  * SPDX-License-Identifier: MIT
  *
@@ -70,10 +71,13 @@ __global__ void PingAllTest(int loop, int skip, long long int *start_time,
  *****************************************************************************/
 PingAllTester::PingAllTester(TesterArguments args) : Tester(args) {
   int num_pes {rocshmem_n_pes()};
-  r_buf = (int *)rocshmem_malloc(sizeof(int) * args.num_wgs * num_pes);
+  std::pair<void*, void*> r_malloc = rocshmem_malloc(sizeof(int) * args.num_wgs * num_pes);
+  r_buf_xdp = static_cast<int *>(r_malloc.first);
+  r_buf_hdp = static_cast<int *>(r_malloc.second);
+  r_buf = static_cast<int *>(r_malloc.second);
 }
 
-PingAllTester::~PingAllTester() { rocshmem_free(r_buf); }
+PingAllTester::~PingAllTester() { rocshmem_free(r_buf_xdp, r_buf_hdp); }
 
 void PingAllTester::resetBuffers(size_t size) {
   int num_pes {rocshmem_n_pes()};

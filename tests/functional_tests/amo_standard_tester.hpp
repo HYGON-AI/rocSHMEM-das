@@ -1,5 +1,6 @@
 /******************************************************************************
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Hygon Information Technology Co., Ltd.
  *
  * SPDX-License-Identifier: MIT
  *
@@ -51,6 +52,8 @@ class AMOStandardTester : public Tester {
   int  numElems() const;
   std::pair<T*, int> retChunk(int l, int elem_idx) const;
 
+  T* dest_xdp{nullptr};
+  T* dest_hdp{nullptr};
   T* dest{nullptr};        // symmetric target buffer [loop][elem]
   T* ret_val{nullptr};     // device returns [loop][thread]
 

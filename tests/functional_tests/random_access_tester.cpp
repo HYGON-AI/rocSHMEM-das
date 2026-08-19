@@ -1,5 +1,6 @@
 /******************************************************************************
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Hygon Information Technology Co., Ltd.
  *
  * SPDX-License-Identifier: MIT
  *
@@ -143,8 +144,14 @@ RandomAccessTester::RandomAccessTester(TesterArguments args) : Tester(args) {
     abort();
   }
 
-  s_buf = (int *)rocshmem_malloc(max_size * wg_size * space);
-  r_buf = (int *)rocshmem_malloc(max_size * wg_size * space);
+  std::pair<void*, void*> s_malloc = rocshmem_malloc(max_size * wg_size * space);
+  std::pair<void*, void*> r_malloc = rocshmem_malloc(max_size * wg_size * space);
+  s_buf_xdp = static_cast<int *>(s_malloc.first);
+  s_buf_hdp = static_cast<int *>(s_malloc.second);
+  s_buf = static_cast<int *>(s_malloc.second);
+  r_buf_xdp = static_cast<int *>(r_malloc.first);
+  r_buf_hdp = static_cast<int *>(r_malloc.second);
+  r_buf = static_cast<int *>(r_malloc.first);
   h_buf = (int *)malloc(max_size * wg_size * space);
   h_dev_buf = (int *)malloc(max_size * wg_size * space);
   CHECK_HIP(hipMalloc((void **)&_threads_bins, sizeof(uint32_t) * _num_waves * _num_bins));
@@ -156,8 +163,8 @@ RandomAccessTester::RandomAccessTester(TesterArguments args) : Tester(args) {
 }
 
 RandomAccessTester::~RandomAccessTester() {
-  rocshmem_free(s_buf);
-  rocshmem_free(r_buf);
+  rocshmem_free(s_buf_xdp, s_buf_hdp);
+  rocshmem_free(r_buf_xdp, r_buf_hdp);
   free(h_buf);
   free(h_dev_buf);
   CHECK_HIP(hipFree(_threads_bins));

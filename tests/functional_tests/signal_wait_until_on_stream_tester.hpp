@@ -1,5 +1,6 @@
 /******************************************************************************
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Hygon Information Technology Co., Ltd.
  *
  * SPDX-License-Identifier: MIT
  *
@@ -52,8 +53,12 @@ protected:
   virtual void verifyResults(size_t size) override;
 
  private:
-  uint64_t *sig_addr;
-  uint64_t *source_buf;             // Source buffer in symmetric heap
+  uint64_t *sig_addr_xdp = nullptr;
+  uint64_t *sig_addr_hdp = nullptr;
+  uint64_t *sig_addr = nullptr;
+  uint64_t *source_buf_xdp = nullptr;
+  uint64_t *source_buf_hdp = nullptr;
+  uint64_t *source_buf = nullptr;   // Source buffer in symmetric heap
   int my_pe;
   int n_pes;
   int num_streams = 1;

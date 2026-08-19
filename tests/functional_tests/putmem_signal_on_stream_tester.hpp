@@ -1,5 +1,6 @@
 /******************************************************************************
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Hygon Information Technology Co., Ltd.
  *
  * SPDX-License-Identifier: MIT
  *
@@ -52,9 +53,15 @@ class PutmemSignalOnStreamTester : public Tester {
   virtual void verifyResults(size_t size) override;
 
  private:
-  char *source_buf;
-  char *dest_buf;
-  uint64_t *sig_addr;
+  char *source_buf_xdp = nullptr;
+  char *source_buf_hdp = nullptr;
+  char *source_buf = nullptr;
+  char *dest_buf_xdp = nullptr;
+  char *dest_buf_hdp = nullptr;
+  char *dest_buf = nullptr;
+  uint64_t *sig_addr_xdp = nullptr;
+  uint64_t *sig_addr_hdp = nullptr;
+  uint64_t *sig_addr = nullptr;
   int my_pe;
   int n_pes;
   size_t buf_size;
@@ -69,4 +76,3 @@ class PutmemSignalOnStreamTester : public Tester {
 #include "putmem_signal_on_stream_tester.cpp"
 
 #endif
-

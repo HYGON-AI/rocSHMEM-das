@@ -1,5 +1,6 @@
 /******************************************************************************
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Hygon Information Technology Co., Ltd.
  *
  * SPDX-License-Identifier: MIT
  *
@@ -129,9 +130,18 @@ __global__ void SignalFetchTest(int loop, int skip, long long int *start_time,
  *****************************************************************************/
 SignalingOperationsTester::SignalingOperationsTester(TesterArguments args)
   : Tester(args) {
-  s_buf = (char *)rocshmem_malloc(args.max_msg_size * args.wg_size);
-  r_buf = (char *)rocshmem_malloc(args.max_msg_size * args.wg_size);
-  sig_addr = (uint64_t *)rocshmem_malloc(sizeof(uint64_t));
+  std::pair<void*, void*> s_malloc = rocshmem_malloc(args.max_msg_size * args.wg_size);
+  std::pair<void*, void*> r_malloc = rocshmem_malloc(args.max_msg_size * args.wg_size);
+  std::pair<void*, void*> sig_malloc = rocshmem_malloc(sizeof(uint64_t));
+  s_buf_xdp = static_cast<char *>(s_malloc.first);
+  s_buf_hdp = static_cast<char *>(s_malloc.second);
+  s_buf = static_cast<char *>(s_malloc.second);
+  r_buf_xdp = static_cast<char *>(r_malloc.first);
+  r_buf_hdp = static_cast<char *>(r_malloc.second);
+  r_buf = static_cast<char *>(r_malloc.second);
+  sig_addr_xdp = static_cast<uint64_t *>(sig_malloc.first);
+  sig_addr_hdp = static_cast<uint64_t *>(sig_malloc.second);
+  sig_addr = static_cast<uint64_t *>(sig_malloc.second);
   CHECK_HIP(hipMallocManaged(&fetched_value, sizeof(uint64_t), hipMemAttachHost));
 }
 
@@ -142,9 +152,9 @@ SignalingOperationsTester::SignalingOperationsTester(TesterArguments args,
 }
 
 SignalingOperationsTester::~SignalingOperationsTester() {
-  rocshmem_free(s_buf);
-  rocshmem_free(r_buf);
-  rocshmem_free(sig_addr);
+  rocshmem_free(s_buf_xdp, s_buf_hdp);
+  rocshmem_free(r_buf_xdp, r_buf_hdp);
+  rocshmem_free(sig_addr_xdp, sig_addr_hdp);
   CHECK_HIP(hipFree(fetched_value));
 }
 

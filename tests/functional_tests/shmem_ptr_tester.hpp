@@ -1,5 +1,6 @@
 /******************************************************************************
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Hygon Information Technology Co., Ltd.
  *
  * SPDX-License-Identifier: MIT
  *
@@ -43,6 +44,8 @@ class ShmemPtrTester : public Tester {
 
   virtual void verifyResults(size_t size) override;
 
+  char *dest_xdp = nullptr;
+  char *dest_hdp = nullptr;
   char *dest = nullptr;
   int *_available = nullptr;
 };

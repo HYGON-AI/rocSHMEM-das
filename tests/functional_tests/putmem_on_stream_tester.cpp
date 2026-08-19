@@ -1,5 +1,6 @@
 /******************************************************************************
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Hygon Information Technology Co., Ltd.
  *
  * SPDX-License-Identifier: MIT
  *
@@ -70,13 +71,19 @@ PutmemOnStreamTester::PutmemOnStreamTester(TesterArguments args)
   int total_bytes = num_bytes_stream * num_streams;
   buf_size = total_bytes;
 
-  source_buf = static_cast<char *>(rocshmem_malloc(buf_size));
-  dest_buf = static_cast<char *>(rocshmem_malloc(buf_size));
+  std::pair<void*, void*> src_malloc = rocshmem_malloc(buf_size);
+  std::pair<void*, void*> dest_malloc = rocshmem_malloc(buf_size);
+  source_buf_xdp = static_cast<char *>(src_malloc.first);
+  source_buf_hdp = static_cast<char *>(src_malloc.second);
+  source_buf = static_cast<char *>(src_malloc.second);
+  dest_buf_xdp = static_cast<char *>(dest_malloc.first);
+  dest_buf_hdp = static_cast<char *>(dest_malloc.second);
+  dest_buf = static_cast<char *>(dest_malloc.first);
 
-  if (source_buf == nullptr || dest_buf == nullptr) {
+  if (nullptr == source_buf_xdp || nullptr == dest_buf_xdp) {
     std::cerr << "Error allocating memory from symmetric heap" << std::endl;
-    std::cerr << "source: " << source_buf << ", dest: " << dest_buf
-              << std::endl;
+    std::cerr << "source: " << source_buf_xdp << ", dest: " << dest_buf_xdp
+              << ", size: " << buf_size << std::endl;
     rocshmem_global_exit(1);
   }
 
@@ -103,8 +110,8 @@ PutmemOnStreamTester::~PutmemOnStreamTester() {
       CHECK_HIP(hipStreamDestroy(streams[i]));
     }
   }
-  rocshmem_free(source_buf);
-  rocshmem_free(dest_buf);
+  rocshmem_free(source_buf_xdp, source_buf_hdp);
+  rocshmem_free(dest_buf_xdp, dest_buf_hdp);
 }
 
 void PutmemOnStreamTester::preLaunchKernel() {
@@ -222,4 +229,3 @@ void PutmemOnStreamTester::verifyResults(size_t size) {
     }
   }
 }
-

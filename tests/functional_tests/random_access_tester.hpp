@@ -1,5 +1,6 @@
 /******************************************************************************
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Hygon Information Technology Co., Ltd.
  *
  * SPDX-License-Identifier: MIT
  *
@@ -53,8 +54,12 @@ class RandomAccessTester : public Tester {
 
   virtual void verifyResults(size_t size) override;
 
-  int *r_buf;
-  int *s_buf;
+  int *r_buf_xdp = nullptr;
+  int *r_buf_hdp = nullptr;
+  int *r_buf = nullptr;
+  int *s_buf_xdp = nullptr;
+  int *s_buf_hdp = nullptr;
+  int *s_buf = nullptr;
   int *h_buf;
   int *h_dev_buf;
   uint32_t *_threads_bins;

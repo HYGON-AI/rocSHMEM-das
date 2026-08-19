@@ -1,5 +1,6 @@
 /******************************************************************************
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Hygon Information Technology Co., Ltd.
  *
  * SPDX-License-Identifier: MIT
  *
@@ -113,14 +114,20 @@ TeamReductionTester<T1, T2>::TeamReductionTester(
     TesterArguments args, std::function<void(T1 &, T1 &)> f1,
     std::function<std::pair<bool, std::string>(const T1 &, const T1 &)> f2)
     : Tester(args), init_buf{f1}, verify_buf{f2} {
-  s_buf = (T1 *)rocshmem_malloc(args.max_msg_size * sizeof(T1));
-  r_buf = (T1 *)rocshmem_malloc(args.max_msg_size * sizeof(T1));
+  std::pair<void*, void*> s_malloc = rocshmem_malloc(args.max_msg_size * sizeof(T1));
+  std::pair<void*, void*> r_malloc = rocshmem_malloc(args.max_msg_size * sizeof(T1));
+  s_buf_xdp = static_cast<T1 *>(s_malloc.first);
+  s_buf_hdp = static_cast<T1 *>(s_malloc.second);
+  s_buf = static_cast<T1 *>(s_malloc.second);
+  r_buf_xdp = static_cast<T1 *>(r_malloc.first);
+  r_buf_hdp = static_cast<T1 *>(r_malloc.second);
+  r_buf = static_cast<T1 *>(r_malloc.second);
 }
 
 template <typename T1, ROCSHMEM_OP T2>
 TeamReductionTester<T1, T2>::~TeamReductionTester() {
-  rocshmem_free(s_buf);
-  rocshmem_free(r_buf);
+  rocshmem_free(s_buf_xdp, s_buf_hdp);
+  rocshmem_free(r_buf_xdp, r_buf_hdp);
 }
 
 template <typename T1, ROCSHMEM_OP T2>

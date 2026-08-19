@@ -1,5 +1,6 @@
 /******************************************************************************
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Hygon Information Technology Co., Ltd.
  *
  * SPDX-License-Identifier: MIT
  *
@@ -104,14 +105,20 @@ TeamFcollectTester<T1>::TeamFcollectTester(TesterArguments args)
   int total_elems = (args.max_msg_size / sizeof(T1)) * args.num_wgs ;
   int buff_size = total_elems * sizeof(T1);
 
-  source_buf = (T1 *)rocshmem_malloc(buff_size);
-  dest_buf = (T1 *)rocshmem_malloc(buff_size * n_pes);
+  std::pair<void*, void*> src_malloc = rocshmem_malloc(buff_size);
+  std::pair<void*, void*> dest_malloc = rocshmem_malloc(buff_size * n_pes);
+  source_buf_xdp = static_cast<T1 *>(src_malloc.first);
+  source_buf_hdp = static_cast<T1 *>(src_malloc.second);
+  source_buf = static_cast<T1 *>(src_malloc.second);
+  dest_buf_xdp = static_cast<T1 *>(dest_malloc.first);
+  dest_buf_hdp = static_cast<T1 *>(dest_malloc.second);
+  dest_buf = static_cast<T1 *>(dest_malloc.first);
 
-  if (source_buf == nullptr || dest_buf == nullptr) {
+  if (nullptr == source_buf_xdp || nullptr == dest_buf_xdp) {
     std::cout << "Error allocating memory from symmetric heap" << std::endl;
-    std::cout << "source: " << source_buf
-              << ", dest: " << dest_buf
-              << std::endl;
+    std::cout << "source: " << source_buf_xdp
+              << ", dest: " << dest_buf_xdp
+              << ", size: " << buff_size << std::endl;
     rocshmem_global_exit(1);
   }
 
@@ -144,8 +151,8 @@ TeamFcollectTester<T1>::TeamFcollectTester(TesterArguments args)
 
 template <typename T1>
 TeamFcollectTester<T1>::~TeamFcollectTester() {
-  rocshmem_free(source_buf);
-  rocshmem_free(dest_buf);
+  rocshmem_free(source_buf_xdp, source_buf_hdp);
+  rocshmem_free(dest_buf_xdp, dest_buf_hdp);
   CHECK_HIP(hipFree(team_fcollect_world_dup));
 }
 

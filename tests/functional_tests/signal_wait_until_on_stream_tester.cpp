@@ -1,5 +1,6 @@
 /******************************************************************************
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Hygon Information Technology Co., Ltd.
  *
  * SPDX-License-Identifier: MIT
  *
@@ -49,14 +50,18 @@ SignalWaitUntilOnStreamTester::SignalWaitUntilOnStreamTester(
   pe_target = (my_pe + 1) % n_pes;
 
   // Allocate signal addresses on symmetric heap
-  sig_addr =
-      static_cast<uint64_t *>(rocshmem_malloc(num_streams * sizeof(uint64_t)));
-  source_buf =
-      static_cast<uint64_t *>(rocshmem_malloc(num_streams * sizeof(uint64_t)));
+  std::pair<void*, void*> sig_malloc = rocshmem_malloc(num_streams * sizeof(uint64_t));
+  std::pair<void*, void*> src_malloc = rocshmem_malloc(num_streams * sizeof(uint64_t));
+  sig_addr_xdp = static_cast<uint64_t *>(sig_malloc.first);
+  sig_addr_hdp = static_cast<uint64_t *>(sig_malloc.second);
+  sig_addr = static_cast<uint64_t *>(sig_malloc.second);
+  source_buf_xdp = static_cast<uint64_t *>(src_malloc.first);
+  source_buf_hdp = static_cast<uint64_t *>(src_malloc.second);
+  source_buf = static_cast<uint64_t *>(src_malloc.second);
 
-  if (sig_addr == nullptr || source_buf == nullptr) {
+  if (nullptr == sig_addr_xdp || nullptr == source_buf_xdp) {
     std::cerr << "Error allocating memory from symmetric heap" << std::endl;
-    std::cerr << "sig_addr: " << sig_addr << ", source_buf: " << source_buf
+    std::cerr << "sig_addr: " << sig_addr_xdp << ", source_buf: " << source_buf_xdp
               << std::endl;
     rocshmem_global_exit(1);
   }
@@ -77,8 +82,8 @@ SignalWaitUntilOnStreamTester::~SignalWaitUntilOnStreamTester() {
     CHECK_HIP(hipEventDestroy(start_events_timed[i]));
     CHECK_HIP(hipStreamDestroy(streams[i]));
   }
-  rocshmem_free(sig_addr);
-  rocshmem_free(source_buf);
+  rocshmem_free(sig_addr_xdp, sig_addr_hdp);
+  rocshmem_free(source_buf_xdp, source_buf_hdp);
 }
 
 void SignalWaitUntilOnStreamTester::preLaunchKernel() {
@@ -201,4 +206,3 @@ void SignalWaitUntilOnStreamTester::verifyResults(size_t size) {
     }
   }
 }
-

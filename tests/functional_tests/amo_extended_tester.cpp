@@ -1,5 +1,6 @@
 /******************************************************************************
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Hygon Information Technology Co., Ltd.
  *
  * SPDX-License-Identifier: MIT
  *
@@ -63,17 +64,20 @@ AMOExtendedTester<T>::AMOExtendedTester(TesterArguments args) : Tester(args) {
   // One return per *thread* per loop
   CHECK_HIP(hipMalloc((void **)&ret_val, args.max_msg_size * n_in * n_loops));
 
-  dest = (T *)rocshmem_malloc(args.max_msg_size * n_out * n_loops);
-  if (dest == nullptr) {
+  std::pair<void*, void*> dest_malloc = rocshmem_malloc(args.max_msg_size * n_out * n_loops);
+  dest_xdp = static_cast<T *>(dest_malloc.first);
+  dest_hdp = static_cast<T *>(dest_malloc.second);
+  dest = static_cast<T *>(dest_malloc.first);
+  if (dest_xdp == nullptr) {
     std::cerr << "Error allocating memory from symmetric heap" << std::endl;
-    std::cerr << "dest: " << (void*)dest << std::endl;
+    std::cerr << "dest: " << (void*)dest_xdp << std::endl;
   }
 }
 
 template <typename T>
 AMOExtendedTester<T>::~AMOExtendedTester() {
   CHECK_HIP(hipFree(ret_val));
-  rocshmem_free(dest);
+  rocshmem_free(dest_xdp, dest_hdp);
 }
 
 template <typename T>

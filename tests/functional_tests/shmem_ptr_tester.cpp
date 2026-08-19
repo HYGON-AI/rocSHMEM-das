@@ -1,5 +1,6 @@
 /******************************************************************************
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Hygon Information Technology Co., Ltd.
  *
  * SPDX-License-Identifier: MIT
  *
@@ -120,11 +121,14 @@ __global__ void ShmemPtrTest(int loop, int skip, long long int *start_time,
 ShmemPtrTester::ShmemPtrTester(TesterArguments args) : Tester(args) {
   size_t buff_size = args.wg_size * args.num_wgs + sizeof(int);
   CHECK_HIP(hipMalloc((void **)&_available, sizeof(int)));
-  dest = (char *)rocshmem_malloc(buff_size);
+  std::pair<void*, void*> dest_malloc = rocshmem_malloc(buff_size);
+  dest_xdp = static_cast<char *>(dest_malloc.first);
+  dest_hdp = static_cast<char *>(dest_malloc.second);
+  dest = static_cast<char *>(dest_malloc.first);
 
-  if (dest == nullptr) {
+  if (nullptr == dest_xdp) {
     std::cerr << "Error allocating memory from symmetric heap" << std::endl;
-    std::cerr << "dest: " << dest << std::endl;
+    std::cerr << "dest: " << dest_xdp << ", size: " << buff_size << std::endl;
 
     rocshmem_global_exit(1);
   }
@@ -132,7 +136,7 @@ ShmemPtrTester::ShmemPtrTester(TesterArguments args) : Tester(args) {
 
 ShmemPtrTester::~ShmemPtrTester() {
   CHECK_HIP(hipFree(_available));
-  rocshmem_free(dest);
+  rocshmem_free(dest_xdp, dest_hdp);
 }
 
 void ShmemPtrTester::resetBuffers(size_t size) {

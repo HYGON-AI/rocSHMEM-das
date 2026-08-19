@@ -1,5 +1,6 @@
 /******************************************************************************
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Hygon Information Technology Co., Ltd.
  *
  * SPDX-License-Identifier: MIT
  *
@@ -52,8 +53,12 @@ class TeamBroadcastmemOnStreamTester : public Tester {
   virtual void verifyResults(size_t size) override;
 
  private:
-  char *source_buf;
-  char *dest_buf;
+  char *source_buf_xdp = nullptr;
+  char *source_buf_hdp = nullptr;
+  char *source_buf = nullptr;
+  char *dest_buf_xdp = nullptr;
+  char *dest_buf_hdp = nullptr;
+  char *dest_buf = nullptr;
   int my_pe;
   int n_pes;
   size_t buf_size;
@@ -68,4 +73,3 @@ class TeamBroadcastmemOnStreamTester : public Tester {
 #include "team_broadcastmem_on_stream_tester.cpp"
 
 #endif
-

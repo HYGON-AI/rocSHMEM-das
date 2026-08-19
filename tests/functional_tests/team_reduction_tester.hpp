@@ -1,5 +1,6 @@
 /******************************************************************************
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Hygon Information Technology Co., Ltd.
  *
  * SPDX-License-Identifier: MIT
  *
@@ -53,8 +54,12 @@ class TeamReductionTester : public Tester {
 
   virtual void verifyResults(size_t size) override;
 
-  T1 *s_buf;
-  T1 *r_buf;
+  T1 *s_buf_xdp = nullptr;
+  T1 *s_buf_hdp = nullptr;
+  T1 *s_buf = nullptr;
+  T1 *r_buf_xdp = nullptr;
+  T1 *r_buf_hdp = nullptr;
+  T1 *r_buf = nullptr;
   T1 *pWrk;
   long *pSync;
 

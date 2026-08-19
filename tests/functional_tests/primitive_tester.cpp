@@ -1,5 +1,6 @@
 /******************************************************************************
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Hygon Information Technology Co., Ltd.
  *
  * SPDX-License-Identifier: MIT
  *
@@ -129,17 +130,24 @@ __global__ void PrimitiveTest(int loop, int skip, long long int *start_time,
  *****************************************************************************/
 PrimitiveTester::PrimitiveTester(TesterArguments args) : Tester(args) {
   size_t buff_size = args.max_msg_size * args.wg_size * args.num_wgs;
-  source = (char *)rocshmem_malloc(buff_size);
-  dest = (char *)rocshmem_malloc(buff_size);
+  std::pair<void*, void*> src_malloc = rocshmem_malloc(buff_size);
+  std::pair<void*, void*> dest_malloc = rocshmem_malloc(buff_size);
+  source_xdp = (char *)src_malloc.first;
+  source_hdp = (char *)src_malloc.second;
+  source = (char *)src_malloc.second;
+  dest_xdp = (char *)dest_malloc.first;
+  dest_hdp = (char *)dest_malloc.second;
+  dest = (char *)dest_malloc.first;
 
-  if (source == nullptr || dest == nullptr) {
+  if (nullptr == source_xdp || nullptr == dest_xdp) {
     std::cerr << "Error allocating memory from symmetric heap" << std::endl;
-    std::cerr << "source: " << source << ", dest: " << dest << std::endl;
-    if (source) {
-      rocshmem_free(source);
+    std::cerr << "source: " << source_xdp << ", dest: " << dest_xdp << ", size: "
+              << buff_size << std::endl;
+    if (source_xdp) {
+      rocshmem_free(source_xdp, source_hdp);
     }
-    if (dest) {
-      rocshmem_free(dest);
+    if (dest_xdp) {
+      rocshmem_free(dest_xdp, dest_hdp);
     }
     rocshmem_global_exit(1);
   }
@@ -150,8 +158,8 @@ PrimitiveTester::PrimitiveTester(TesterArguments args) : Tester(args) {
 }
 
 PrimitiveTester::~PrimitiveTester() {
-  rocshmem_free(source);
-  rocshmem_free(dest);
+  rocshmem_free(source_xdp, source_hdp);
+  rocshmem_free(dest_xdp, dest_hdp);
 }
 
 void PrimitiveTester::resetBuffers(size_t size) {
