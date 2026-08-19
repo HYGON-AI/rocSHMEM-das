@@ -4,7 +4,7 @@
 
 set -eux
 
-ROCSHMEM_INSTALL_PREFIX=${ROCSHMEM_INSTALL_PREFIX:=$(pwd)/rocshmem_dir}
+ROCSHMEM_INSTALL_PREFIX=${ROCSHMEM_INSTALL_PREFIX:=/opt/rocshmem}
 
 mkdir -p build
 cd build
