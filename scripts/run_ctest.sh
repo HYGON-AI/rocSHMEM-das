@@ -21,7 +21,7 @@ Options:
                  Example: --host host1,host2
 
 Environment Variables:
-  ROCSHMEM_TEST_DIR          ctest directory (Default: /home/rocshmem/rocshmem-install/bin/rocshmem)
+  ROCSHMEM_TEST_DIR          ctest directory (Default: /opt/rocshmem/bin/rocshmem)
   ROCSHMEM_TEST_LOG_DIR      Log directory for both ctest and per-test logs (Default: $(pwd)/test_logs)
 
 Examples:
@@ -66,7 +66,7 @@ if [[ -z "$HOST_SPEC" ]]; then
     usage
 fi
 
-TEST_DIR=${ROCSHMEM_TEST_DIR:-/home/rocshmem/rocshmem-install/bin/rocshmem}
+TEST_DIR=${ROCSHMEM_TEST_DIR:-/opt/rocshmem/bin/rocshmem}
 LOG_DIR=${ROCSHMEM_TEST_LOG_DIR:-$(pwd)/test_logs}
 mkdir -p "$LOG_DIR"
 # Convert to absolute path: ctest --test-dir changes CWD, so test_wrapper.sh

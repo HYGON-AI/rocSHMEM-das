@@ -296,7 +296,7 @@ and looking for the ``Name:`` field under each agent, for example
 Installation prefix
 ^^^^^^^^^^^^^^^^^^^
 
-By default, the build scripts install the library to ``~/rocshmem``. You can customize the installation path by adding
+By default, the build scripts install the library to ``/opt/rocshmem``. You can customize the installation path by adding
 the desired path through the ``INSTALL_PREFIX`` environment variable. For example, to relocate the default configuration:
 
 .. code-block:: bash
