@@ -23,8 +23,8 @@ env:
   PIP_TRUSTED_HOST: ${{ vars.PIP_TRUSTED_HOST }}
   DEVPI_URL: ${{ vars.DEVPI_URL }}
   DTK_PKG: /ArchivedFile/dtk-pkg/dtk26.04/DTK-26.04-rc4-centos8-x86_64.tar.gz
-  CI_HOSTS: ${{ vars.CI_HOSTS || 'nmz36,nmz4' }}
-  CI_TEST_REMOTE_HOST: nmz4
+  CI_HOSTS: ${{ vars.CI_HOSTS || 'github-nmz36,github-nmz4' }}
+  CI_TEST_REMOTE_HOST: github-nmz4
   CI_SSH_PORT: '2222'
   CI_IMAGE: ${{ vars.IMAGE }}
   CI_CONTAINER_NAME: rocshmem-ci-${{ github.repository_id }}
@@ -38,9 +38,9 @@ jobs:
       matrix:
         include:
           - host: nmz36
-            ssh_target: nmz4
+            ssh_target: github-nmz4
           - host: nmz4
-            ssh_target: nmz36
+            ssh_target: github-nmz36
     runs-on:
       - self-hosted
       - ${{ matrix.host }}
