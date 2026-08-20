@@ -118,7 +118,6 @@ jobs:
         run: |
           set -euo pipefail
           docker exec -w /workspace "$CI_CONTAINER_NAME" bash -lc '
-            set -euo pipefail
             rm -rf build
             source /opt/dtk/env.sh
             mkdir build
@@ -220,7 +219,6 @@ jobs:
             -e CI_HOSTS="$CI_HOSTS" \
             "$CI_CONTAINER_NAME" \
             bash -lc '
-              set -euo pipefail
               source /opt/dtk/env.sh
               /opt/rocshmem/share/rocshmem/run_ctest.sh "${{ steps.suite.outputs.label }}" --host "$CI_HOSTS"
             '
