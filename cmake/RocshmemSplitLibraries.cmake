@@ -6,10 +6,6 @@ include_guard(GLOBAL)
 if(NOT TARGET rocshmem)
   message(FATAL_ERROR "RocshmemSplitLibraries.cmake requires the rocshmem target")
 endif()
-if(NOT TARGET rocshmem_device_bitcode)
-  message(FATAL_ERROR
-    "RocshmemSplitLibraries.cmake requires rocshmem device bitcode targets")
-endif()
 
 ###############################################################################
 # DEVICE-ONLY STATIC LIBRARY

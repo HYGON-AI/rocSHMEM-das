@@ -16,10 +16,9 @@ expected_count=${3:-}
 toolchain_root=${ROCSHMEM_DEVICE_ARCHIVE_TOOLCHAIN_ROOT:-/opt/dtk/llvm/bin}
 ar_tool=${ROCSHMEM_DEVICE_ARCHIVE_AR:-"${toolchain_root}/llvm-ar"}
 bundler=${ROCSHMEM_DEVICE_ARCHIVE_BUNDLER:-"${toolchain_root}/clang-offload-bundler"}
+host_cxx=${ROCSHMEM_DEVICE_ARCHIVE_HOST_CXX:-"${toolchain_root}/clang++"}
 
-# Use the compiler toolchain's archive and offload tools so the bundle format
-# exactly matches the aicc/DTK version used by the main build.
-for tool in "$ar_tool" "$bundler"; do
+for tool in "$ar_tool" "$bundler" "$host_cxx"; do
   if [[ ! -x "$tool" ]]; then
     echo "required tool is not executable: $tool" >&2
     exit 1
@@ -36,8 +35,19 @@ mkdir -p "$output_dir"
 work_dir="${output_dir}/.extract"
 mkdir -p "$work_dir"
 
+# Build one minimal empty host stub object.  clang-offload-bundler --type=o
+# emits a valid ELF only when the target list contains at least one host
+# target; otherwise it produces a bare bundle container that the host linker
+# rejects with "not an ELF file".  The stub has no symbols so it cannot
+# collide with the host-only companion library.
+host_stub_src="${work_dir}/host_stub.cpp"
+host_stub_obj="${work_dir}/host_stub.o"
+: >"$host_stub_src"
+"$host_cxx" -fPIC -fvisibility=hidden -c "$host_stub_src" -o "$host_stub_obj"
+
 archive_index=0
 device_index=0
+host_triple=""
 # Process members independently to preserve the full library's HIP TU topology.
 while IFS= read -r member; do
   [[ -n "$member" ]] || continue
@@ -53,8 +63,17 @@ while IFS= read -r member; do
   extracted="${work_dir}/${archive_index}_${member}"
   "$ar_tool" p "$full_archive" "$member" >"$extracted"
 
-  # Select device targets only; deliberately omit the host target when the
-  # member is bundled again below.
+  # Discover the host triple once from the first real bundled member.
+  if [[ -z "$host_triple" ]]; then
+    host_triple=$("$bundler" --list --type=o --input="$extracted" 2>/dev/null \
+      | awk '/^host-/ { print; exit }')
+    if [[ -z "$host_triple" ]]; then
+      echo "archive member has no host bundle: $member" >&2
+      exit 1
+    fi
+  fi
+
+  # Select device targets only; host code is replaced by the empty stub below.
   mapfile -t targets < <("$bundler" --list --type=o --input="$extracted" 2>/dev/null \
     | awk '/^(hip|hipv4)-/ { print }')
   if [[ ${#targets[@]} -eq 0 ]]; then
@@ -73,10 +92,13 @@ while IFS= read -r member; do
   "$bundler" --unbundle --type=o --targets="$target_csv" \
     --input="$extracted" --outputs="$output_csv"
 
-  # Recreate one device-only fat object per original archive member.
+  # Rebundle with an empty host stub alongside the device images so the result
+  # is a well-formed ELF that the host archiver and linker can ingest.
+  rebundle_targets="${host_triple},${target_csv}"
+  rebundle_inputs="${host_stub_obj},${output_csv}"
   rebundled="${output_dir}/${device_index}_${member}"
-  "$bundler" --type=o --targets="$target_csv" \
-    --inputs="$output_csv" --output="$rebundled"
+  "$bundler" --type=o --targets="$rebundle_targets" \
+    --inputs="$rebundle_inputs" --output="$rebundled"
 done < <("$ar_tool" t "$full_archive")
 
 # Catch source-list/archive drift before CMake attempts to create device.a.
