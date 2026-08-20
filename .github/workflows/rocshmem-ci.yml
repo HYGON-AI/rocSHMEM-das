@@ -1,0 +1,273 @@
+name: rocSHMEM CI
+
+on:
+  pull_request:
+    branches:
+      - develop
+  schedule:
+    # Run the full test suite at 02:17 UTC on the first day of each month.
+    - cron: '17 2 1 * *'
+
+# The two hosts are an exclusive test cluster. Serializing all runs also avoids
+# collisions on the host-networked SSH port.
+concurrency:
+  group: rocshmem-ci-cluster
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  checks: write
+
+env:
+  PIP_INDEX_URL: ${{ vars.PIP_INDEX_URL }}
+  PIP_TRUSTED_HOST: ${{ vars.PIP_TRUSTED_HOST }}
+  DEVPI_URL: ${{ vars.DEVPI_URL }}
+  DTK_PKG: /ArchivedFile/dtk-pkg/dtk26.04/DTK-26.04-rc4-centos8-x86_64.tar.gz
+  CI_HOSTS: ${{ vars.CI_HOSTS || 'nmz36,nmz4' }}
+  CI_TEST_REMOTE_HOST: nmz4
+  CI_SSH_PORT: '2222'
+  CI_IMAGE: ${{ vars.IMAGE }}
+  CI_CONTAINER_NAME: rocshmem-ci-${{ github.repository_id }}
+
+jobs:
+  compile:
+    name: Compile on ${{ matrix.host }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: nmz36
+            ssh_target: nmz4
+          - host: nmz4
+            ssh_target: nmz36
+    runs-on:
+      - self-hosted
+      - ${{ matrix.host }}
+    env:
+      CI_SSH_TARGET: ${{ matrix.ssh_target }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Create persistent build container
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CI_IMAGE" || {
+            echo "ERROR: repository variable IMAGE is not configured" >&2
+            exit 1
+          }
+
+          # Global workflow concurrency makes this a stale container from this repo.
+          docker rm -f "$CI_CONTAINER_NAME" >/dev/null 2>&1 || true
+          mkdir -p "$GITHUB_WORKSPACE/reports"
+          docker run -d \
+            --name "$CI_CONTAINER_NAME" \
+            --shm-size=16g \
+            --network=host \
+            --ipc=host \
+            --device=/dev/kfd \
+            --device=/dev/dri/ \
+            --group-add=video \
+            --cap-add=SYS_PTRACE \
+            --security-opt seccomp=unconfined \
+            --privileged \
+            -v /public/opendas/ArchivedFile:/ArchivedFile:ro \
+            -v /public5:/public5:ro \
+            -v /opt/hyhal/:/opt/hyhal/:ro \
+            -v "$GITHUB_WORKSPACE:/workspace" \
+            -v "$GITHUB_WORKSPACE/reports:/reports" \
+            "$CI_IMAGE" \
+            bash -lc '/usr/sbin/sshd && exec sleep infinity'
+
+      - name: Install build and SSH dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker exec \
+            -e DTK_PKG="$DTK_PKG" \
+            -e PIP_INDEX_URL="$PIP_INDEX_URL" \
+            -e PIP_TRUSTED_HOST="$PIP_TRUSTED_HOST" \
+            "$CI_CONTAINER_NAME" bash -lc '
+              set -euo pipefail
+              cp -f "$DTK_PKG" /opt/
+              cd /opt
+              tar -xzf "$(basename "$DTK_PKG")"
+              rm -rf /opt/dtk
+              mv dtk-* /opt/dtk
+              pip install pyyaml
+
+              if ! command -v sshpass >/dev/null 2>&1; then
+                if command -v yum >/dev/null 2>&1; then
+                  yum install -y epel-release 2>/dev/null || true
+                  yum install -y sshpass
+                elif command -v apt-get >/dev/null 2>&1; then
+                  apt-get update -y
+                  apt-get install -y sshpass
+                fi
+              fi
+              command -v sshpass >/dev/null 2>&1 || {
+                echo "ERROR: sshpass is required for passwordless SSH setup" >&2
+                exit 1
+              }
+            '
+
+      - name: Compile and install rocSHMEM
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker exec -w /workspace "$CI_CONTAINER_NAME" bash -lc '
+            set -euo pipefail
+            rm -rf build
+            source /opt/dtk/env.sh
+            mkdir build
+            cd build
+            ../scripts/build_configs/ipc_ro_mlx5
+          '
+
+      - name: Configure passwordless SSH between containers
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo ">>> Set the root password and restart sshd"
+          docker exec \
+            -e CI_SSH_PORT="$CI_SSH_PORT" \
+            "$CI_CONTAINER_NAME" bash -lc '
+              set -euo pipefail
+              echo "root:123456" | chpasswd
+
+              set_sshd_option() {
+                local key=$1 value=$2 config=/etc/ssh/sshd_config
+                if grep -Eq "^[#[:space:]]*${key}[[:space:]]+" "$config"; then
+                  sed -ri "s|^[#[:space:]]*${key}[[:space:]]+.*|${key} ${value}|" "$config"
+                else
+                  printf "%s %s\n" "$key" "$value" >> "$config"
+                fi
+              }
+
+              set_sshd_option Port "$CI_SSH_PORT"
+              set_sshd_option PermitRootLogin yes
+              set_sshd_option PasswordAuthentication yes
+              mkdir -p /run/sshd
+              /usr/sbin/sshd -t
+              pkill -x sshd 2>/dev/null || true
+              /usr/sbin/sshd
+            '
+
+          echo ">>> Wait for ${CI_SSH_TARGET}:${CI_SSH_PORT}"
+          ready=false
+          for attempt in $(seq 1 180); do
+            if docker exec "$CI_CONTAINER_NAME" \
+              bash -c "</dev/tcp/${CI_SSH_TARGET}/${CI_SSH_PORT}" 2>/dev/null; then
+              ready=true
+              break
+            fi
+            echo "Peer ${CI_SSH_TARGET} is not ready (attempt ${attempt}/180); retrying in 10s"
+            sleep 10
+          done
+          if [ "$ready" != true ]; then
+            echo "ERROR: ${CI_SSH_TARGET}:${CI_SSH_PORT} did not become ready" >&2
+            exit 1
+          fi
+
+          echo ">>> Run configssh.sh ${CI_SSH_TARGET} ${CI_SSH_PORT}"
+          docker exec \
+            -w /workspace \
+            "$CI_CONTAINER_NAME" \
+            bash .github/scripts/configssh.sh "$CI_SSH_TARGET" "$CI_SSH_PORT"
+
+      - name: Record container status
+        shell: bash
+        run: |
+          docker ps --filter "name=^/${CI_CONTAINER_NAME}$"
+          docker exec "$CI_CONTAINER_NAME" test -x /opt/rocshmem/share/rocshmem/run_ctest.sh
+
+  test:
+    name: Test (${{ github.event_name == 'schedule' && 'full' || 'standard' }})
+    needs: compile
+    runs-on:
+      - self-hosted
+      - nmz36
+    timeout-minutes: 180
+    steps:
+      - name: Select test suite
+        id: suite
+        shell: bash
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            echo "label=full" >> "$GITHUB_OUTPUT"
+          else
+            echo "label=standard" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify both compiled containers
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker exec "$CI_CONTAINER_NAME" test -x /opt/rocshmem/share/rocshmem/run_ctest.sh
+          docker exec "$CI_CONTAINER_NAME" \
+            ssh "$CI_TEST_REMOTE_HOST" test -x /opt/rocshmem/share/rocshmem/run_ctest.sh
+
+      - name: Run ${{ steps.suite.outputs.label }} tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo ">>> Run ${{ steps.suite.outputs.label }} tests on ${CI_HOSTS}"
+          docker exec \
+            -e ROCSHMEM_TEST_DIR=/opt/rocshmem/bin/rocshmem \
+            -e ROCSHMEM_TEST_LOG_DIR=/reports \
+            -e CI_HOSTS="$CI_HOSTS" \
+            "$CI_CONTAINER_NAME" \
+            bash -lc '
+              set -euo pipefail
+              source /opt/dtk/env.sh
+              /opt/rocshmem/share/rocshmem/run_ctest.sh "${{ steps.suite.outputs.label }}" --host "$CI_HOSTS"
+            '
+
+      - name: Publish test summary
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p reports
+          if docker ps --format '{{.Names}}' | grep -Fxq "$CI_CONTAINER_NAME"; then
+            docker exec -w /workspace "$CI_CONTAINER_NAME" bash -lc '
+              python_bin=$(command -v python3 || command -v python)
+              "$python_bin" .github/scripts/summarize_ctest.py \
+                /reports /reports/test-summary.md \
+                --suite "${{ steps.suite.outputs.label }}"
+            '
+          else
+            printf '# rocSHMEM Test Results\n\nThe test container is not running; no results could be collected.\n' \
+              > reports/test-summary.md
+          fi
+          cat reports/test-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rocshmem-${{ steps.suite.outputs.label }}-logs
+          path: reports/
+          if-no-files-found: warn
+
+  cleanup:
+    name: Clean up on ${{ matrix.host }}
+    if: always()
+    needs:
+      - compile
+      - test
+    strategy:
+      fail-fast: false
+      matrix:
+        host:
+          - nmz36
+          - nmz4
+    runs-on:
+      - self-hosted
+      - ${{ matrix.host }}
+    steps:
+      - name: Remove CI container
+        shell: bash
+        run: docker rm -f "$CI_CONTAINER_NAME" >/dev/null 2>&1 || true
