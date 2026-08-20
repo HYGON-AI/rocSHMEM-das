@@ -115,14 +115,29 @@ configure_file(../../scripts/functional_tests/driver.sh rocshmem_functional_driv
 rocm_install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/rocshmem_functional_driver.sh COMPONENT tests DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
 install(TARGETS rocshmem_functional_tests COMPONENT tests RUNTIME DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
 
-target_link_libraries(
-  ${PROJECT_NAME}
-  PRIVATE
-    roc::rocshmem
-    $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>
-    $<TARGET_NAME_IF_EXISTS:PMIx::pmix>
-    hiprtc
-)
+if(TARGET roc::rocshmem_host AND TARGET roc::rocshmem_device)
+  target_link_libraries(
+    ${PROJECT_NAME}
+    PRIVATE
+      roc::rocshmem_host
+      -Wl,--whole-archive
+      roc::rocshmem_device
+      -Wl,--no-whole-archive
+      $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>
+      $<TARGET_NAME_IF_EXISTS:PMIx::pmix>
+      hiprtc
+  )
+  target_link_options(${PROJECT_NAME} PRIVATE -Wl,--export-dynamic)
+else()
+  target_link_libraries(
+    ${PROJECT_NAME}
+    PRIVATE
+      roc::rocshmem
+      $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>
+      $<TARGET_NAME_IF_EXISTS:PMIx::pmix>
+      hiprtc
+  )
+endif()
 
 if(${ROCM_MAJOR_VERSION} LESS 7)
   # ROCm 6.x requires us to explicitly enable warp sync builtins
