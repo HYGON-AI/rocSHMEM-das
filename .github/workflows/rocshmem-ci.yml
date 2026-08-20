@@ -48,7 +48,11 @@ jobs:
       CI_SSH_TARGET: ${{ matrix.ssh_target }}
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+        with:
+          # The persistent container may leave root-owned build files in the
+          # runner workspace. Cleanup is handled explicitly in the cleanup job.
+          clean: false
 
       - name: Create persistent build container
         shell: bash
@@ -266,6 +270,21 @@ jobs:
       - self-hosted
       - ${{ matrix.host }}
     steps:
+      - name: Restore workspace ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          host_uid=$(id -u)
+          host_gid=$(id -g)
+          if docker ps -a --format '{{.Names}}' | grep -Fxq "$CI_CONTAINER_NAME"; then
+            docker exec \
+              -e HOST_UID="$host_uid" \
+              -e HOST_GID="$host_gid" \
+              "$CI_CONTAINER_NAME" bash -lc '
+                chown -R "$HOST_UID:$HOST_GID" /workspace /reports 2>/dev/null || true
+              '
+          fi
+
       - name: Remove CI container
         shell: bash
         run: docker rm -f "$CI_CONTAINER_NAME" >/dev/null 2>&1 || true
