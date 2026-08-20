@@ -47,6 +47,25 @@ jobs:
     env:
       CI_SSH_TARGET: ${{ matrix.ssh_target }}
     steps:
+      - name: Fix stale workspace ownership before checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CI_IMAGE" || {
+            echo "ERROR: repository variable IMAGE is not configured" >&2
+            exit 1
+          }
+          host_uid=$(id -u)
+          host_gid=$(id -g)
+          docker run --rm \
+            --user 0:0 \
+            -e HOST_UID="$host_uid" \
+            -e HOST_GID="$host_gid" \
+            -v "$GITHUB_WORKSPACE:/workspace" \
+            --entrypoint /bin/bash \
+            "$CI_IMAGE" \
+            -lc 'chown -R "$HOST_UID:$HOST_GID" /workspace'
+
       - name: Check out source
         uses: actions/checkout@v5
         with:
