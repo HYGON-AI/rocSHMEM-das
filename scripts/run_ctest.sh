@@ -74,6 +74,15 @@ mkdir -p "$LOG_DIR"
 LOG_DIR=$(cd "$LOG_DIR" && pwd)
 export ROCSHMEM_TEST_LOG_DIR="$LOG_DIR"
 
+# PRTE launches remote ranks through its own ssh command and may override
+# host-specific ~/.ssh/config settings.  The CI containers recreate their
+# sshd host keys on every run, so strict known-host checking can reject a
+# perfectly valid passwordless setup (and abort the remote daemon launch).
+# Set both MCA namespaces because the bundled MPI versions use either the
+# Open MPI or PRRTE-prefixed variable for the rsh launcher.
+export OMPI_MCA_plm_rsh_args="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+export PRTE_MCA_plm_rsh_args="$OMPI_MCA_plm_rsh_args"
+
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 LOG_PREFIX="$LOG_DIR/test_${LABEL}_${TIMESTAMP}"
 

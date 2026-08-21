@@ -223,6 +223,18 @@ jobs:
             echo "label=standard" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Clean stale test logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The runner workspace persists between runs (checkout uses clean: false),
+          # so reports/ accumulates timestamped logs from every previous run. Wipe
+          # its contents up front so each artifact only contains this run's logs.
+          # Keep the directory itself: the build container holds a live bind mount
+          # on /reports, and replacing the directory would orphan that mount.
+          mkdir -p reports
+          find reports -mindepth 1 -delete
+
       - name: Verify both compiled containers
         shell: bash
         run: |
@@ -265,12 +277,27 @@ jobs:
           fi
           cat reports/test-summary.md >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Package test logs
+        # Bundle the per-test logs into a single tarball before uploading, so each
+        # artifact is one small archive instead of hundreds of loose files.
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd reports
+          if [ -n "$(ls -A)" ]; then
+            tar -czf rocshmem-logs.tar.gz .
+            ls -lh rocshmem-logs.tar.gz
+          else
+            echo "::warning::No test logs found to package"
+          fi
+
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: rocshmem-${{ steps.suite.outputs.label }}-logs
-          path: reports/
+          path: reports/rocshmem-logs.tar.gz
           if-no-files-found: warn
 
   cleanup:
