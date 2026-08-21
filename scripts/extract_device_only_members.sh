@@ -9,6 +9,10 @@ if [[ $# -lt 2 || $# -gt 3 ]]; then
   exit 2
 fi
 
+if [[ ! -f "$1" ]]; then
+  echo "full archive does not exist: $1" >&2
+  exit 1
+fi
 full_archive=$(realpath "$1")
 output_dir=$2
 expected_count=${3:-}
@@ -24,11 +28,6 @@ for tool in "$ar_tool" "$bundler" "$host_cxx"; do
     exit 1
   fi
 done
-
-if [[ ! -f "$full_archive" ]]; then
-  echo "full archive does not exist: $full_archive" >&2
-  exit 1
-fi
 
 mkdir -p "$output_dir"
 # Intermediate unbundled images are kept outside the final member list.
@@ -47,7 +46,6 @@ host_stub_obj="${work_dir}/host_stub.o"
 
 archive_index=0
 device_index=0
-host_triple=""
 # Process members independently to preserve the full library's HIP TU topology.
 while IFS= read -r member; do
   [[ -n "$member" ]] || continue
@@ -63,14 +61,13 @@ while IFS= read -r member; do
   extracted="${work_dir}/${archive_index}_${member}"
   "$ar_tool" p "$full_archive" "$member" >"$extracted"
 
-  # Discover the host triple once from the first real bundled member.
-  if [[ -z "$host_triple" ]]; then
-    host_triple=$("$bundler" --list --type=o --input="$extracted" 2>/dev/null \
-      | awk '/^host-/ { print; exit }')
-    if [[ -z "$host_triple" ]]; then
-      echo "archive member has no host bundle: $member" >&2
-      exit 1
-    fi
+  # Discover the host triple for this member.  Each TU may carry its own
+  # host triple, so extract it per-member rather than assuming uniformity.
+  member_host_triple=$("$bundler" --list --type=o --input="$extracted" 2>/dev/null \
+    | awk '/^host-/ { gsub(/[[:space:]]+$/, ""); print; exit }')
+  if [[ -z "$member_host_triple" ]]; then
+    echo "archive member has no host bundle: $member" >&2
+    exit 1
   fi
 
   # Select device targets only; host code is replaced by the empty stub below.
@@ -87,18 +84,37 @@ while IFS= read -r member; do
   for target_index in "${!targets[@]}"; do
     unbundled_outputs+=("${work_dir}/${device_index}_${target_index}.o")
   done
-  output_csv=$(IFS=,; echo "${unbundled_outputs[*]}")
 
+  output_flags=()
+  for f in "${unbundled_outputs[@]}"; do
+    output_flags+=("--output=$f")
+  done
   "$bundler" --unbundle --type=o --targets="$target_csv" \
-    --input="$extracted" --outputs="$output_csv"
+    --input="$extracted" "${output_flags[@]}"
 
   # Rebundle with an empty host stub alongside the device images so the result
   # is a well-formed ELF that the host archiver and linker can ingest.
-  rebundle_targets="${host_triple},${target_csv}"
-  rebundle_inputs="${host_stub_obj},${output_csv}"
+  # clang-offload-bundler uses singular --input/--output (repeatable) flags;
+  # the plural CSV forms are deprecated and inconsistent across LLVM versions.
+  rebundle_targets="${member_host_triple},${target_csv}"
+  input_flags=("--input=$host_stub_obj")
+  for f in "${unbundled_outputs[@]}"; do
+    input_flags+=("--input=$f")
+  done
   rebundled="${output_dir}/${device_index}_${member}"
   "$bundler" --type=o --targets="$rebundle_targets" \
-    --inputs="$rebundle_inputs" --output="$rebundled"
+    "${input_flags[@]}" --output="$rebundled"
+
+  # Verify the rebundled output is a real ELF, not a bare bundle container.
+  if [[ ! -s "$rebundled" ]]; then
+    echo "rebundle produced empty output: $member" >&2
+    exit 1
+  fi
+  magic=$(od -An -tx1 -N4 "$rebundled" | tr -d ' \n')
+  if [[ "$magic" != "7f454c46" ]]; then
+    echo "rebundle output is not ELF: $member (magic=$magic)" >&2
+    exit 1
+  fi
 done < <("$ar_tool" t "$full_archive")
 
 # Catch source-list/archive drift before CMake attempts to create device.a.
