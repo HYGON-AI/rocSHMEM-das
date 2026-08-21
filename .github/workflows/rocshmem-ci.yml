@@ -96,6 +96,7 @@ jobs:
             --cap-add=SYS_PTRACE \
             --security-opt seccomp=unconfined \
             --privileged \
+            -e ROCSHMEM_ALLOWED_IBV_DEVICES=mlx5_0 \
             -v /public/opendas/ArchivedFile:/ArchivedFile:ro \
             -v /public5:/public5:ro \
             -v /opt/hyhal/:/opt/hyhal/:ro \
