@@ -57,10 +57,13 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <cstdint>
 #include <functional>
 #include <random>
 #include <cassert>
 #include <unistd.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 
 namespace rocshmem {
 
@@ -84,74 +87,89 @@ rocshmem_ctx_t ROCSHMEM_HOST_CTX_DEFAULT;
 
 BackendType get_backend_type() { return backend->get_backend_type(); }
 
-#if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
-static BackendType select_backend_type() {
-  BackendType type;
+#if defined(USE_IPC) && (defined(USE_GDA) || defined(USE_RO))
+static bool backend_can_run(BackendType type, MPI_Comm comm,
+                            TcpBootstrap *bootstrap) {
+  switch (type) {
+#if defined(USE_GDA)
+  case BackendType::GDA_BACKEND:
+    return GDABackend::backend_can_run() == ROCSHMEM_SUCCESS;
+#endif
+#if defined(USE_RO)
+  case BackendType::RO_BACKEND:
+    return ROBackend::backend_can_run() == ROCSHMEM_SUCCESS;
+#endif
+#if defined(USE_IPC)
+  case BackendType::IPC_BACKEND:
+    return IPCBackend::backend_can_run(comm, bootstrap) == ROCSHMEM_SUCCESS;
+#endif
+  default:
+    return false;
+  }
+}
 
-  /* Check whether the user explicitely requests a particular backend type */
-  std::string envstr = envvar::backend;
-  std::transform(envstr.begin(), envstr.end(), envstr.begin(), ::tolower);
-  if (!envstr.empty()) {
-    DPRINTF("Found environment variable ROCSHMEM_BACKEND, value is %s\n", envstr.c_str());
-    if (envstr.find("gda") != std::string::npos) {
-      if (GDABackend::backend_can_run() != ROCSHMEM_SUCCESS) {
-        fprintf(stderr, "Error: ROCSHMEM_BACKEND=gda requested but GDA backend cannot run.\n"
-                        "No active RDMA interface found for the requested provider.\n"
-                        "Check that the correct NIC hardware is present and the link is active.\n");
-        exit(1);
-      }
-      return BackendType::GDA_BACKEND;
+static BackendType select_backend_type(MPI_Comm comm,
+                                       TcpBootstrap *bootstrap) {
+  std::string requested = envvar::backend;
+  std::transform(requested.begin(), requested.end(), requested.begin(),
+                 ::tolower);
+
+  if (!requested.empty()) {
+    BackendType type{BackendType::IPC_BACKEND};
+    if (requested == "gda") {
+      type = BackendType::GDA_BACKEND;
+    } else if (requested == "ro") {
+      type = BackendType::RO_BACKEND;
+    } else if (requested == "ipc") {
+      type = BackendType::IPC_BACKEND;
+    } else {
+      fprintf(stderr, "Invalid ROCSHMEM_BACKEND value '%s'. Expected gda, ro, or ipc.\n",
+              requested.c_str());
+      exit(1);
     }
-    if (envstr.find("ro") != std::string::npos) {
-      if (ROBackend::backend_can_run() != ROCSHMEM_SUCCESS) {
-        fprintf(stderr, "Error: ROCSHMEM_BACKEND=ro requested but RO backend cannot run.\n"
-                        "MPI library could not be loaded.\n"
-                        "Check that MPI is properly installed and accessible.\n");
-        exit(1);
-      }
-      return BackendType::RO_BACKEND;
+
+    if (!backend_can_run(type, comm, bootstrap)) {
+      fprintf(stderr, "Requested ROCSHMEM_BACKEND=%s is not compiled in or cannot run in this configuration.\n",
+              requested.c_str());
+      exit(1);
     }
-    if (envstr.find("ipc") != std::string::npos) {
-      return BackendType::IPC_BACKEND;
-    }
+    return type;
   }
 
-  if (GDABackend::backend_can_run() == ROCSHMEM_SUCCESS) {
-    DPRINTF("GDABackend::backend_can_run returned success\n");
+#if defined(USE_IPC)
+  if (backend_can_run(BackendType::IPC_BACKEND, comm, bootstrap)) {
+    return BackendType::IPC_BACKEND;
+  }
+#endif
+#if defined(USE_GDA)
+  if (backend_can_run(BackendType::GDA_BACKEND, comm, bootstrap)) {
     return BackendType::GDA_BACKEND;
   }
-  if (ROBackend::backend_can_run() == ROCSHMEM_SUCCESS) {
-    DPRINTF("MPIInstance could dl_init MPI library\n");
+#endif
+#if defined(USE_RO)
+  if (backend_can_run(BackendType::RO_BACKEND, comm, bootstrap)) {
     return BackendType::RO_BACKEND;
   }
+#endif
 
-  return BackendType::IPC_BACKEND;
-}
-#elif defined(USE_GDA) && defined(USE_IPC)
-static BackendType select_backend_type() {
-  BackendType type;
-
-  /* Check whether the user explicitely requests a particular backend type */
-  std::string envstr = envvar::backend;
-  std::transform(envstr.begin(), envstr.end(), envstr.begin(), ::tolower);
-  if (!envstr.empty()) {
-    DPRINTF("Found environment variable ROCSHMEM_BACKEND, value is %s\n", envstr.c_str());
-    if (envstr.find("gda") != std::string::npos) {
-      return BackendType::GDA_BACKEND;
-    }
-    if (envstr.find("ipc") != std::string::npos) {
-      return BackendType::IPC_BACKEND;
-    }
-  }
-
-  if (GDABackend::backend_can_run() == ROCSHMEM_SUCCESS) {
-    DPRINTF("GDABackend::backend_can_run returned success\n");
-    return BackendType::GDA_BACKEND;
-  }
-
+  fprintf(stderr, "No compiled backend can run in the current configuration.\n");
+  exit(1);
   return BackendType::IPC_BACKEND;
 }
 #endif
+
+static void setFilesLimit() {
+  rlimit filesLimit;
+  if (getrlimit(RLIMIT_NOFILE, &filesLimit) != 0) {
+    DPRINTF("getrlimit failed\n");
+    return;
+  }
+  filesLimit.rlim_cur = filesLimit.rlim_max;
+  if (setrlimit(RLIMIT_NOFILE, &filesLimit) != 0) {
+    DPRINTF("setrlimit failed\n");
+    return;
+  }
+}
 
 [[maybe_unused]] __host__ void inline library_init(MPI_Comm comm) {
   assert(!backend);
@@ -163,6 +181,7 @@ static BackendType select_backend_type() {
     abort();
   }
 
+  setFilesLimit();
   rocm_init();
 
   int ret;
@@ -175,7 +194,7 @@ static BackendType select_backend_type() {
   mpi_instance = new MPIInstance(comm);
 
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
-  BackendType type = select_backend_type();
+  BackendType type = select_backend_type(comm, nullptr);
   switch (type) {
   case BackendType::GDA_BACKEND:
     DPRINTF("Initializing GDA backend using MPI\n");
@@ -193,8 +212,22 @@ static BackendType select_backend_type() {
     backend = new (backend) IPCBackend(comm);
     break;
   }
+#elif defined(USE_RO) && defined(USE_IPC)
+  BackendType type = select_backend_type(comm, nullptr);
+  switch (type) {
+  case BackendType::RO_BACKEND:
+    DPRINTF("Initializing RO backend using MPI\n");
+    CHECK_HIP(hipHostMalloc(&backend, sizeof(ROBackend)));
+    backend = new (backend) ROBackend(comm);
+    break;
+  case BackendType::IPC_BACKEND:
+    DPRINTF("Initializing IPC backend using MPI\n");
+    CHECK_HIP(hipHostMalloc(&backend, sizeof(IPCBackend)));
+    backend = new (backend) IPCBackend(comm);
+    break;
+  }
 #elif defined(USE_GDA) && defined(USE_IPC)
-  BackendType type = select_backend_type();
+  BackendType type = select_backend_type(comm, nullptr);
   switch (type) {
   case BackendType::GDA_BACKEND:
     DPRINTF("Initializing GDA backend using MPI\n");
@@ -294,10 +327,11 @@ static BackendType select_backend_type() {
     abort();
   }
 
+  setFilesLimit();
   rocm_init();
 
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
-  BackendType type = select_backend_type();
+  BackendType type = select_backend_type(MPI_COMM_NULL, bootstrap);
   switch (type) {
   case BackendType::GDA_BACKEND:
     DPRINTF("Initializing GDA backend with TCP bootstrapping\n");
@@ -314,8 +348,21 @@ static BackendType select_backend_type() {
     backend = new (backend) IPCBackend(bootstrap);
     break;
   }
+#elif defined(USE_RO) && defined(USE_IPC)
+  BackendType type = select_backend_type(MPI_COMM_NULL, bootstrap);
+  switch (type) {
+  case BackendType::RO_BACKEND:
+    DPRINTF("Initializing RO backend with TCP bootstrapping\n");
+    library_init_subcomm(bootstr, bootstr->getNranks(), bootstr->getRank());
+    break;
+  case BackendType::IPC_BACKEND:
+    DPRINTF("Initializing IPC backend with TCP bootstrapping\n");
+    CHECK_HIP(hipHostMalloc(&backend, sizeof(IPCBackend)));
+    backend = new (backend) IPCBackend(bootstrap);
+    break;
+  }
 #elif defined(USE_GDA) && defined(USE_IPC)
-  BackendType type = select_backend_type();
+  BackendType type = select_backend_type(MPI_COMM_NULL, bootstrap);
   switch (type) {
   case BackendType::GDA_BACKEND:
     DPRINTF("Initializing GDA backend with TCP bootstrapping\n");

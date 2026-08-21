@@ -158,8 +158,13 @@ class IPCBackend : public Backend {
 
   /**
    * @brief Handle for raw memory for fence/quiet
-  */
+   */
   int *fence_pool{nullptr};
+
+  /**
+   * @brief Check whether all PEs are on a single node
+   */
+  static int backend_can_run(MPI_Comm comm, TcpBootstrap *bootstrap);
 
  protected:
    /**
