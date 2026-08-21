@@ -199,6 +199,16 @@ jobs:
             "$CI_CONTAINER_NAME" \
             bash .github/scripts/configssh.sh "$CI_SSH_TARGET" "$CI_SSH_PORT"
 
+          # MPI launches daemons on every host, including the local host.  The
+          # remote-only setup above leaves the local github-* alias without an
+          # SSH config entry, so PRTE can fail host-key verification before it
+          # starts the local daemon. Configure both aliases in every container.
+          echo ">>> Configure local SSH alias github-${{ matrix.host }}"
+          docker exec \
+            -w /workspace \
+            "$CI_CONTAINER_NAME" \
+            bash .github/scripts/configssh.sh "github-${{ matrix.host }}" "$CI_SSH_PORT"
+
       - name: Record container status
         shell: bash
         run: |
@@ -284,10 +294,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cd reports
-          if [ -n "$(ls -A)" ]; then
-            tar -czf rocshmem-logs.tar.gz .
-            ls -lh rocshmem-logs.tar.gz
+          if [ -n "$(ls -A reports)" ]; then
+            archive="${RUNNER_TEMP:-/tmp}/rocshmem-logs.tar.gz"
+            tar -czf "$archive" -C reports .
+            mv "$archive" reports/rocshmem-logs.tar.gz
+            ls -lh reports/rocshmem-logs.tar.gz
           else
             echo "::warning::No test logs found to package"
           fi
