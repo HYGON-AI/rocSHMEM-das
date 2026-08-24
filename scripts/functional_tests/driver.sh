@@ -167,6 +167,31 @@ ExecTest() {
     OPTIONS+=" --hostfile $HOSTFILE"
   fi
 
+  # Use MPI Parameters when provided via environment variable (overrides all default launcher params)
+  if [[ -n "${ROCSHMEM_TEST_MPI_PARAMS:-}" ]]; then
+    read -ra mpi_params <<< "$ROCSHMEM_TEST_MPI_PARAMS"
+    OPTIONS="-n $NUM_RANKS ${mpi_params[@]}"
+    # Distribute ranks evenly across hosts specified via ROCSHMEM_TEST_HOSTS
+    if [[ -n "${ROCSHMEM_TEST_HOSTS:-}" ]]; then
+      IFS=',' read -ra hosts <<< "$ROCSHMEM_TEST_HOSTS"
+      num_hosts=${#hosts[@]}
+      base=$((NUM_RANKS / num_hosts))
+      rem=$((NUM_RANKS % num_hosts))
+      host_spec=""
+      for i in "${!hosts[@]}"; do
+        n=$base
+        if (( i < rem )); then
+          n=$((base + 1))
+        fi
+        if [[ -n "$host_spec" ]]; then
+          host_spec+=","
+        fi
+        host_spec+="${hosts[$i]}:$n"
+      done
+      OPTIONS+=" --host $host_spec"
+    fi
+  fi
+
   # Construct Test Command
   TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_z"$NUM_THREADS"
   CMD="$LAUNCHER $OPTIONS $APP -a $TEST_NUM -w $NUM_WG -z $NUM_THREADS"
@@ -483,6 +508,171 @@ TestOther() {
   unset ROCSHMEM_MAX_NUM_CONTEXTS
 }
 
+################################################################################
+# CI test functions
+################################################################################
+
+TestCI_IPC() {
+  ##############################################################################
+  #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
+  ##############################################################################
+  # Blocking Put
+  ExecTest  "put"              2       1            1         1048576
+  ExecTest  "wgput"            2       1            64        1048576
+  ExecTest  "waveput"          2       1            64        1048576
+  ExecTest  "defaultctxput"    2       4            128       1024
+  ExecTest  "teamctxput"       2       4            128       1024
+  ExecTest  "p"                2       1            1         128
+  ExecTest  "putmem_on_stream" 2       1            1         1048576
+  # Non-Blocking Put
+  ExecTest  "putnbi"           2       1            1         1048576
+  ExecTest  "wgputnbi"         2       1            64        1048576
+  ExecTest  "waveputnbi"       2       1            64        1048576
+  ExecTest  "defaultctxputnbi" 2       4            128       1024
+  ExecTest  "teamctxputnbi"    2       4            128       1024
+  # Blocking Get
+  ExecTest  "get"              2       1            1         1048576
+  ExecTest  "wgget"            2       1            64        1048576
+  ExecTest  "waveget"          2       1            64        1048576
+  ExecTest  "defaultctxget"    2       4            128       1024
+  ExecTest  "teamctxget"       2       4            128       1024
+  ExecTest  "g"                2       1            1         128
+  ExecTest  "getmem_on_stream" 2       1            1         1048576
+  # Non-Blocking Get
+  ExecTest  "getnbi"           2       1            1         1048576
+  ExecTest  "wggetnbi"         2       1            64        1048576
+  ExecTest  "wavegetnbi"       2       1            64        1048576
+  ExecTest  "defaultctxgetnbi" 2       4            128       1024
+  ExecTest  "teamctxgetnbi"    2       4            128       1024
+  # AMO
+  ExecTest  "amo_fetch"        2       1            1
+  ExecTest  "amo_set"          2       1            1
+  ExecTest  "amo_fcswap"       2       1            1
+  ExecTest  "amo_finc"         2       1            1
+  ExecTest  "amo_inc"          2       1            1
+  ExecTest  "amo_fadd"         2       1            1
+  ExecTest  "amo_add"          2       1            1
+  ExecTest  "amo_fetchand"     2       1            1
+  ExecTest  "amo_and"          2       1            1
+  ExecTest  "amo_xor"          2       1            1
+  # SigOps
+  ExecTest  "putsignal"        2       1            1         1048576
+  ExecTest  "wgputsignal"      2       2            32        1048576
+  ExecTest  "waveputsignal"    2       1            32        1048576
+  ExecTest  "putsignalnbi"     2       1            1         1048576
+  ExecTest  "signalfetch"      2       1            1
+  ExecTest  "wgsignalfetch"    2       2            32
+  ExecTest  "wavesignalfetch"  2       1            32
+  # Coll
+  ExecTest  "barrierall"       2       1            1
+  ExecTest  "teambarrier"      2       1            1
+  ExecTest  "teamsync"         2       1            1
+  ExecTest  "syncall"          2       1            1
+  ExecTest  "alltoall"         2       1            64        512
+  ExecTest  "teambroadcast"    2       1            64        32768
+  ExecTest  "fcollect"         2       1            64        512
+  ExecTest  "teamreduction"    2       1            64        32768
+}
+
+TestCI_RO() {
+  ##############################################################################
+  #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
+  ##############################################################################
+  # Blocking Put
+  ExecTest  "put"              2       1            1         1048576
+  ExecTest  "wgput"            2       1            64        1048576
+  ExecTest  "waveput"          2       1            64        1048576
+  ExecTest  "defaultctxput"    2       4            128       1024
+  ExecTest  "teamctxput"       2       4            128       1024
+  ExecTest  "p"                2       1            1         128
+  # Non-Blocking Put
+  ExecTest  "putnbi"           2       1            1         1048576
+  ExecTest  "wgputnbi"         2       1            64        1048576
+  ExecTest  "waveputnbi"       2       1            64        1048576
+  ExecTest  "defaultctxputnbi" 2       4            128       1024
+  ExecTest  "teamctxputnbi"    2       4            128       1024
+  # Blocking Get
+  ExecTest  "get"              2       1            1         1048576
+  ExecTest  "wgget"            2       1            64        1048576
+  ExecTest  "waveget"          2       1            64        1048576
+  ExecTest  "defaultctxget"    2       4            128       1024
+  ExecTest  "teamctxget"       2       4            128       1024
+  # Non-Blocking Get
+  ExecTest  "getnbi"           2       1            1         1048576
+  ExecTest  "wggetnbi"         2       1            64        1048576
+  ExecTest  "wavegetnbi"       2       1            64        1048576
+  ExecTest  "defaultctxgetnbi" 2       4            128       1024
+  ExecTest  "teamctxgetnbi"    2       4            128       1024
+  # AMO
+  ExecTest  "amo_fetch"        2       1            1
+  ExecTest  "amo_set"          2       1            1
+  ExecTest  "amo_fcswap"       2       1            1
+  ExecTest  "amo_fetchand"     2       1            1
+  ExecTest  "amo_and"          2       1            1
+  ExecTest  "amo_xor"          2       1            1
+  # SigOps
+  ExecTest  "putsignal"        2       1            1         1048576
+  ExecTest  "putsignalnbi"     2       1            1         1048576
+  ExecTest  "signalfetch"      2       1            1
+  # Coll
+  ExecTest  "barrierall"       2       1            1
+  ExecTest  "teambarrier"      2       1            1
+  ExecTest  "teamsync"         2       1            1
+  ExecTest  "syncall"          2       1            1
+  ExecTest  "alltoall"         2       1            64        512
+  ExecTest  "fcollect"         2       1            64        512
+}
+
+TestCI_GDA() {
+  ##############################################################################
+  #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
+  ##############################################################################
+  # Blocking Put
+  ExecTest  "put"              2       1            1         1048576
+  ExecTest  "wgput"            2       1            64        1048576
+  ExecTest  "waveput"          2       1            64        1048576
+  ExecTest  "defaultctxput"    2       4            128       1024
+  ExecTest  "teamctxput"       2       4            128       1024
+  ExecTest  "p"                2       1            1         128
+  # Non-Blocking Put
+  ExecTest  "putnbi"           2       1            1         1048576
+  ExecTest  "wgputnbi"         2       1            64        1048576
+  ExecTest  "waveputnbi"       2       1            64        1048576
+  ExecTest  "defaultctxputnbi" 2       4            128       1024
+  ExecTest  "teamctxputnbi"    2       4            128       1024
+  # Blocking Get
+  ExecTest  "get"              2       1            1         1048576
+  ExecTest  "wgget"            2       1            64        1048576
+  ExecTest  "waveget"          2       1            64        1048576
+  ExecTest  "defaultctxget"    2       4            128       1024
+  ExecTest  "teamctxget"       2       4            128       1024
+  # Non-Blocking Get
+  ExecTest  "getnbi"           2       1            1         1048576
+  ExecTest  "wggetnbi"         2       1            64        1048576
+  ExecTest  "wavegetnbi"       2       1            64        1048576
+  ExecTest  "defaultctxgetnbi" 2       4            128       1024
+  ExecTest  "teamctxgetnbi"    2       4            128       1024
+  # AMO
+  ExecTest  "amo_fetch"        2       1            1
+  ExecTest  "amo_set"          2       1            1
+  ExecTest  "amo_fcswap"       2       1            1
+  ExecTest  "amo_finc"         2       1            1
+  ExecTest  "amo_inc"          2       1            1
+  ExecTest  "amo_fadd"         2       1            1
+  ExecTest  "amo_add"          2       1            1
+  ExecTest  "amo_fetchand"     2       1            1
+  ExecTest  "amo_and"          2       1            1
+  ExecTest  "amo_xor"          2       1            1
+  # Coll
+  ExecTest  "barrierall"       2       1            1
+  ExecTest  "teambarrier"      2       1            1
+  ExecTest  "teamsync"         2       1            1
+  ExecTest  "syncall"          2       1            1
+  ExecTest  "alltoall"         2       1            1         512
+  ExecTest  "teambroadcast"    2       1            1         32768
+  ExecTest  "fcollect"         2       1            1         512
+}
+
 # TODO: remove when GDA is feature complete
 TestGDA() {
   ##############################################################################
@@ -730,6 +920,15 @@ case $TEST in
     ;;
   *"coll")
     TestColl
+    ;;
+  *"ctest-ipc")
+    TestCI_IPC
+    ;;
+  *"ctest-ro")
+    TestCI_RO
+    ;;
+  *"ctest-gda")
+    TestCI_GDA
     ;;
   *"other")
     TestOther

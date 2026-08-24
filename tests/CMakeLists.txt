@@ -29,3 +29,7 @@ ENDIF()
 IF (BUILD_UNIT_TESTS)
     add_subdirectory(unit_tests)
 ENDIF()
+
+# Install the ctest runner script
+configure_file(${CMAKE_SOURCE_DIR}/scripts/run_ctest.sh ${CMAKE_CURRENT_BINARY_DIR}/run_ctest.sh COPYONLY)
+rocm_install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/run_ctest.sh COMPONENT tests DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
