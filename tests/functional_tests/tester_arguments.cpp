@@ -139,6 +139,17 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       batch_quiet = (value == "1");
     } else if (arg == "-noverif" || arg == "-nocheck") {
       verif = false;
+    } else if (arg == "--num-wf") {
+      i++;
+      if (argc < i + 1) {
+        fprintf(stderr, "Invalid arguments for --num-wf.\n");
+        exit(-1);
+      }
+      num_wf = atoi(argv[i]);
+      if (num_wf <= 0) {
+        fprintf(stderr, "--num-wf must be a positive integer.\n");
+        exit(-1);
+      }
     } else if (arg == "-localbuftype") {
       i++;
 
@@ -298,6 +309,7 @@ void TesterArguments::show_usage(std::string executable_name) {
   std::cout << "\t-b|-batch Set buffer rotation batch size (default: loop count)\n";
   std::cout << "\t-bq <0|1> enable batch-boundary quiet (default: 1; disabled by -noverif)\n";
   std::cout << "\t-noverif|-nocheck disable buffer verification\n";
+  std::cout << "\t--num-wf <number of wave-fronts per workgroup> (detected at runtime via HIP, overwrites -z if used)\n";
 }
 
 void TesterArguments::get_arguments() {

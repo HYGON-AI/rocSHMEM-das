@@ -113,6 +113,7 @@ public:
   int batch = 0;
   bool verif = true;
   bool batch_quiet = true;
+  int num_wf = 0;
   size_t large_message_size = 32768;
 
   bool use_batch_quiet() const { return verif && batch_quiet; }
