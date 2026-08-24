@@ -54,11 +54,7 @@ class TeamAlltoallTester : public Tester {
 
   virtual void verifyResults(size_t size) override;
 
-  T1 *source_buf_xdp = nullptr;
-  T1 *source_buf_hdp = nullptr;
   T1 *source_buf = nullptr;
-  T1 *dest_buf_xdp = nullptr;
-  T1 *dest_buf_hdp = nullptr;
   T1 *dest_buf = nullptr;
 
  private:

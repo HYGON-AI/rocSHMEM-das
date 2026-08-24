@@ -44,8 +44,6 @@ class ShmemPtrTester : public Tester {
 
   virtual void verifyResults(size_t size) override;
 
-  char *dest_xdp = nullptr;
-  char *dest_hdp = nullptr;
   char *dest = nullptr;
   int *_available = nullptr;
 };

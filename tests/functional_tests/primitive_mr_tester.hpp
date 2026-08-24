@@ -44,11 +44,7 @@ class PrimitiveMRTester : public Tester {
 
   virtual void verifyResults(size_t size) override;
 
-  char *s_buf_xdp = nullptr;
-  char *s_buf_hdp = nullptr;
   char *s_buf = nullptr;
-  char *r_buf_xdp = nullptr;
-  char *r_buf_hdp = nullptr;
   char *r_buf = nullptr;
 };
 

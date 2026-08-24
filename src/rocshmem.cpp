@@ -529,11 +529,19 @@ static void setFilesLimit() {
 }
 
 [[maybe_unused]] __host__ std::pair<void*, void*> rocshmem_malloc(size_t size) {
+  return rocshmem_malloc(size, size);
+}
+
+[[maybe_unused]] __host__ std::pair<void*, void*> rocshmem_malloc(size_t xdp_size, size_t hdp_size) {
   VERIFY_BACKEND();
 
-  void *ptr, *ptr_hdp;
-  backend->heap.malloc(&ptr, size);
-  backend->heap.malloc_hdp(&ptr_hdp, size);
+  void *ptr = nullptr, *ptr_hdp = nullptr;
+  if (xdp_size > 0) {
+    backend->heap.malloc(&ptr, xdp_size);
+  }
+  if (hdp_size > 0) {
+    backend->heap.malloc_hdp(&ptr_hdp, hdp_size);
+  }
   rocshmem_barrier_all();
 
   return {ptr, ptr_hdp};
@@ -544,8 +552,12 @@ static void setFilesLimit() {
 
   rocshmem_barrier_all();
 
-  backend->heap.free(ptr);
-  backend->heap.free_hdp(ptr_hdp);
+  if (ptr) {
+    backend->heap.free(ptr);
+  }
+  if (ptr_hdp) {
+    backend->heap.free_hdp(ptr_hdp);
+  }
 }
 
 __host__ void * rocshmem_ptr(const void * dest, int pe){

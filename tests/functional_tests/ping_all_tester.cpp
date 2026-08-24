@@ -71,13 +71,11 @@ __global__ void PingAllTest(int loop, int skip, long long int *start_time,
  *****************************************************************************/
 PingAllTester::PingAllTester(TesterArguments args) : Tester(args) {
   int num_pes {rocshmem_n_pes()};
-  std::pair<void*, void*> r_malloc = rocshmem_malloc(sizeof(int) * args.num_wgs * num_pes);
-  r_buf_xdp = static_cast<int *>(r_malloc.first);
-  r_buf_hdp = static_cast<int *>(r_malloc.second);
-  r_buf = static_cast<int *>(r_malloc.second);
+  std::pair<void*, void*> r_malloc = rocshmem_malloc(sizeof(int) * args.num_wgs * num_pes, 0);
+  r_buf = static_cast<int *>(r_malloc.first);
 }
 
-PingAllTester::~PingAllTester() { rocshmem_free(r_buf_xdp, r_buf_hdp); }
+PingAllTester::~PingAllTester() { rocshmem_free(r_buf, nullptr); }
 
 void PingAllTester::resetBuffers(size_t size) {
   int num_pes {rocshmem_n_pes()};

@@ -130,25 +130,17 @@ __global__ void PrimitiveTest(int loop, int skip, long long int *start_time,
  *****************************************************************************/
 PrimitiveTester::PrimitiveTester(TesterArguments args) : Tester(args) {
   size_t buff_size = args.max_msg_size * args.wg_size * args.num_wgs;
-  std::pair<void*, void*> src_malloc = rocshmem_malloc(buff_size);
-  std::pair<void*, void*> dest_malloc = rocshmem_malloc(buff_size);
-  source_xdp = (char *)src_malloc.first;
-  source_hdp = (char *)src_malloc.second;
-  source = (char *)src_malloc.second;
-  dest_xdp = (char *)dest_malloc.first;
-  dest_hdp = (char *)dest_malloc.second;
+  std::pair<void*, void*> src_malloc = rocshmem_malloc(buff_size, 0);
+  std::pair<void*, void*> dest_malloc = rocshmem_malloc(buff_size, 0);
+  source = (char *)src_malloc.first;
   dest = (char *)dest_malloc.first;
 
-  if (nullptr == source_xdp || nullptr == dest_xdp) {
+  if (nullptr == source || nullptr == dest) {
     std::cerr << "Error allocating memory from symmetric heap" << std::endl;
-    std::cerr << "source: " << source_xdp << ", dest: " << dest_xdp << ", size: "
+    std::cerr << "source: " << source << ", dest: " << dest << ", size: "
               << buff_size << std::endl;
-    if (source_xdp) {
-      rocshmem_free(source_xdp, source_hdp);
-    }
-    if (dest_xdp) {
-      rocshmem_free(dest_xdp, dest_hdp);
-    }
+    rocshmem_free(source, nullptr);
+    rocshmem_free(dest, nullptr);
     rocshmem_global_exit(1);
   }
 
@@ -158,8 +150,8 @@ PrimitiveTester::PrimitiveTester(TesterArguments args) : Tester(args) {
 }
 
 PrimitiveTester::~PrimitiveTester() {
-  rocshmem_free(source_xdp, source_hdp);
-  rocshmem_free(dest_xdp, dest_hdp);
+  rocshmem_free(source, nullptr);
+  rocshmem_free(dest, nullptr);
 }
 
 void PrimitiveTester::resetBuffers(size_t size) {

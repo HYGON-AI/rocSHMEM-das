@@ -185,23 +185,44 @@ __host__ void rocshmem_reset_stats();
 __host__ void rocshmem_finalize();
 
 /**
- * @brief Allocate memory of \p size bytes from the symmetric heap.
+ * @brief Allocate memory from the symmetric heap.
  * This is a collective operation and must be called by all PEs.
  *
- * @param[in] size Memory allocation size in bytes.
+ * @param[in] xdp_size Memory allocation size in bytes for XDP pointer.
+ *                     If <= 0, XDP is not allocated (first of returned pair
+ *                     will be nullptr).
+ * @param[in] hdp_size Memory allocation size in bytes for HDP pointer.
+ *                     If <= 0, HDP is not allocated (second of returned pair
+ *                     will be nullptr).
  *
- * @return A pointer to the allocated memory on the symmetric heap.
+ * @return A pair of pointers on the symmetric heap: first is XDP (or nullptr
+ *         if not allocated), second is HDP (or nullptr if not allocated).
+ *
+ * @todo Return error code instead of ptr.
+ */
+/**
+ * @brief Allocate memory of \p size bytes from the symmetric heap.
+ *        Convenience overload that allocates both XDP and HDP with the same
+ *        size. Equivalent to rocshmem_malloc(size, size).
+ *
+ * @param[in] size Memory allocation size in bytes for both XDP and HDP.
+ *
+ * @return A pair of pointers on the symmetric heap: first is XDP, second is HDP.
  *
  * @todo Return error code instead of ptr.
  */
 __host__ void *rocshmem_malloc_orig(size_t size);
 __host__ std::pair<void*, void*> rocshmem_malloc(size_t size);
+__host__ std::pair<void*, void*> rocshmem_malloc(size_t xdp_size, size_t hdp_size);
 
 /**
  * @brief Free a memory allocation from the symmetric heap.
  * This is a collective operation and must be called by all PEs.
  *
- * @param[in] ptr Pointer to previously allocated memory on the symmetric heap.
+ * @param[in] ptr     XDP pointer previously returned by rocshmem_malloc(),
+ *                    or nullptr to skip freeing XDP.
+ * @param[in] ptr_hdp HDP pointer previously returned by rocshmem_malloc(),
+ *                    or nullptr to skip freeing HDP.
  */
 __host__ void rocshmem_free_orig(void *ptr);
 __host__ void rocshmem_free(void *ptr, void *ptr_hdp);

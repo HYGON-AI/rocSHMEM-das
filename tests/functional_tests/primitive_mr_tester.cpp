@@ -63,19 +63,15 @@ __global__ void PrimitiveMRTest(int loop, long long int *start_time,
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
 PrimitiveMRTester::PrimitiveMRTester(TesterArguments args) : Tester(args) {
-  std::pair<void*, void*> s_malloc = rocshmem_malloc(args.max_msg_size * args.wg_size);
-  std::pair<void*, void*> r_malloc = rocshmem_malloc(args.max_msg_size * args.wg_size);
-  s_buf_xdp = static_cast<char *>(s_malloc.first);
-  s_buf_hdp = static_cast<char *>(s_malloc.second);
-  s_buf = static_cast<char *>(s_malloc.second);
-  r_buf_xdp = static_cast<char *>(r_malloc.first);
-  r_buf_hdp = static_cast<char *>(r_malloc.second);
+  std::pair<void*, void*> s_malloc = rocshmem_malloc(args.max_msg_size * args.wg_size, 0);
+  std::pair<void*, void*> r_malloc = rocshmem_malloc(args.max_msg_size * args.wg_size, 0);
+  s_buf = static_cast<char *>(s_malloc.first);
   r_buf = static_cast<char *>(r_malloc.first);
 }
 
 PrimitiveMRTester::~PrimitiveMRTester() {
-  rocshmem_free(s_buf_xdp, s_buf_hdp);
-  rocshmem_free(r_buf_xdp, r_buf_hdp);
+  rocshmem_free(s_buf, nullptr);
+  rocshmem_free(r_buf, nullptr);
 }
 
 void PrimitiveMRTester::resetBuffers(size_t size) {

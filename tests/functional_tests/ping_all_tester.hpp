@@ -50,8 +50,6 @@ class PingAllTester : public Tester {
 
   virtual void verifyResults(size_t size) override;
 
-  int *r_buf_xdp = nullptr;
-  int *r_buf_hdp = nullptr;
   int *r_buf = nullptr;
 };
 

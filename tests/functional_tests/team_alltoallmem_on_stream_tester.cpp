@@ -51,18 +51,14 @@ TeamAlltoallmemOnStreamTester::TeamAlltoallmemOnStreamTester(TesterArguments arg
   int total_bytes = num_bytes_wg * num_teams;
   buf_size = total_bytes;
 
-  std::pair<void*, void*> src_malloc = rocshmem_malloc(buf_size);
-  std::pair<void*, void*> dest_malloc = rocshmem_malloc(buf_size);
-  source_buf_xdp = static_cast<char *>(src_malloc.first);
-  source_buf_hdp = static_cast<char *>(src_malloc.second);
-  source_buf = static_cast<char *>(src_malloc.second);
-  dest_buf_xdp = static_cast<char *>(dest_malloc.first);
-  dest_buf_hdp = static_cast<char *>(dest_malloc.second);
+  std::pair<void*, void*> src_malloc = rocshmem_malloc(buf_size, 0);
+  std::pair<void*, void*> dest_malloc = rocshmem_malloc(buf_size, 0);
+  source_buf = static_cast<char *>(src_malloc.first);
   dest_buf = static_cast<char *>(dest_malloc.first);
 
-  if (nullptr == source_buf_xdp || nullptr == dest_buf_xdp) {
+  if (nullptr == source_buf || nullptr == dest_buf) {
     std::cerr << "Error allocating memory from symmetric heap" << std::endl;
-    std::cerr << "source: " << source_buf_xdp << ", dest: " << dest_buf_xdp
+    std::cerr << "source: " << source_buf << ", dest: " << dest_buf
               << ", size: " << buf_size << std::endl;
     rocshmem_global_exit(1);
   }
@@ -85,8 +81,8 @@ TeamAlltoallmemOnStreamTester::~TeamAlltoallmemOnStreamTester() {
     CHECK_HIP(hipEventDestroy(start_events_timed[i]));
     CHECK_HIP(hipStreamDestroy(streams[i]));
   }
-  rocshmem_free(source_buf_xdp, source_buf_hdp);
-  rocshmem_free(dest_buf_xdp, dest_buf_hdp);
+  rocshmem_free(source_buf, nullptr);
+  rocshmem_free(dest_buf, nullptr);
 }
 
 void TeamAlltoallmemOnStreamTester::preLaunchKernel() {

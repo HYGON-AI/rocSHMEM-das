@@ -53,11 +53,7 @@ class TeamAlltoallmemOnStreamTester : public Tester {
   virtual void verifyResults(size_t size) override;
 
  private:
-  char *source_buf_xdp = nullptr;
-  char *source_buf_hdp = nullptr;
   char *source_buf = nullptr;
-  char *dest_buf_xdp = nullptr;
-  char *dest_buf_hdp = nullptr;
   char *dest_buf = nullptr;
   int my_pe;
   int n_pes;

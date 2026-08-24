@@ -54,11 +54,7 @@ class RandomAccessTester : public Tester {
 
   virtual void verifyResults(size_t size) override;
 
-  int *r_buf_xdp = nullptr;
-  int *r_buf_hdp = nullptr;
   int *r_buf = nullptr;
-  int *s_buf_xdp = nullptr;
-  int *s_buf_hdp = nullptr;
   int *s_buf = nullptr;
   int *h_buf;
   int *h_dev_buf;

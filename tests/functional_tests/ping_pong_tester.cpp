@@ -71,13 +71,11 @@ __global__ void PingPongTest(int loop, int skip, long long int *start_time,
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
 PingPongTester::PingPongTester(TesterArguments args) : Tester(args) {
-  std::pair<void*, void*> r_malloc = rocshmem_malloc(sizeof(int) * args.num_wgs);
-  r_buf_xdp = static_cast<int *>(r_malloc.first);
-  r_buf_hdp = static_cast<int *>(r_malloc.second);
-  r_buf = static_cast<int *>(r_malloc.second);
+  std::pair<void*, void*> r_malloc = rocshmem_malloc(sizeof(int) * args.num_wgs, 0);
+  r_buf = static_cast<int *>(r_malloc.first);
 }
 
-PingPongTester::~PingPongTester() { rocshmem_free(r_buf_xdp, r_buf_hdp); }
+PingPongTester::~PingPongTester() { rocshmem_free(r_buf, nullptr); }
 
 void PingPongTester::resetBuffers(size_t size) {
   memset(r_buf, 0, sizeof(int) * args.num_wgs);

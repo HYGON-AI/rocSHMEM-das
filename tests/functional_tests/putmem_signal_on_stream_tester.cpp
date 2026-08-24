@@ -62,23 +62,17 @@ PutmemSignalOnStreamTester::PutmemSignalOnStreamTester(TesterArguments args)
   int total_bytes = num_bytes_stream * num_streams;
   buf_size = total_bytes;
 
-  std::pair<void*, void*> src_malloc = rocshmem_malloc(buf_size);
-  std::pair<void*, void*> dest_malloc = rocshmem_malloc(buf_size);
-  std::pair<void*, void*> sig_malloc = rocshmem_malloc(num_streams * sizeof(uint64_t));
-  source_buf_xdp = static_cast<char *>(src_malloc.first);
-  source_buf_hdp = static_cast<char *>(src_malloc.second);
-  source_buf = static_cast<char *>(src_malloc.second);
-  dest_buf_xdp = static_cast<char *>(dest_malloc.first);
-  dest_buf_hdp = static_cast<char *>(dest_malloc.second);
+  std::pair<void*, void*> src_malloc = rocshmem_malloc(buf_size, 0);
+  std::pair<void*, void*> dest_malloc = rocshmem_malloc(buf_size, 0);
+  std::pair<void*, void*> sig_malloc = rocshmem_malloc(num_streams * sizeof(uint64_t), 0);
+  source_buf = static_cast<char *>(src_malloc.first);
   dest_buf = static_cast<char *>(dest_malloc.first);
-  sig_addr_xdp = static_cast<uint64_t *>(sig_malloc.first);
-  sig_addr_hdp = static_cast<uint64_t *>(sig_malloc.second);
-  sig_addr = static_cast<uint64_t *>(sig_malloc.second);
+  sig_addr = static_cast<uint64_t *>(sig_malloc.first);
 
-  if (nullptr == source_buf_xdp || nullptr == dest_buf_xdp || nullptr == sig_addr_xdp) {
+  if (nullptr == source_buf || nullptr == dest_buf || nullptr == sig_addr) {
     std::cerr << "Error allocating memory from symmetric heap" << std::endl;
-    std::cerr << "source: " << source_buf_xdp << ", dest: " << dest_buf_xdp
-              << ", sig_addr: " << sig_addr_xdp << std::endl;
+    std::cerr << "source: " << source_buf << ", dest: " << dest_buf
+              << ", sig_addr: " << sig_addr << std::endl;
     rocshmem_global_exit(1);
   }
 
@@ -98,9 +92,9 @@ PutmemSignalOnStreamTester::~PutmemSignalOnStreamTester() {
     CHECK_HIP(hipEventDestroy(start_events_timed[i]));
     CHECK_HIP(hipStreamDestroy(streams[i]));
   }
-  rocshmem_free(source_buf_xdp, source_buf_hdp);
-  rocshmem_free(dest_buf_xdp, dest_buf_hdp);
-  rocshmem_free(sig_addr_xdp, sig_addr_hdp);
+  rocshmem_free(source_buf, nullptr);
+  rocshmem_free(dest_buf, nullptr);
+  rocshmem_free(sig_addr, nullptr);
 }
 
 void PutmemSignalOnStreamTester::preLaunchKernel() {

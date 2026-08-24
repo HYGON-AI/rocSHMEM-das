@@ -54,11 +54,7 @@ class TeamReductionTester : public Tester {
 
   virtual void verifyResults(size_t size) override;
 
-  T1 *s_buf_xdp = nullptr;
-  T1 *s_buf_hdp = nullptr;
   T1 *s_buf = nullptr;
-  T1 *r_buf_xdp = nullptr;
-  T1 *r_buf_hdp = nullptr;
   T1 *r_buf = nullptr;
   T1 *pWrk;
   long *pSync;

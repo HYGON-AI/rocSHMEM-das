@@ -50,18 +50,14 @@ SignalWaitUntilOnStreamTester::SignalWaitUntilOnStreamTester(
   pe_target = (my_pe + 1) % n_pes;
 
   // Allocate signal addresses on symmetric heap
-  std::pair<void*, void*> sig_malloc = rocshmem_malloc(num_streams * sizeof(uint64_t));
-  std::pair<void*, void*> src_malloc = rocshmem_malloc(num_streams * sizeof(uint64_t));
-  sig_addr_xdp = static_cast<uint64_t *>(sig_malloc.first);
-  sig_addr_hdp = static_cast<uint64_t *>(sig_malloc.second);
-  sig_addr = static_cast<uint64_t *>(sig_malloc.second);
-  source_buf_xdp = static_cast<uint64_t *>(src_malloc.first);
-  source_buf_hdp = static_cast<uint64_t *>(src_malloc.second);
-  source_buf = static_cast<uint64_t *>(src_malloc.second);
+  std::pair<void*, void*> sig_malloc = rocshmem_malloc(num_streams * sizeof(uint64_t), 0);
+  std::pair<void*, void*> src_malloc = rocshmem_malloc(num_streams * sizeof(uint64_t), 0);
+  sig_addr = static_cast<uint64_t *>(sig_malloc.first);
+  source_buf = static_cast<uint64_t *>(src_malloc.first);
 
-  if (nullptr == sig_addr_xdp || nullptr == source_buf_xdp) {
+  if (nullptr == sig_addr || nullptr == source_buf) {
     std::cerr << "Error allocating memory from symmetric heap" << std::endl;
-    std::cerr << "sig_addr: " << sig_addr_xdp << ", source_buf: " << source_buf_xdp
+    std::cerr << "sig_addr: " << sig_addr << ", source_buf: " << source_buf
               << std::endl;
     rocshmem_global_exit(1);
   }
@@ -82,8 +78,8 @@ SignalWaitUntilOnStreamTester::~SignalWaitUntilOnStreamTester() {
     CHECK_HIP(hipEventDestroy(start_events_timed[i]));
     CHECK_HIP(hipStreamDestroy(streams[i]));
   }
-  rocshmem_free(sig_addr_xdp, sig_addr_hdp);
-  rocshmem_free(source_buf_xdp, source_buf_hdp);
+  rocshmem_free(sig_addr, nullptr);
+  rocshmem_free(source_buf, nullptr);
 }
 
 void SignalWaitUntilOnStreamTester::preLaunchKernel() {

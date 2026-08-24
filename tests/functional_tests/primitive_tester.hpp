@@ -44,11 +44,7 @@ class PrimitiveTester : public Tester {
 
   virtual void verifyResults(size_t size) override;
 
-  char *source_xdp = nullptr;
-  char *source_hdp = nullptr;
   char *source = nullptr;
-  char *dest_xdp = nullptr;
-  char *dest_hdp = nullptr;
   char *dest = nullptr;
 };
 

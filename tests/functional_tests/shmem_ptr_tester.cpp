@@ -121,14 +121,12 @@ __global__ void ShmemPtrTest(int loop, int skip, long long int *start_time,
 ShmemPtrTester::ShmemPtrTester(TesterArguments args) : Tester(args) {
   size_t buff_size = args.wg_size * args.num_wgs + sizeof(int);
   CHECK_HIP(hipMalloc((void **)&_available, sizeof(int)));
-  std::pair<void*, void*> dest_malloc = rocshmem_malloc(buff_size);
-  dest_xdp = static_cast<char *>(dest_malloc.first);
-  dest_hdp = static_cast<char *>(dest_malloc.second);
+  std::pair<void*, void*> dest_malloc = rocshmem_malloc(buff_size, 0);
   dest = static_cast<char *>(dest_malloc.first);
 
-  if (nullptr == dest_xdp) {
+  if (nullptr == dest) {
     std::cerr << "Error allocating memory from symmetric heap" << std::endl;
-    std::cerr << "dest: " << dest_xdp << ", size: " << buff_size << std::endl;
+    std::cerr << "dest: " << dest << ", size: " << buff_size << std::endl;
 
     rocshmem_global_exit(1);
   }
@@ -136,7 +134,7 @@ ShmemPtrTester::ShmemPtrTester(TesterArguments args) : Tester(args) {
 
 ShmemPtrTester::~ShmemPtrTester() {
   CHECK_HIP(hipFree(_available));
-  rocshmem_free(dest_xdp, dest_hdp);
+  rocshmem_free(dest, nullptr);
 }
 
 void ShmemPtrTester::resetBuffers(size_t size) {

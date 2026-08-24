@@ -46,14 +46,8 @@ class SignalingOperationsTester : public Tester {
   virtual void verifyResults(size_t size) override;
 
   int sig_op;
-  char *s_buf_xdp = nullptr;
-  char *s_buf_hdp = nullptr;
   char *s_buf = nullptr;
-  char *r_buf_xdp = nullptr;
-  char *r_buf_hdp = nullptr;
   char *r_buf = nullptr;
-  uint64_t *sig_addr_xdp = nullptr;
-  uint64_t *sig_addr_hdp = nullptr;
   uint64_t *sig_addr = nullptr;
   uint64_t *fetched_value;
 };
