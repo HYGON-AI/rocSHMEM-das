@@ -189,7 +189,9 @@ __device__ T GDAContext::amo_fetch_and(void *dst, T value, int pe) {
   }
   
   ActiveWFInfo wf_info(pe);
-  int qp_index = get_qp_index(pe, wf_info);
+  // CAS-loop bitwise AMOs must serialize on one QP per target PE to avoid
+  // cross-QP retry livelock under high wave concurrency.
+  int qp_index = get_qp_index(pe, wf_info, true);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   T cond = 0;
@@ -226,7 +228,7 @@ __device__ T GDAContext::amo_fetch_or(void *dst, T value, int pe) {
   }
 
   ActiveWFInfo wf_info(pe);
-  int qp_index = get_qp_index(pe, wf_info);
+  int qp_index = get_qp_index(pe, wf_info, true);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   T cond = 0;
@@ -263,7 +265,7 @@ __device__ T GDAContext::amo_fetch_xor(void *dst, T value, int pe) {
   }
   
   ActiveWFInfo wf_info(pe);
-  int qp_index = get_qp_index(pe, wf_info);
+  int qp_index = get_qp_index(pe, wf_info, true);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   T cond = 0;
@@ -1313,11 +1315,21 @@ __device__ __forceinline__ void GDAContext::atomic_nofetch_shared_qp(
   }
 }
 
+__device__ __forceinline__ bool gda_copy_if_self(int pe, void* dst,
+                                                 const void* src,
+                                                 size_t bytes) {
+  if (pe != constmem.my_pe) return false;
+  if (bytes != 0) {
+    memcpy_lane<MemcpyKind::Put>(dst, const_cast<void*>(src), bytes);
+  }
+  return true;
+}
+
 template <typename T>
 __device__ void GDAContext::alltoall(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems,
                                      int elem_offset, int elem_count) {
-  alltoall_linear_thread_puts(team, dst, src, nelems, elem_offset, elem_count);
+  alltoall_linear(team, dst, src, nelems, elem_offset, elem_count);
 }
 
 template <typename T>
@@ -1546,7 +1558,7 @@ __device__ void GDAContext::alltoall_linear(rocshmem_team_t team, T *dst,
 
   for (int j = wf_id; j < pe_size; j+= wf_count) {
     int dest_pe = team_obj->get_pe_in_world(j);
-    qps[dest_pe].quiet(wf_info);
+    internal_quiet(dest_pe, wf_info);
   }
 
   // wait until everyone has obtained their designated data
@@ -1580,6 +1592,13 @@ __device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team,
     int qp_index = get_qp_index(dest_pe, wf_info);
     qp_indices[j] = qp_index;
     uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
+    if (gda_copy_if_self(
+          dest_pe, &dst[my_pe_in_team * nelems + elem_offset],
+          &src[j * nelems + elem_offset], elem_count * sizeof(T))) {
+      pSync[alltoall_pSync_offset + my_pe_in_team] = completion_count;
+      continue;
+    }
+
     put_nbi_shared_qp(qp_index,
       reinterpret_cast<char*>(&dst[my_pe_in_team * nelems + elem_offset]) + base_heap_offset,
       &src[j * nelems + elem_offset], elem_count * sizeof(T), false);
@@ -1837,7 +1856,11 @@ __device__ T GDAContext::internal_amo_swap(void *dst, T value, int pe,
  *    - **[ QP2,2 ]**       →  The 3rd QP (QP index 2) of PE2
  */
 __device__ __forceinline__ uint32_t GDAContext::get_qp_index(int pe,
-    ActiveWFInfo wf_info) {
+    ActiveWFInfo wf_info, bool force_single_qp) {
+
+#if defined(GDA_SHCA)
+  if (force_single_qp && constmem.gda_provider == GDAProvider::SHCA) return pe;
+#endif
 
   uint32_t qp_index   {0};
 

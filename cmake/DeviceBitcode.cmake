@@ -199,6 +199,13 @@ if(USE_GDA)
       ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/bnxt/queue_pair_bnxt.cpp
     )
   endif()
+  if(GDA_SHCA)
+    list(APPEND BITCODE_SOURCES
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/shca/queue_pair_shca.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/shca/queue_pair_shca_multiqp.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/shca/segment_builder_shca.cpp
+    )
+  endif()
 endif()
 
 # Build bitcode for each GPU architecture

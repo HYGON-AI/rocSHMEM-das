@@ -41,3 +41,6 @@ target_sources(
 add_subdirectory(mlx5)
 add_subdirectory(bnxt)
 add_subdirectory(ionic)
+if(GDA_SHCA)
+  add_subdirectory(shca)
+endif()

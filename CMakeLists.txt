@@ -81,6 +81,7 @@ option(BUILD_DEBUG_DEVICE "Compile in device-side logging (LOGD_WARN/INFO and GD
 option(GDA_IONIC "Build for AMD Pensando IONIC RDMA provider" OFF)
 option(GDA_BNXT "Build for Broadcom RDMA provider" OFF)
 option(GDA_MLX5 "Build for Mellanox MLX5 RDMA provider" OFF)
+option(GDA_SHCA "Build for Dawning SHCA RDMA provider" OFF)
 option(ASAN "Enable AddressSanitizer" ${ASAN})
 
 if (ASAN)
@@ -289,6 +290,7 @@ if (NOT BUILD_TESTS_ONLY)
       set(GDA_IONIC OFF)
       set(GDA_BNXT OFF)
       set(GDA_MLX5 OFF)
+      set(GDA_SHCA OFF)
     endif()
   endif()
 
@@ -541,4 +543,3 @@ add_subdirectory(tests)
 if (BUILD_EXAMPLES)
   add_subdirectory(examples)
 endif()
-

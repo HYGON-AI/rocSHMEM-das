@@ -31,7 +31,8 @@ namespace gda {
     UNSET,
     IONIC,
     BNXT,
-    MLX5
+    MLX5,
+    SHCA
   };
 
   enum alltoallv_wg_algos {

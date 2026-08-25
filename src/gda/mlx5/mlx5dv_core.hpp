@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2017 Mellanox Technologies, Inc.  All rights reserved.
+ * Copyright (c) 2026 Hygon Information Technology Co., Ltd.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -52,12 +53,16 @@ enum mlx5_ib_uapi_uar_alloc_type {
 #define MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED (1U << 31)
 
 /* infiniband/tm_types.h */
+#if defined(GDA_SHCA)
+#include <infiniband/tm_types.h>
+#else
 struct ibv_tmh {
 	uint8_t		opcode;      /* from enum ibv_tmh_op */
 	uint8_t		reserved[3]; /* must be zero */
 	__be32		app_ctx;     /* opaque user data */
 	__be64		tag;
 };
+#endif
 
 /* infiniband/mlx5dv.h */
 enum {

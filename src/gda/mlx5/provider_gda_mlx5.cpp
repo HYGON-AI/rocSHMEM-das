@@ -1,5 +1,6 @@
 /******************************************************************************
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Hygon Information Technology Co., Ltd.
  *
  * SPDX-License-Identifier: MIT
  *
@@ -614,7 +615,11 @@ static int mlx5_modify_qp_init2rtr(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& q
     // IB + GRH needs to set GRH bit
     DEVX_SET(ads, primary_addr, grh,  static_cast<bool>(ah_attr->is_global));
     DEVX_SET(ads, primary_addr, mlid, ah_attr->src_path_bits);
+#if defined(GDA_SHCA)
+    DEVX_SET(ads, primary_addr, rlid, u17_to_32(ah_attr->dlid));
+#else
     DEVX_SET(ads, primary_addr, rlid, ah_attr->dlid);
+#endif
     DEVX_SET(ads, primary_addr, sl,   ah_attr->sl);
   }
 

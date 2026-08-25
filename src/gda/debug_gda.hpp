@@ -1,5 +1,6 @@
 /******************************************************************************
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Hygon Information Technology Co., Ltd.
  *
  * SPDX-License-Identifier: MIT
  *
@@ -85,7 +86,18 @@ static void dump_ibv_port_attr([[maybe_unused]] struct ibv_port_attr* x) {
             "  (uint16_t)            port_cap_flags2 = 0x%x\n"
             "========",
             x->state, x->max_mtu, x->active_mtu, x->gid_tbl_len, x->port_cap_flags, x->max_msg_sz,
-            x->bad_pkey_cntr, x->qkey_viol_cntr, x->pkey_tbl_len, x->lid, x->sm_lid, x->lmc, x->max_vl_num,
+            x->bad_pkey_cntr, x->qkey_viol_cntr, x->pkey_tbl_len,
+#if defined(GDA_SHCA)
+            u17_to_32(x->lid),
+#else
+            x->lid,
+#endif
+#if defined(GDA_SHCA)
+            u17_to_32(x->sm_lid),
+#else
+            x->sm_lid,
+#endif
+            x->lmc, x->max_vl_num,
             x->sm_sl, x->subnet_timeout, x->init_type_reply, x->active_width, x->active_speed, x->phys_state,
             x->link_layer, x->flags, x->port_cap_flags2);
 }
@@ -107,6 +119,19 @@ static void dump_ibv_qp([[maybe_unused]] struct ibv_qp *qp, [[maybe_unused]] int
             conn_num, qp->context, qp->qp_context, qp->pd, qp->send_cq, qp->recv_cq,
             qp->srq, qp->handle, qp->qp_num, qp->state, qp->qp_type, qp->events_completed);
 }
+
+#if defined(GDA_SHCA)
+[[maybe_unused]] static void dump_shcadv_qp([[maybe_unused]] struct shca_dv_qp *qp,
+                           [[maybe_unused]] int conn_num) {
+  LOG_TRACE("SHCA QP[%d]: sq=%p dbrec=%p", conn_num, qp->sq.buf, qp->dbrec);
+}
+
+[[maybe_unused]] static void dump_shcadv_cq([[maybe_unused]] struct shca_dv_cq *cq,
+                           [[maybe_unused]] int conn_num) {
+  LOG_TRACE("SHCA CQ[%d]: buf=%p dbrec=%p cqe_cnt=%u",
+            conn_num, cq->buf, cq->dbrec, cq->cqe_cnt);
+}
+#endif
 
 
 #endif /* LIBRARY_SRC_GDA_DEBUG_GDA_HPP_ */

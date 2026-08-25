@@ -236,6 +236,11 @@ __device__ void GDAContext::internal_quiet(ActiveWFInfo &wf_info) {
   ipcImpl_.ipcQuiet();
 }
 
+__device__ void GDAContext::internal_quiet(int qp_index,
+                                           ActiveWFInfo &wf_info) {
+  qps[qp_index].quiet(wf_info);
+}
+
 __device__ void GDAContext::pe_quiet(size_t pe) {
   ActiveWFInfo wf_info(ctx_id_);
   for(uint32_t i = 0; i < num_qps_per_pe; i++) {

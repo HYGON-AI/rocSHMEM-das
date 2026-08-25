@@ -42,6 +42,9 @@
 #include "gda/ionic/provider_gda_ionic.hpp"
 #include "gda/bnxt/provider_gda_bnxt.hpp"
 #include "gda/mlx5/provider_gda_mlx5.hpp"
+#if defined(GDA_SHCA)
+#include "gda/shca/provider_gda_shca.hpp"
+#endif
 
 namespace rocshmem {
 
@@ -53,6 +56,7 @@ class HostInterface;
 inline constexpr uint32_t GDA_IONIC_VENDOR_ID = 0x1DD8;
 inline constexpr uint32_t GDA_MLX5_VENDOR_ID  = 0x02c9; //PCI-ID is 15b3
 inline constexpr uint32_t GDA_BNXT_VENDOR_ID  = 0x14E4;
+inline constexpr uint32_t GDA_SHCA_VENDOR_ID  = 0x1CB8;
 
 struct NicDevice {
   std::string nic_name;
@@ -78,6 +82,9 @@ class GDABackend : public Backend {
  private:
   typedef struct dest_info {
     int lid;
+#if defined(GDA_SHCA)
+    u17 shca_lid;
+#endif
     int qpn;
     int psn;
     union ibv_gid gid;
@@ -414,6 +421,9 @@ class GDABackend : public Backend {
   void bnxt_initialize_gpu_qp(QueuePair* qp, int conn_num);
   void ionic_initialize_gpu_qp(QueuePair* qp, int conn_num);
   void mlx5_initialize_gpu_qp(QueuePair* qp, int conn_num);
+#if defined(GDA_SHCA)
+  void shca_initialize_gpu_qp(QueuePair* qp, int conn_num);
+#endif
 
   /**
    * @brief Setup InfiniBand Resources
@@ -646,6 +656,12 @@ class GDABackend : public Backend {
    */
   static void* mlx5_dv_dlopen();
 
+#if defined(GDA_SHCA)
+  shcadv_funcs_t shcadv;
+  void *shcadv_handle_{nullptr};
+  int shca_dv_dl_init();
+  static void* shca_dv_dlopen();
+#endif
   /**
    * @brief structures holding the function pointers to the direct verbs functionality
    * of each network driver.

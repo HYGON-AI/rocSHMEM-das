@@ -301,7 +301,7 @@ __device__ void rocshmem_quiet() {
 }
 
 __device__ void rocshmem_quiet_dp(size_t qp_idx) {
-#if defined(GDA_MLX5)
+#if defined(GDA_MLX5) || defined(GDA_SHCA)
   static_cast<GDAContext*>(ROCSHMEM_CTX_DEFAULT.ctx_opaque)->qp_quiet(qp_idx);  
 #endif
 }

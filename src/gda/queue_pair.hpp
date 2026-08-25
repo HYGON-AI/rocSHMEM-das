@@ -45,6 +45,9 @@
 #include "gda/ionic/provider_gda_ionic.hpp"
 #include "gda/mlx5/provider_gda_mlx5.hpp"
 #include "gda/bnxt/provider_gda_bnxt.hpp"
+#if defined(GDA_SHCA)
+#include "gda/shca/provider_gda_shca.hpp"
+#endif
 
 #include "containers/free_list.hpp"
 #include "memory/hip_allocator.hpp"
@@ -332,6 +335,11 @@ class QueuePair {
       uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
       ActiveWFInfo &wf_info, bool fetching = false, bool fence = false);
 #endif
+#if defined(GDA_SHCA)
+  __device__ uint64_t shca_post_wqe_amo(uintptr_t raddr, uint32_t rkey,
+      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+      ActiveWFInfo &wf_info, bool fetching = false, bool fence = false);
+#endif
 
   __device__ __attribute__((noinline)) uint64_t post_wqe_amo_single(uintptr_t raddr,
       uint32_t rkey, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
@@ -384,6 +392,37 @@ class QueuePair {
   __device__ void mlx5_quiet();
   __device__ void mlx5_quiet_single();
 #endif
+#if defined(GDA_SHCA)
+  static constexpr uint32_t SHCA_OUTSTANDING_TABLE_SIZE = 1u << 16;
+  __device__ void shca_build_rma_wqe(uint64_t sq_counter, uint64_t sq_index,
+      uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey,
+      int32_t length, uint8_t opcode);
+  __device__ void shca_build_amo_wqe(uint64_t sq_counter, uint64_t sq_index,
+      uintptr_t raddr, uint32_t rkey, uint8_t opcode, int64_t atomic_data,
+      int64_t atomic_cmp, bool fetching, uint64_t *fetch_addr);
+  __device__ uint64_t *shca_allocate_wave_fetching_atomic_buffer(
+      uint64_t sq_counter, bool leader, uint64_t leader_lane);
+  __device__ void shca_quiet();
+  __device__ void shca_quiet_single();
+  __device__ void shca_quiet_dp_single_lane();
+  __device__ void shca_post_wqe_rma(int32_t length, uintptr_t raddr,
+      uint32_t rkey, uintptr_t laddr, uint32_t lkey,
+      uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
+  __device__ void shca_post_wqe_rma_single_dp(int32_t length,
+      uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey,
+      uint8_t opcode, bool ring_db);
+  __device__ void shca_post_wqe_rma_single(int32_t length,
+      uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey,
+      uint8_t opcode);
+  __device__ uint64_t shca_post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
+      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+      bool fetching = false, bool fence = false);
+  __device__ void shca_post_wqe_rma_single_lane_dp(int32_t size,
+      uintptr_t laddr, uintptr_t raddr, uint8_t opcode);
+  __device__ void shca_post_wqe_amo_single_lane_dp(int32_t size,
+      uintptr_t raddr, uint8_t opcode, int64_t atomic_data,
+      int64_t atomic_cmp, bool fetching);
+#endif
 #if defined(GDA_BNXT)
 
   __device__ void bnxt_write_rma_wqe(int32_t length, uintptr_t raddr,
@@ -426,6 +465,13 @@ class QueuePair {
 #if defined(GDA_MLX5)
   __device__ void mlx5_ring_doorbell(uint64_t sq_post, const gda_mlx5_wqe& wqe);
 #endif
+#if defined(GDA_SHCA)
+  __device__ void shca_write_doorbell(uint64_t db_val, uint64_t sq_post);
+  __device__ void shca_ring_doorbell(uint64_t wave_sq_counter, uint8_t num_wqes);
+  __device__ void shca_wait_for_free_sq_slots(uint64_t wave_sq_counter,
+      uint8_t num_wqes);
+  __device__ void shca_wait_for_db_touched_eq(uint64_t target_sq_counter);
+#endif
 #if defined(GDA_BNXT)
   __device__ void bnxt_ring_doorbell(uint32_t slot_idx);
 #endif
@@ -455,6 +501,30 @@ class QueuePair {
   [[maybe_unused]] __device__ __attribute__((noinline)) void mlx5_print_cqe_error(const mlx5_cqe64* cqe, uint8_t opcode);
 
   /* GDAProvider::MLX5 END */
+
+#if defined(GDA_SHCA)
+  /* GDAProvider::SHCA START */
+  shca_cqe64 *shca_cq_buf{nullptr};
+  volatile uint32_t *shca_cq_dbrec{nullptr};
+  uint32_t shca_cq_cnt{0};
+  uint32_t shca_cq_log_cnt{0};
+  volatile uint32_t *shca_dbrec{nullptr};
+  uint64_t *shca_sq_buf{nullptr};
+  uint16_t shca_sq_wqe_cnt{0};
+  uint64_t shca_sq_posted{0};
+  uint64_t shca_sq_db_touched{0};
+  uint64_t shca_sq_sunk{0};
+  uint64_t shca_quiet_active{0};
+  uint64_t shca_quiet_posted{0};
+  uint64_t shca_quiet_completed{0};
+  uint64_t shca_cq_consumer{0};
+  uint64_t shca_outstanding_wqes[SHCA_OUTSTANDING_TABLE_SIZE]{0};
+  shca_db_reg_t shca_db;
+  uint32_t shca_fwb_bufsize{0};
+  // acquire_lock()/release_lock() use 0/1, not the SPIN_LOCK_* protocol.
+  uint32_t shca_sq_lock{0};
+  /* GDAProvider::SHCA END */
+#endif
 
   /* GDAProvider::IONIC START */
 

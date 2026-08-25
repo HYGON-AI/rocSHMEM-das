@@ -1,0 +1,9 @@
+#!/bin/bash
+# Copyright (c) 2026 Hygon Information Technology Co., Ltd.
+# SPDX-License-Identifier: MIT
+
+set -e
+
+script_path=$(dirname "$(realpath $0)")
+
+source $script_path/gda -DGDA_SHCA=ON $*

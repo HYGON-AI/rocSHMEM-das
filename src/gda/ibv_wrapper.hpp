@@ -1,5 +1,6 @@
 /******************************************************************************
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Hygon Information Technology Co., Ltd.
  *
  * SPDX-License-Identifier: MIT
  *
@@ -25,7 +26,11 @@
 #ifndef LIBRARY_SRC_GDA_IBV_WRAPPER_HPP_
 #define LIBRARY_SRC_GDA_IBV_WRAPPER_HPP_
 
+#if defined(GDA_SHCA)
+#include <infiniband/verbs.h>
+#else
 #include "ibv_core.hpp"
+#endif
 #include "memory/hip_allocator.hpp"
 #include <sys/types.h>
 #include <map>
