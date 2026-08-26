@@ -1023,6 +1023,29 @@ TestHeatMapColl() {
   ExecTest  "alltoall"         64      1            256        v1073741824
 }
 
+TestPerfAMO() {
+  NOTIMEOUT=1
+  NOVERIF=1
+
+  ##############################################################################
+  #       | Name                     | Ranks               |  Max Message Size #
+  ##############################################################################
+  ExecPerfTest  "amo_add"              2               $MAX_MESSAGE_SIZE
+  ExecPerfTest  "amo_fadd"             2               $MAX_MESSAGE_SIZE
+  ExecPerfTest  "amo_inc"              2               $MAX_MESSAGE_SIZE
+  ExecPerfTest  "amo_finc"             2               $MAX_MESSAGE_SIZE
+  ExecPerfTest  "amo_set"              2               $MAX_MESSAGE_SIZE
+  ExecPerfTest  "amo_fetch"            2               $MAX_MESSAGE_SIZE
+  ExecPerfTest  "amo_fcswap"           2               $MAX_MESSAGE_SIZE
+  ExecPerfTest  "amo_and"              2               $MAX_MESSAGE_SIZE
+  ExecPerfTest  "amo_fetchand"         2               $MAX_MESSAGE_SIZE
+  ExecPerfTest  "amo_xor"              2               $MAX_MESSAGE_SIZE
+  ExecPerfTest  "amo_swap"             2               $MAX_MESSAGE_SIZE
+  ExecPerfTest  "amo_fetchor"          2               $MAX_MESSAGE_SIZE
+  ExecPerfTest  "amo_fetchxor"         2               $MAX_MESSAGE_SIZE
+  ExecPerfTest  "amo_or"               2               $MAX_MESSAGE_SIZE
+}
+
 TestPerfColl() {
   NOTIMEOUT=1
   NOVERIF=1
@@ -1041,46 +1064,51 @@ TestPerfColl() {
   ExecPerfTest  "reduce_on_stream"        $RANKS       $MAX_MESSAGE_SIZE
 }
 
-TestRMAPerf() {
+TestPerfRMA() {
   NOTIMEOUT=1
   NOVERIF=1
-
-  local rma_ranks=$RANKS
-  if [ $rma_ranks -gt 2 ]; then    
-    rma_ranks=2  
-  fi
 
   ##############################################################################
   #       | Name                    | Ranks                 | Max Message Size #
   ##############################################################################
-  ExecPerfTest  "put"                     $rma_ranks         $MAX_MESSAGE_SIZE
-  ExecPerfTest  "wgput"                   $rma_ranks         $MAX_MESSAGE_SIZE
-  ExecPerfTest  "waveput"                 $rma_ranks         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "put"                     2         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "wgput"                   2         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "waveput"                 2         $MAX_MESSAGE_SIZE
   
-  ExecPerfTest  "putnbi"                  $rma_ranks         $MAX_MESSAGE_SIZE
-  ExecPerfTest  "wgputnbi"                $rma_ranks         $MAX_MESSAGE_SIZE
-  ExecPerfTest  "waveputnbi"              $rma_ranks         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "putnbi"                  2         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "wgputnbi"                2         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "waveputnbi"              2         $MAX_MESSAGE_SIZE
   
-  ExecPerfTest  "get"                     $rma_ranks         $MAX_MESSAGE_SIZE
-  ExecPerfTest  "wgget"                   $rma_ranks         $MAX_MESSAGE_SIZE
-  ExecPerfTest  "waveget"                 $rma_ranks         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "get"                     2         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "wgget"                   2         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "waveget"                 2         $MAX_MESSAGE_SIZE
   
-  ExecPerfTest  "getnbi"                  $rma_ranks         $MAX_MESSAGE_SIZE
-  ExecPerfTest  "wggetnbi"                $rma_ranks         $MAX_MESSAGE_SIZE
-  ExecPerfTest  "wavegetnbi"              $rma_ranks         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "getnbi"                  2         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "wggetnbi"                2         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "wavegetnbi"              2         $MAX_MESSAGE_SIZE
+
+  ExecPerfTest  "defaultctxput"           2         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "teamctxput"              2         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "defaultctxputnbi"        2         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "teamctxputnbi"           2         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "defaultctxget"           2         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "teamctxget"              2         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "defaultctxgetnbi"        2         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "teamctxgetnbi"           2         $MAX_MESSAGE_SIZE 
   
-  ExecPerfTest  "putmem_on_stream"        $rma_ranks         $MAX_MESSAGE_SIZE
-  ExecPerfTest  "getmem_on_stream"        $rma_ranks         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "putmem_on_stream"        2         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "getmem_on_stream"        2         $MAX_MESSAGE_SIZE
   
   if [[ $TEST == perf-mlx5* ]]; then  
-  ExecPerfTest  "defaultctx_waveputnbi_dp"  $rma_ranks       $MAX_MESSAGE_SIZE
-  ExecPerfTest  "waveputnbi_dp"             $rma_ranks       $MAX_MESSAGE_SIZE
+  ExecPerfTest  "defaultctx_waveputnbi_dp"  2       $MAX_MESSAGE_SIZE
+  ExecPerfTest  "waveputnbi_dp"             2       $MAX_MESSAGE_SIZE
   else echo "Skip:   *_dp (AIROCSHMEM: GDA *_dp not implemented)"; fi
 }
 
 TestPerf() {
-  TestRMAPerf
+  TestPerfRMA
   TestPerfColl
+  TestPerfAMO
 }
 
 ExecPerfTest() {
@@ -1096,10 +1124,16 @@ ExecPerfTest() {
   local -a thread_options
   read -ra thread_options <<< "${ROCSHMEM_TEST_THDS:-128 256}"
 
-  if [[ $test_name == *"on_stream"* ]]; then
+  if [[ $test_name == *"on_stream"* ]] \
+     && [[ $test_name != "putmem_on_stream" ]] \
+     && [[ $test_name != "getmem_on_stream" ]]; then
     wg_options=(1)
     thread_options=(64)
     max_msg_size=1073741824
+
+    if [[ $test_name == "alltoallmem_on_stream" ]]; then
+      max_msg_size=$((1073741824 / num_ranks))
+    fi
   fi
   
   declare -A best_latency
@@ -1556,6 +1590,29 @@ case $TEST in
       TestHostRma
     fi
     ;;
+  "perf"*|"perf-mlx5"*)
+    read -ra TEST_OPTS <<< "$TEST"
+    NAME=${TEST_OPTS[1]}
+    if [ ${#TEST_OPTS[@]} -ge 3 ]; then
+      RANKS=${TEST_OPTS[2]}
+      MAX_MESSAGE_SIZE=${TEST_OPTS[3]:-8388608}
+    fi
+
+    if [ "$NAME" == "all" ]; then
+      TestPerf
+    elif [ "$NAME" == "rma-amo" ]; then
+      TestPerfRMA
+      TestPerfAMO
+    elif [ "$NAME" == "rma" ]; then
+      TestPerfRMA
+    elif [ "$NAME" == "coll" ]; then
+      TestPerfColl
+    elif [ "$NAME" == "amo" ]; then
+      TestPerfAMO
+    else
+      ExecPerfTest  "${NAME}"  "${RANKS}"  "${MAX_MESSAGE_SIZE}"
+    fi
+    ;;
   *"host")
     if [ -x "$ROCSHMEM_INFO" ] && "$ROCSHMEM_INFO" | grep -q "USE_IPC.*: ON"; then
       TestHostRma
@@ -1589,24 +1646,6 @@ case $TEST in
     ;;
   *"tiles")
     TestTiles
-    ;;
-    "perf"*|"perf-mlx5"*)
-    read -ra TEST_OPTS <<< "$TEST"
-    NAME=${TEST_OPTS[1]}
-    if [ ${#TEST_OPTS[@]} -ge 3 ]; then
-      RANKS=${TEST_OPTS[2]}
-      MAX_MESSAGE_SIZE=${TEST_OPTS[3]:-8388608}
-    fi
-
-    if [ "$NAME" == "all" ]; then
-      TestPerf
-    elif [ "$NAME" == "rma" ]; then
-      TestRMAPerf
-    elif [ "$NAME" == "coll" ]; then
-      TestPerfColl
-    else
-      ExecPerfTest  "${NAME}"  "${RANKS}"  "${MAX_MESSAGE_SIZE}"
-    fi
     ;;
   *)
     #######################################################################################

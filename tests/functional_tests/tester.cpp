@@ -1110,8 +1110,6 @@ bool Tester::peLaunchesKernel() {
 }
 
 bool Tester::AlignBwWithRccl(TesterArguments args, uint64_t size, double time_us, size_t *volume, double *AlgBw_align_rccl, double *BusBw_align_rccl) {
-  constexpr size_t kAlignFactor = 4;
-
   auto is_env_enabled = [](const char* env_name) -> bool {
     const char* env_value = getenv(env_name);
     if (!env_value) return false;
@@ -1148,7 +1146,7 @@ bool Tester::AlignBwWithRccl(TesterArguments args, uint64_t size, double time_us
     case TeamFCollectTestType:      // AllGather
     case TeamReduceScatterTestType:
       params.size_factor = args.numprocs;
-      params.volume_factor = kAlignFactor * args.numprocs;
+      params.volume_factor = args.numprocs;
       params.bus_factor = static_cast<double>(args.numprocs - 1) / args.numprocs;
       break;
 
@@ -1166,11 +1164,12 @@ bool Tester::AlignBwWithRccl(TesterArguments args, uint64_t size, double time_us
   }
 
   if (is_match) {
-    const size_t total_size = params.size_factor * size * num_timed_msgs; // total size of data transferred
+    const size_t base_count = size * num_timed_msgs;
+    const size_t total_count = params.size_factor * base_count; // total size of data transferred
     const double time_s = time_us  / 1.0E6; // total time in seconds
 
-    *volume = total_size / num_loops * params.volume_factor; // volume of data transferred, align with rccl's size
-    *AlgBw_align_rccl = static_cast<double>(total_size) / time_s / 1.0E9;
+    *volume = base_count / num_loops * params.volume_factor; // volume of data transferred, align with rccl's size
+    *AlgBw_align_rccl = static_cast<double>(total_count) / time_s / 1.0E9;
     *BusBw_align_rccl = *AlgBw_align_rccl * params.bus_factor;
   }
 
