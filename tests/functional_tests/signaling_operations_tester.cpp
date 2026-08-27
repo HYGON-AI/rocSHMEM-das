@@ -26,6 +26,8 @@
 
 #include <rocshmem/rocshmem.hpp>
 
+#include <vector>
+
 using namespace rocshmem;
 
 /******************************************************************************
@@ -191,24 +193,32 @@ void SignalingOperationsTester::verifyResults(size_t size) {
   } else {
     if (1 == args.myid) {
       // Validate Data
+      std::vector<char> result(size);
+      CHECK_HIP(hipMemcpy(result.data(), r_buf, size, hipMemcpyDeviceToHost));
       for (uint64_t i = 0; i < size; i++) {
-        if (r_buf[i] != '0') {
+        const unsigned char value = result[i];
+        if (value != static_cast<unsigned char>('0')) {
           fprintf(stderr, "Data validation error at idx %lu\n", i);
-          fprintf(stderr, "Got %c, Expected %c\n", r_buf[i], '0');
+          fprintf(stderr, "Got %u (0x%02x), Expected %u (0x%02x)\n",
+                  value, value,
+                  static_cast<unsigned char>('0'),
+                  static_cast<unsigned char>('0'));
           exit(-1);
         }
       }
       // Validate Signal
       if (ROCSHMEM_SIGNAL_SET == sig_op) {
         uint64_t expected_value = 1;
-        uint64_t value = *sig_addr;
+        uint64_t value{};
+        CHECK_HIP(hipMemcpy(&value, sig_addr, sizeof(value), hipMemcpyDeviceToHost));
 
         if (value != expected_value) {
           fprintf(stderr, "ROCSHMEM_SIGNAL_SET Value %lu, Expected %lu\n", value, expected_value);
           exit(-1);
         }
       } else if (ROCSHMEM_SIGNAL_ADD == sig_op) {
-        uint64_t value = *sig_addr;
+        uint64_t value{};
+        CHECK_HIP(hipMemcpy(&value, sig_addr, sizeof(value), hipMemcpyDeviceToHost));
         uint64_t expected_value = (args.myid + 123); // Initial Value
 
         switch (_type) {
