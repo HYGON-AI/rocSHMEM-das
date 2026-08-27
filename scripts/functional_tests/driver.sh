@@ -412,6 +412,7 @@ ExecTest_MPI() {
   # Construct Test Command
   TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_z"$NUM_THREADS"
   cmd+=("$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS")
+  cmd+=(-b "${ROCSHMEM_TEST_BATCH_SIZE:-1}")
   [[ -n "${NOVERIF:-}" ]] && cmd+=(-noverif)
   cmd+=(-localbuftype "${LOCALBUFTYPE:-heap}")
   if [[ -n "${ROCSHMEM_TEST_ARGS:-}" ]]; then
@@ -1026,6 +1027,7 @@ TestHeatMapColl() {
 TestPerfAMO() {
   NOTIMEOUT=1
   NOVERIF=1
+  ROCSHMEM_TEST_BATCH_SIZE=1
 
   ##############################################################################
   #       | Name                     | Ranks               |  Max Message Size #
@@ -1049,6 +1051,7 @@ TestPerfAMO() {
 TestPerfColl() {
   NOTIMEOUT=1
   NOVERIF=1
+  ROCSHMEM_TEST_BATCH_SIZE=1
 
   ##############################################################################
   #       | Name                     | Ranks               |  Max Message Size #
@@ -1067,6 +1070,7 @@ TestPerfColl() {
 TestPerfRMA() {
   NOTIMEOUT=1
   NOVERIF=1
+  ROCSHMEM_TEST_BATCH_SIZE=1
 
   ##############################################################################
   #       | Name                    | Ranks                 | Max Message Size #
