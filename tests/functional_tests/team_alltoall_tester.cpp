@@ -169,13 +169,15 @@ void TeamAlltoallTester<T1>::postLaunchKernel() {
 template <typename T1>
 void TeamAlltoallTester<T1>::resetBuffers(size_t size) {
 
-  int num_elems = size / sizeof(T1);
-  int buff_size = num_elems * sizeof(T1) * args.num_wgs * n_pes;
-  int idx = 0;
+  size_t num_elems = size / sizeof(T1);
+  size_t buff_size = num_elems * sizeof(T1) *
+                     static_cast<size_t>(args.num_wgs) *
+                     static_cast<size_t>(n_pes);
+  size_t idx = 0;
 
   for(unsigned int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
     for(int pe = 0; pe < n_pes; pe++) {
-      for(unsigned int i = 0; i < static_cast<unsigned int>(num_elems); i++) {
+      for(size_t i = 0; i < num_elems; i++) {
         idx = (wg_id * n_pes + pe) * num_elems + i;
         if constexpr (std::is_same<T1, char>::value ||
                       std::is_same<T1, signed char>::value ||
@@ -197,13 +199,13 @@ void TeamAlltoallTester<T1>::resetBuffers(size_t size) {
 
 template <typename T1>
 void TeamAlltoallTester<T1>::verifyResults(size_t size) {
-  int num_elems = size / sizeof(T1);
-  int idx = 0;
+  size_t num_elems = size / sizeof(T1);
+  size_t idx = 0;
 
   for(unsigned int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
     for(int pe = 0; pe < n_pes; pe++) {
-      for(unsigned int i = 0; i < static_cast<unsigned int>(num_elems); i++) {
-        idx = (wg_id * n_pes + pe) * num_elems + static_cast<int>(i);
+      for(size_t i = 0; i < num_elems; i++) {
+        idx = (wg_id * n_pes + pe) * num_elems + i;
         if (dest_buf[idx] != source_buf[idx]) {
           std::cerr << "Data validation error at idx " << idx << std::endl;
           std::cerr << "PE " << my_pe << " Got " << dest_buf[idx]
