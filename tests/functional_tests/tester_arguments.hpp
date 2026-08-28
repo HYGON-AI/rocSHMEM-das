@@ -106,9 +106,9 @@ public:
   /**
    * Defaults tester values
    */
-  int loop = 10;
+  int loop = 20;
   int skip = 10;
-  int loop_large = 10;
+  int loop_large = 20;
   int batch = 0;
   bool verif = true;
   size_t large_message_size = 32768;
