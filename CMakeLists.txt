@@ -60,6 +60,7 @@ option(USE_SHARED_CTX "Request support for shared ctx between WG" OFF)
 option(USE_SINGLE_NODE "Enable single node support only." OFF)
 option(USE_HDP_FLUSH "Force flush the HDP cache." OFF)
 option(USE_HDP_FLUSH_HOST_SIDE "Use a polling thread to flush the HDP cache on the host." OFF)
+option(USE_RCCL "Enable RCCL acceleration for host collectives" ON)
 
 option(BUILD_FUNCTIONAL_TESTS "Build the functional tests (uses MPI if available, otherwise SLR)" OFF)
 option(BUILD_EXAMPLES "Build the examples" OFF)
@@ -324,6 +325,16 @@ if (NOT BUILD_TESTS_ONLY)
   find_package(hip REQUIRED)
   find_package(hsa-runtime64 REQUIRED)
 
+  if(USE_RCCL)
+    find_path(RCCL_INCLUDE_DIR rccl.h
+      HINTS $ENV{RCCL_HOME} ${RCCL_HOME} ${ROCM_PATH} /opt/dtk
+      PATH_SUFFIXES include)
+    if(NOT RCCL_INCLUDE_DIR)
+      message(STATUS "RCCL headers not found; disabling RCCL host collectives")
+      set(USE_RCCL OFF)
+    endif()
+  endif()
+
   if (USE_SDMA)
     find_package(hsakmt REQUIRED)
   endif()
@@ -424,6 +435,8 @@ if (NOT BUILD_TESTS_ONLY)
       $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include/rocshmem>   # rocshmem_config.h from rocshmem.hpp
       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
       $<INSTALL_INTERFACE:include>
+    PRIVATE
+      $<$<BOOL:${USE_RCCL}>:${RCCL_INCLUDE_DIR}>
   )
 
   target_link_libraries(

@@ -43,6 +43,15 @@ namespace envvar {
     const var<bool> uniqueid_with_mpi("UNIQUEID_WITH_MPI",
       "Defines whether rocSHMEM is expected to use MPI internally when using the uniqueId based initialization. 0: Do not use MPI; 1: Use MPI",
       false);
+    const var<bool> disable_rccl("DISABLE_RCCL",
+      "Disable RCCL host collectives at runtime. 0: Use RCCL when compiled and available; 1: Use the rocSHMEM collective implementation",
+      false);
+    const var<size_t> rccl_min_size("RCCL_MIN_SIZE",
+      "Minimum host collective message size in bytes for RCCL. Messages less than or equal to this value use the rocSHMEM implementation",
+      4194304);
+    const var<bool> rccl_delay_init("RCCL_DELAY_INIT",
+      "Delay RCCL communicator initialization until the first eligible host collective. 0: Initialize with the team; 1: Initialize on demand",
+      true);
     const var<types::debug_level> debug_level("DEBUG_LEVEL",
       "Debug output level (NONE, ERROR, WARN, ENV, VERSION, INFO, API, TRACE). "
       "Append modifiers: :noversion, :noenv, :noinfo, :nowarn, :notrace to suppress categories; "

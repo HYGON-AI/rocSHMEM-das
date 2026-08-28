@@ -30,6 +30,7 @@
 #include "log.hpp"
 #include "memory/window_info.hpp"
 #include "collective_launcher.hpp"
+#include "rccl.hpp"
 #include "team.hpp"
 
 #include <utility>
@@ -182,6 +183,14 @@ __host__ void HostInterface::broadcast_internal(MPI_Comm mpi_comm, T* dest,
    */
   hdp_policy_->hdp_flush();
 
+#if defined(USE_RCCL)
+  const size_t bytes = static_cast<size_t>(nelems) * sizeof(T);
+  RcclCommContext* rccl_comm = get_rccl_comm(mpi_comm, bytes);
+  if (rccl_broadcast(rccl_comm, source, dest, bytes, pe_root, nullptr, true)) {
+    return;
+  }
+#endif
+
   /*
    * Offload the broadcast to MPI
    */
@@ -220,6 +229,15 @@ __host__ void HostInterface::broadcast(rocshmem_team_t team, T* dest,
    */
   Team* team_obj{get_internal_team(team)};
   MPI_Comm mpi_comm{team_obj->mpi_comm};
+
+#if defined(USE_RCCL)
+  hdp_policy_->hdp_flush();
+  if (rccl_broadcast(team_obj, host_bootstrap_, source, dest,
+                     static_cast<size_t>(nelems) * sizeof(T), pe_root, nullptr,
+                     true)) {
+    return;
+  }
+#endif
 
   broadcast_internal<T>(mpi_comm, dest, source, nelems, pe_root);
 
@@ -367,6 +385,19 @@ __host__ void HostInterface::to_all_internal(MPI_Comm mpi_comm, T* dest,
    */
   hdp_policy_->hdp_flush();
 
+#if defined(USE_RCCL)
+  constexpr ncclDataType_t rccl_type = to_rccl_data_type<T>();
+  constexpr ncclRedOp_t rccl_op = to_rccl_reduce_op<Op>();
+  const size_t bytes = static_cast<size_t>(nreduce) * sizeof(T);
+  RcclCommContext* rccl_comm =
+      rccl_type != ncclNumTypes && rccl_op != ncclNumOps
+          ? get_rccl_comm(mpi_comm, bytes)
+          : nullptr;
+  if (rccl_all_reduce(rccl_comm, source, dest, nreduce, rccl_type, rccl_op, nullptr, true)) {
+    return;
+  }
+#endif
+
   /*
    * Offload the allreduce to MPI
    */
@@ -406,6 +437,14 @@ __host__ int HostInterface::reduce(rocshmem_team_t team, T* dest,
   Team* team_obj{get_internal_team(team)};
   MPI_Comm mpi_comm{team_obj->mpi_comm};
 
+#if defined(USE_RCCL)
+  hdp_policy_->hdp_flush();
+  if (rccl_all_reduce<T, Op>(team_obj, host_bootstrap_, source, dest, nreduce,
+                             nullptr, true)) {
+    return ROCSHMEM_SUCCESS;
+  }
+#endif
+
   to_all_internal<T, Op>(mpi_comm, dest, source, nreduce);
 
   return ROCSHMEM_SUCCESS;
@@ -419,15 +458,22 @@ __host__ int HostInterface::reduce_scatter(rocshmem_team_t team, T* dest,
   Team* team_obj{get_internal_team(team)};
   MPI_Comm mpi_comm{team_obj->mpi_comm};
 
+  hdp_policy_->hdp_flush();
+
+#if defined(USE_RCCL)
+  if (rccl_reduce_scatter<T, Op>(team_obj, host_bootstrap_, source, dest,
+                                 nreduce, nullptr, true)) {
+    return ROCSHMEM_SUCCESS;
+  }
+#endif
+
   if (mpi_comm == MPI_COMM_NULL) {
-    LOG_WARN("reduce_scatter host variant is only executable on MPI bootstrapping path");
+    LOG_WARN("reduce_scatter host variant requires RCCL or MPI bootstrapping");
     return ROCSHMEM_ERROR;
   }
 
   MPI_Op mpi_op{get_mpi_op(Op)};
   MPI_Datatype mpi_type{get_mpi_type<T>()};
-
-  hdp_policy_->hdp_flush();
 
   mpilib_ftable_.Reduce_scatter_block(
       const_cast<T*>(source), dest, nreduce, mpi_type, mpi_op, mpi_comm);
@@ -442,6 +488,13 @@ __host__ int HostInterface::reduce_on_stream(rocshmem_team_t team,
                                               int nreduce,
                                               hipStream_t stream)
 {
+#if defined(USE_RCCL)
+  Team* team_obj{get_internal_team(team)};
+  if (rccl_all_reduce<T, Op>(team_obj, host_bootstrap_, source, dest, nreduce,
+                             stream)) {
+    return ROCSHMEM_SUCCESS;
+  }
+#endif
   size_t byte_count = static_cast<size_t>(nreduce) * sizeof(T);
   if (CollectiveLauncher::use_single_wg(team, byte_count)) {
     // Small-message path: one-block reduce kernel.

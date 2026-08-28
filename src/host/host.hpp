@@ -35,6 +35,7 @@
  */
 
 #include <map>
+#include <mutex>
 
 #include "rocshmem/rocshmem.hpp"
 #include "hdp_policy.hpp"
@@ -44,6 +45,8 @@
 #include "mpi_instance.hpp"
 
 namespace rocshmem {
+
+class RcclCommContext;
 
 class HostContextWindowInfo {
  public:
@@ -341,6 +344,10 @@ class HostInterface {
 
   __host__ MPI_Comm get_mpi_comm(int pe_start, int log_pe_stride, int pe_size);
 
+#if defined(USE_RCCL)
+  __host__ RcclCommContext* get_rccl_comm(MPI_Comm mpi_comm, size_t bytes);
+#endif
+
   __host__ MPI_Op get_mpi_op(ROCSHMEM_OP Op);
 
   template <typename T>
@@ -451,6 +458,11 @@ class HostInterface {
    * @brief Map of active set descriptors to MPI communicators
    */
   std::map<ActiveSetKey, MPI_Comm> comm_map{};
+
+#if defined(USE_RCCL)
+  std::map<MPI_Comm, RcclCommContext*> rccl_comm_map_{};
+  std::mutex rccl_comm_map_mutex_{};
+#endif
 };
 
 }  // namespace rocshmem
