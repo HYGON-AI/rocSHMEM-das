@@ -1116,7 +1116,7 @@ bool Tester::peLaunchesKernel() {
 bool Tester::AlignBwWithRccl(TesterArguments args, uint64_t size, double time_us, size_t *volume, double *AlgBw_align_rccl, double *BusBw_align_rccl) {
   auto is_env_enabled = [](const char* env_name) -> bool {
     const char* env_value = getenv(env_name);
-    if (!env_value) return false;
+    if (!env_value) return true;
 
     std::string value(env_value);
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c){ return std::tolower(c); });
