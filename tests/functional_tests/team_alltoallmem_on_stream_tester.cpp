@@ -126,7 +126,7 @@ void TeamAlltoallmemOnStreamTester::resetBuffers(size_t size) {
   // Initialize source buffer: each PE fills its portion with its PE number
   // For alltoall, PE i sends block j to PE j
   // Support multiple work groups (teams)
-  int idx = 0;
+  size_t idx = 0;
 
   for (int wg_id = 0; wg_id < num_teams; wg_id++) {
     for (int pe = 0; pe < n_pes; pe++) {
@@ -192,7 +192,7 @@ void TeamAlltoallmemOnStreamTester::verifyResults(size_t size) {
   // the block that PE j sent to PE i
   // PE j sends block i (containing value j * n_pes + i) to PE i
   // Support multiple work groups (teams)
-  int idx = 0;
+  size_t idx = 0;
 
   for (int wg_id = 0; wg_id < num_teams; wg_id++) {
     for (int j = 0; j < n_pes; j++) {

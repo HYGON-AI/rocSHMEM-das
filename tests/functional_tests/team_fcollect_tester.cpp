@@ -101,8 +101,9 @@ TeamFcollectTester<T1>::TeamFcollectTester(TesterArguments args)
   n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
 
   // Total number of elements in src buffer
-  int total_elems = (max_msg_size / sizeof(T1)) * args.num_wgs ;
-  int buff_size = total_elems * sizeof(T1);
+  size_t total_elems = (max_msg_size / sizeof(T1)) *
+                       static_cast<size_t>(args.num_wgs);
+  size_t buff_size = total_elems * sizeof(T1);
 
   source_buf = (T1 *)alloc_test_buffer(buff_size, args.local_buf_type);
   dest_buf = (T1 *)alloc_test_buffer(buff_size * n_pes);
@@ -110,17 +111,17 @@ TeamFcollectTester<T1>::TeamFcollectTester(TesterArguments args)
   if constexpr (std::is_same<T1, char>::value ||
                 std::is_same<T1, signed char>::value ||
                 std::is_same<T1, unsigned char>::value) {
-    for (int i = 0; i < total_elems; ++i) {
+    for (size_t i = 0; i < total_elems; ++i) {
       source_buf[i] = static_cast<T1>('a' + my_pe);
     }
   }
   else if constexpr (std::is_floating_point<T1>::value) {
-    for (int i = 0; i < total_elems; ++i) {
+    for (size_t i = 0; i < total_elems; ++i) {
       source_buf[i] = static_cast<T1>(3.14 + my_pe);
     }
   }
   else if constexpr (std::is_integral<T1>::value) {
-    for (int i = 0; i < total_elems; i++) {
+    for (size_t i = 0; i < total_elems; i++) {
       source_buf[i] = static_cast<T1>(my_pe);
     }
   }
@@ -184,8 +185,10 @@ void TeamFcollectTester<T1>::postLaunchKernel() {
 
 template <typename T1>
 void TeamFcollectTester<T1>::resetBuffers(size_t size) {
-  int num_elems = (size / sizeof(T1));
-  int buff_size = num_elems * sizeof(T1) * args.num_wgs * n_pes;
+  size_t num_elems = size / sizeof(T1);
+  size_t buff_size = num_elems * sizeof(T1) *
+                     static_cast<size_t>(args.num_wgs) *
+                     static_cast<size_t>(n_pes);
 
   memset(dest_buf, -1, buff_size);
 }
@@ -193,13 +196,13 @@ void TeamFcollectTester<T1>::resetBuffers(size_t size) {
 template <typename T1>
 void TeamFcollectTester<T1>::verifyResults(size_t size) {
 
-  int num_elems = size / sizeof(T1);
-  int idx = 0;
+  size_t num_elems = size / sizeof(T1);
+  size_t idx = 0;
   T1 expected;
 
   for(unsigned int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
     for(int pe = 0; pe < n_pes; pe++) {
-      for(unsigned int i = 0; i < static_cast<unsigned int>(num_elems); i++) {
+      for(size_t i = 0; i < num_elems; i++) {
         idx = (wg_id * n_pes + pe) * num_elems + i;
         if constexpr (std::is_same<T1, char>::value ||
               std::is_same<T1, signed char>::value ||

@@ -108,8 +108,9 @@ TeamBroadcastTester<T1>::TeamBroadcastTester(TesterArguments args)
   n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
 
   // Total number of elements in src buffer
-  int total_elems = (max_msg_size / sizeof(T1)) * args.num_wgs ;
-  int buff_size = total_elems * sizeof(T1);
+  size_t total_elems = (max_msg_size / sizeof(T1)) *
+                       static_cast<size_t>(args.num_wgs);
+  size_t buff_size = total_elems * sizeof(T1);
 
   source_buf = (T1 *)alloc_test_buffer(buff_size, args.local_buf_type);
   dest_buf = (T1 *)alloc_test_buffer(buff_size);
@@ -171,12 +172,13 @@ void TeamBroadcastTester<T1>::postLaunchKernel() {
 template <typename T1>
 void TeamBroadcastTester<T1>::resetBuffers(size_t size) {
 
-  int num_elems = size / sizeof(T1);
-  [[maybe_unused]] int buff_size = num_elems * sizeof(T1) * args.num_wgs;
-  int idx = 0;
+  size_t num_elems = size / sizeof(T1);
+  [[maybe_unused]] size_t buff_size = num_elems * sizeof(T1) *
+                                      static_cast<size_t>(args.num_wgs);
+  size_t idx = 0;
 
   for (unsigned int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
-    for (unsigned int i = 0; i < static_cast<unsigned int>(num_elems); i++) {
+    for (size_t i = 0; i < num_elems; i++) {
       idx = wg_id * num_elems + i;
       if constexpr (std::is_same<T1, char>::value ||
                     std::is_same<T1, signed char>::value ||
@@ -199,14 +201,14 @@ void TeamBroadcastTester<T1>::resetBuffers(size_t size) {
 template <typename T1>
 void TeamBroadcastTester<T1>::verifyResults(size_t size) {
 
-  int num_elems = size / sizeof(T1);
-  int idx = 0;
+  size_t num_elems = size / sizeof(T1);
+  size_t idx = 0;
   T1 expected;
 
   // Verify correctness: all PEs (including root) receive source 
   // buffer data in dest buffer
   for (unsigned int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
-    for (int i = 0; i < num_elems; i++) {
+    for (size_t i = 0; i < num_elems; i++) {
       idx = wg_id * num_elems + i;
       if constexpr (std::is_same<T1, char>::value ||
                     std::is_same<T1, signed char>::value ||

@@ -126,8 +126,9 @@ TeamReduceScatterTester<T1, T2>::TeamReduceScatterTester(
   my_pe = rocshmem_team_my_pe(ROCSHMEM_TEAM_WORLD);
   n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
 
-  int total_elems = (max_msg_size / sizeof(T1)) * args.num_wgs;
-  int buff_size = total_elems * sizeof(T1);
+  size_t total_elems = (max_msg_size / sizeof(T1)) *
+                       static_cast<size_t>(args.num_wgs);
+  size_t buff_size = total_elems * sizeof(T1);
 
   // source buffer: n_pes * max_msg_size elements per WG (on symmetric heap)
   s_buf = (T1 *)alloc_test_buffer(n_pes * buff_size, args.local_buf_type);
@@ -194,15 +195,15 @@ void TeamReduceScatterTester<T1, T2>::postLaunchKernel() {
 
 template <typename T1, ROCSHMEM_OP T2>
 void TeamReduceScatterTester<T1, T2>::resetBuffers(uint64_t size) {
-  int num_elems = size / sizeof(T1);
+  size_t num_elems = size / sizeof(T1);
 
   for (unsigned int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
     // Each PE sets its entire source buffer to 1 so that a SUM
     // over n_pes PEs yields n_pes in every element of dest.
-    for (unsigned int i = 0; i < static_cast<unsigned int>(n_pes * num_elems); i++) {
+    for (size_t i = 0; i < static_cast<size_t>(n_pes) * num_elems; i++) {
       s_buf[wg_id * n_pes * num_elems + i] = static_cast<T1>(1);
     }
-    for (unsigned int i = 0; i < static_cast<unsigned int>(num_elems); i++) {
+    for (size_t i = 0; i < num_elems; i++) {
       r_buf[wg_id * num_elems + i] = static_cast<T1>(0);
     }
   }
@@ -210,14 +211,14 @@ void TeamReduceScatterTester<T1, T2>::resetBuffers(uint64_t size) {
 
 template <typename T1, ROCSHMEM_OP T2>
 void TeamReduceScatterTester<T1, T2>::verifyResults(uint64_t size) {
-  int num_elems = size / sizeof(T1);
+  size_t num_elems = size / sizeof(T1);
 
   for (unsigned int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
-    for (unsigned int i = 0; i < static_cast<unsigned int>(num_elems); i++) {
-      int idx = wg_id * num_elems + i;
+    for (size_t i = 0; i < num_elems; i++) {
+      size_t idx = wg_id * num_elems + i;
       auto r = verify_buf(r_buf[idx], (T1)n_pes);
       if (r.first == false) {
-        fprintf(stderr, "Data validation error at idx %d (wg %u)\n", idx, wg_id);
+        fprintf(stderr, "Data validation error at idx %zu (wg %u)\n", idx, wg_id);
         fprintf(stderr, "%s.\n", r.second.c_str());
         exit(-1);
       }
