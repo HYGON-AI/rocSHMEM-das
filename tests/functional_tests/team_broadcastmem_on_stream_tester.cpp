@@ -56,8 +56,8 @@ TeamBroadcastmemOnStreamTester::TeamBroadcastmemOnStreamTester(TesterArguments a
     }
   }
 
-  int num_bytes_wg = args.max_msg_size;
-  int total_bytes = num_bytes_wg * num_teams;
+  size_t num_bytes_wg = args.max_msg_size;
+  size_t total_bytes = num_bytes_wg * static_cast<size_t>(num_teams);
   buf_size = total_bytes;
 
   source_buf = static_cast<char *>(alloc_test_buffer(buf_size, args.local_buf_type));
@@ -135,7 +135,7 @@ void TeamBroadcastmemOnStreamTester::resetBuffers(size_t size) {
   // Initialize source buffer on all PEs
   // Each work group has its own portion
   for (int wg_id = 0; wg_id < num_teams; wg_id++) {
-    int idx = wg_id * size;
+    size_t idx = static_cast<size_t>(wg_id) * size;
     if (my_pe == pe_root) {
       // Root PE fills its source buffer with broadcast value
       int value = (pe_root + 1) * 100 + wg_id;
@@ -150,7 +150,7 @@ void TeamBroadcastmemOnStreamTester::resetBuffers(size_t size) {
   // Root PE keeps its initial dest value (broadcast doesn't copy to root's
   // dest) Non-root PEs set to 0 (will receive broadcast data)
   for (int wg_id = 0; wg_id < num_teams; wg_id++) {
-    int idx = wg_id * size;
+    size_t idx = static_cast<size_t>(wg_id) * size;
     if (my_pe == pe_root) {
       // Root PE's dest buffer stays with a different value
       int root_dest_value = 0xAA;
@@ -205,7 +205,7 @@ void TeamBroadcastmemOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize
 void TeamBroadcastmemOnStreamTester::verifyResults(size_t size) {
   // Verify correctness: after broadcast, all PEs receive the broadcast data
   for (int wg_id = 0; wg_id < num_teams; wg_id++) {
-    int idx = wg_id * size;
+    size_t idx = static_cast<size_t>(wg_id) * size;
     int expected_value = (pe_root + 1) * 100 + wg_id;
 
     for (size_t k = 0; k < size; k++) {
@@ -221,4 +221,3 @@ void TeamBroadcastmemOnStreamTester::verifyResults(size_t size) {
     }
   }
 }
-
