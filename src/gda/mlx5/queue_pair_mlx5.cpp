@@ -200,12 +200,12 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
     uint16_t consumed_slots  = posted   - completed;
     uint16_t available_slots = sq_depth - consumed_slots;
 
-    /* continue until both:
-     *   - no additional WQEs have been posted
-     *   - the number of requested SQ slots are available */
-    uint64_t prior_sq_post = sq_post;
-    sq_post = __hip_atomic_load(&mlx5_sq.post, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
-    if (sq_post == prior_sq_post && available_slots >= requested_available_slots) {
+    /* Wait only for WQEs included in the entry-time post snapshot. WQEs
+     * posted concurrently after this call began must not extend this wait.
+     * A wrapped difference greater than the SQ depth means completion has
+     * already advanced past the snapshot. */
+    if (consumed_slots > sq_depth ||
+        available_slots >= requested_available_slots) {
       return;
     }
   }
