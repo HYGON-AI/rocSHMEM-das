@@ -170,7 +170,7 @@ class QueuePair {
    * @param[in] wf_info Wavefront information.
    */
   __device__ void put_nbi(void *dest, const void *source, size_t length,
-      ActiveWFInfo &wf_info);
+      ActiveWFInfo &wf_info, bool ring_db = true);
 
   __device__ void put_nbi_single(void *dest, const void *source, size_t length,
       bool ring_db);

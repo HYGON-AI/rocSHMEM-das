@@ -313,6 +313,15 @@ class GDAContext : public Context {
                                               int elem_offset = 0,
                                               int elem_count = -1);
 
+  __device__ __forceinline__ uint64_t get_next_qp_group(
+      int qp_index, uint64_t pending_lanes);
+  __device__ __forceinline__ void put_nbi_shared_qp(int qp_index, void *dest,
+      const void *source, size_t length, bool ring_db);
+  __device__ __forceinline__ void get_nbi_shared_qp(int qp_index, void *dest,
+      const void *source, size_t length);
+  __device__ __forceinline__ void atomic_nofetch_shared_qp(int qp_index, void *dest,
+      int64_t value);
+
   __device__ void internal_sync(int pe, int PE_start, int stride, int PE_size,
       int64_t *pSync, ActiveWFInfo &wf_info);
 
@@ -410,6 +419,8 @@ class GDAContext : public Context {
    * @brief Get the Queue Pair index to use for a given PE
    */
   __device__ __forceinline__ uint32_t get_qp_index(int pe, ActiveWFInfo wf_info);
+  __device__ __forceinline__ uint32_t get_team_qp_index(
+      const GDATeam *team_obj, int pe);
 
   //Temporary scratchpad memory used by internal barrier algorithms.
   int64_t *barrier_sync{nullptr};

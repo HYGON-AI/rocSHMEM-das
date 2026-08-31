@@ -644,6 +644,7 @@ __device__ void GDAContext::internal_ring_allreduce(T *dst, const T *src,
   long *pSync = team_obj->reduce_pSync;
   T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
   int my_pe_in_team = team_obj->my_pe;
+  long sequence_base = team_obj->reduce_sequence_number;
 
   int off_seg, off_send, off_recv;
   int send_pe = (my_pe_in_team + 1) % PE_size;
@@ -675,7 +676,7 @@ __device__ void GDAContext::internal_ring_allreduce(T *dst, const T *src,
         chunk_size * sizeof(T), send_pe, qp_index, wf_info);
 
       if (is_thread_zero_in_block()) {
-        wait_val = seg + 100;
+        wait_val = sequence_base + seg + 1;
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe, qp_index, wf_info);
 #if defined(__gfx936__) || defined (__gfx938__)
         __threadfence_system();
@@ -696,7 +697,7 @@ __device__ void GDAContext::internal_ring_allreduce(T *dst, const T *src,
         chunk_size * sizeof(T), send_pe, qp_index, wf_info);
 
       if (is_thread_zero_in_block()) {
-        wait_val = seg + 100;
+        wait_val = sequence_base + seg + 1;
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe, qp_index, wf_info);
 #if defined(__gfx936__) || defined (__gfx938__)
         __threadfence_system();
@@ -708,8 +709,8 @@ __device__ void GDAContext::internal_ring_allreduce(T *dst, const T *src,
   }
   __syncthreads();
 
-  for (int i = wg_id; i < 2 * constmem.num_pes - 2; i += wg_size) {
-    pSync[i] = ROCSHMEM_SYNC_VALUE;
+  if (is_thread_zero_in_block()) {
+    team_obj->reduce_sequence_number += n_seg;
   }
   __syncthreads();
 }
@@ -1232,6 +1233,86 @@ __device__ bool GDAContext::internal_proxy_broadcast(T *dst, const T *src,
   return true;  // Proxy broadcast completed successfully
 }
 
+/**
+ * @brief Select the next same-QP lane group for wave-safe submission.
+ * @note Default-context QPs may be shared across workgroups. Processing one
+ * QP group at a time avoids a wave blocking on multiple SQ locks.
+ */
+__device__ __forceinline__ uint64_t GDAContext::get_next_qp_group(
+    int qp_index, uint64_t pending_lanes) {
+  // Use the first pending lane to select the next QP.
+  const int first_lane = __builtin_ctzll(pending_lanes);
+  const int selected_qp = __shfl(qp_index, first_lane);
+  const int lane_id = get_flat_block_id() % WF_SIZE;
+  // Collect all pending lanes mapped to the selected QP.
+  return __ballot((pending_lanes & (uint64_t{1} << lane_id)) &&
+                  qp_index == selected_qp);
+}
+
+/** @brief Submit a PUT safely through a QP shared across workgroups. */
+__device__ __forceinline__ void GDAContext::put_nbi_shared_qp(
+    int qp_index, void *dest, const void *source, size_t length, bool ring_db) {
+  if (ctx_id_ != 0) {
+    qps[qp_index].put_nbi_single(dest, source, length, ring_db);
+    return;
+  }
+
+  uint64_t pending_lanes = get_active_lane_mask();
+  const int lane_id = get_flat_block_id() % WF_SIZE;
+  // Submit each QP group through the existing wave-batched path.
+  while (pending_lanes) {
+    const uint64_t qp_group = get_next_qp_group(qp_index, pending_lanes);
+    if (qp_group & (uint64_t{1} << lane_id)) {
+      ActiveWFInfo wf_info(qp_index);
+      qps[qp_index].put_nbi(dest, source, length, wf_info, ring_db);
+    }
+    // Continue with the remaining QP groups.
+    pending_lanes &= ~qp_group;
+  }
+}
+
+/** @brief Submit a GET safely through a QP shared across workgroups. */
+__device__ __forceinline__ void GDAContext::get_nbi_shared_qp(
+    int qp_index, void *dest, const void *source, size_t length) {
+  if (ctx_id_ != 0) {
+    qps[qp_index].get_nbi_single(dest, source, length, true);
+    return;
+  }
+
+  uint64_t pending_lanes = get_active_lane_mask();
+  const int lane_id = get_flat_block_id() % WF_SIZE;
+  // Submit each QP group through the existing wave-batched path.
+  while (pending_lanes) {
+    const uint64_t qp_group = get_next_qp_group(qp_index, pending_lanes);
+    if (qp_group & (uint64_t{1} << lane_id)) {
+      ActiveWFInfo wf_info(qp_index);
+      qps[qp_index].get_nbi(dest, source, length, wf_info);
+    }
+    pending_lanes &= ~qp_group;
+  }
+}
+
+/** @brief Submit a non-fetching atomic safely through a shared QP. */
+__device__ __forceinline__ void GDAContext::atomic_nofetch_shared_qp(
+    int qp_index, void *dest, int64_t value) {
+  if (ctx_id_ != 0) {
+    qps[qp_index].atomic_nofetch_single(dest, value);
+    return;
+  }
+
+  uint64_t pending_lanes = get_active_lane_mask();
+  const int lane_id = get_flat_block_id() % WF_SIZE;
+  // Submit each QP group through the existing wave-batched path.
+  while (pending_lanes) {
+    const uint64_t qp_group = get_next_qp_group(qp_index, pending_lanes);
+    if (qp_group & (uint64_t{1} << lane_id)) {
+      ActiveWFInfo wf_info(qp_index);
+      qps[qp_index].atomic_nofetch(dest, value, 0, wf_info);
+    }
+    pending_lanes &= ~qp_group;
+  }
+}
+
 template <typename T>
 __device__ void GDAContext::alltoall(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems,
@@ -1245,6 +1326,24 @@ __device__ void GDAContext::alltoallv(rocshmem_team_t team,
                                       const size_t dest_displs[],
                                       T *source, const size_t source_nelems[],
                                       const size_t source_displs[]) {
+  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
+  const int pe_size = team_obj->num_pes;
+  const size_t nelems = source_nelems[0];
+  bool regular_layout = nelems <= 0x7fffffff;
+
+  for (int pe = 0; pe < pe_size && regular_layout; pe++) {
+    regular_layout = source_nelems[pe] == nelems &&
+                     dest_nelems[pe] == nelems &&
+                     source_displs[pe] == static_cast<size_t>(pe) * nelems &&
+                     dest_displs[pe] == static_cast<size_t>(pe) * nelems;
+  }
+
+  if (regular_layout) {
+    alltoall(team, dest, source, static_cast<int>(nelems), 0,
+             static_cast<int>(nelems));
+    return;
+  }
+
   if (constmem.alltoall_wg_algo == gda::ALLTOALLV_WG_ALGO_COPY) {
     alltoallv_copy(team,
                    dest, dest_nelems, dest_displs,
@@ -1264,7 +1363,9 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
   int pe_size = team_obj->num_pes;
   long *pSync = team_obj->alltoall_pSync;
   int my_pe_in_team = team_obj->my_pe;
-  uint64_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
+  uint64_t a2a_sn = team_obj->alltoall_sequence_number;
+  uint64_t alltoall_pSync_offset = (a2a_sn % 2) * pe_size;
+  long completion_count = a2a_sn / 2 + 1;
   T *tmp_buf = reinterpret_cast<T*>(team_obj->pWrk);
   int tmp_buf_off = (ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double)) / (pe_size * sizeof(T));
 
@@ -1274,6 +1375,7 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
   // Have each PE put their designated data to the other PEs
   for (int j = tid; j < pe_size; j+= step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
+    int qp_index = get_team_qp_index(team_obj, dest_pe);
     uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
     size_t nelems = source_nelems[dest_pe] * sizeof(T);
     char* amo_dst = ((char*)&pSync[alltoall_pSync_offset + my_pe_in_team] + base_heap_offset);
@@ -1281,22 +1383,22 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
     if (nelems != 0) {
       T* src = (T*)((char*)source + (source_displs[j] * sizeof(T)));
       T* dst = (T*)((char*)&tmp_buf[constmem.my_pe * tmp_buf_off] + base_heap_offset);
-      qps[dest_pe].put_nbi_single(dst, src, nelems, false);
+      put_nbi_shared_qp(qp_index, dst, src, nelems, false);
     }
 
-    qps[dest_pe].atomic_nofetch_single(amo_dst, 1);
+    atomic_nofetch_shared_qp(qp_index, amo_dst, 1);
   }
 
   // wait until everyone has obtained their designated data
   for (int j = tid; j < pe_size; j+= step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
+    int qp_index = get_team_qp_index(team_obj, dest_pe);
 
     long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
-    while (uncached_load(sync_flags) != 1) { }
+    while (uncached_load(sync_flags) < completion_count) { }
 
-    qps[dest_pe].quiet_single();
+    qps[qp_index].quiet_single();
 
-    pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
   }
 
   // Copy out of staging buffer
@@ -1317,6 +1419,7 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
   if (is_thread_zero_in_block()) {
     team_obj->alltoall_sequence_number++;
   }
+  __syncthreads();
 }
 
 template <typename T>
@@ -1329,6 +1432,7 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
   int my_pe_in_team = team_obj->my_pe;
   uint64_t a2a_sn   = team_obj->alltoall_sequence_number;
   uint64_t alltoall_pSync_offset = (a2a_sn % 2) * pe_size;
+  long completion_count = a2a_sn / 2 + 1;
   uint64_t *tmp_buf = (uint64_t*)team_obj->pWrk;
 
   const uint64_t displs_mask = 0x0000'FFFF'FFFF'FFFF;
@@ -1338,7 +1442,7 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
   int tid = get_flat_block_id();
   int step_size = min(get_flat_block_size(), WF_SIZE);
 
-  /* Put Ctrl Message */
+  /* Phase 1: publish displacement control messages to every peer. */
   for (int j = tid; j < pe_size; j+= step_size) {
     uint64_t *src;
     uint64_t *dst;
@@ -1346,6 +1450,7 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
     uint64_t displ_bits;
 
     int dest_pe = team_obj->get_pe_in_world(j);
+    int qp_index = get_team_qp_index(team_obj, dest_pe);
     uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
 
     /* Pack Ctrl Message * 16 bits seq | 48bit displ */
@@ -1357,11 +1462,21 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
     src = (uint64_t*)&ctrl_msg;
     dst = (uint64_t*)((char*)&tmp_buf[constmem.my_pe] + base_heap_offset);
 
-    qps[dest_pe].put_nbi_single(dst, src, sizeof(uint64_t), true);
+    put_nbi_shared_qp(qp_index, dst, src, sizeof(uint64_t), true);
+    qps[qp_index].quiet_single();
+  }
 
-    /* Wait for Ctrl Message */
+  __syncthreads();
+
+  /* Phase 2: consume every control message and issue the corresponding GET. */
+  for (int j = tid; j < pe_size; j+= step_size) {
+    int dest_pe = team_obj->get_pe_in_world(j);
+    int qp_index = get_team_qp_index(team_obj, dest_pe);
+    uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
     uint64_t ctrl_value;
     uint64_t *vol_ctrl = &tmp_buf[dest_pe];
+    uint64_t seq_bits;
+    uint64_t displ_bits;
 
     do {
       ctrl_value = uncached_load(vol_ctrl);
@@ -1371,21 +1486,28 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
 
     /* Get data */
     size_t nelems = dest_nelems[dest_pe] * sizeof(T);
-    src = (uint64_t*)((char*)source + (displ_bits * sizeof(T)) + base_heap_offset);
-    dst = (uint64_t*)((char*)dest + (dest_displs[j] * sizeof(T)));
+    uint64_t *src = (uint64_t*)((char*)source +
+                               (displ_bits * sizeof(T)) + base_heap_offset);
+    uint64_t *dst = (uint64_t*)((char*)dest +
+                               (dest_displs[j] * sizeof(T)));
 
-    qps[dest_pe].get_nbi_single(dst, src, nelems, true);
+    get_nbi_shared_qp(qp_index, dst, src, nelems);
 
     /* Put Completion */
     char* amo_dst = ((char*)&pSync[alltoall_pSync_offset + my_pe_in_team] + base_heap_offset);
-    qps[dest_pe].atomic_nofetch_single(amo_dst, 1);
+    atomic_nofetch_shared_qp(qp_index, amo_dst, 1);
+  }
 
+  __syncthreads();
+
+  /* Phase 3: wait for all peers and drain the QPs used by this team. */
+  for (int j = tid; j < pe_size; j+= step_size) {
+    int dest_pe = team_obj->get_pe_in_world(j);
+    int qp_index = get_team_qp_index(team_obj, dest_pe);
     long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
-    while (uncached_load(sync_flags) != 1) { }
+    while (uncached_load(sync_flags) < completion_count) { }
 
-    qps[dest_pe].quiet_single();
-
-    pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
+    qps[qp_index].quiet_single();
   }
 
   if (is_thread_zero_in_block()) {
@@ -1439,7 +1561,9 @@ __device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team,
   int pe_size = team_obj->num_pes;
   long *pSync = team_obj->alltoall_pSync;
   int my_pe_in_team = team_obj->my_pe;
-  uint64_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
+  uint64_t a2a_sn = team_obj->alltoall_sequence_number;
+  uint64_t alltoall_pSync_offset = (a2a_sn % 2) * pe_size;
+  long completion_count = a2a_sn / 2 + 1;
 
   // Normalize: elem_count == -1 means "process the full [0, nelems) range".
   if (elem_count < 0) elem_count = nelems;
@@ -1456,10 +1580,10 @@ __device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team,
     int qp_index = get_qp_index(dest_pe, wf_info);
     qp_indices[j] = qp_index;
     uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
-    qps[qp_index].put_nbi_single(
+    put_nbi_shared_qp(qp_index,
       reinterpret_cast<char*>(&dst[my_pe_in_team * nelems + elem_offset]) + base_heap_offset,
       &src[j * nelems + elem_offset], elem_count * sizeof(T), false);
-    qps[qp_index].atomic_nofetch_single(
+    atomic_nofetch_shared_qp(qp_index,
       reinterpret_cast<char *>(&pSync[alltoall_pSync_offset + my_pe_in_team]) +
       base_heap_offset, 1);
   }
@@ -1469,11 +1593,10 @@ __device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team,
     int dest_pe = team_obj->get_pe_in_world(j);
 
     long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
-    while (uncached_load(sync_flags) != 1) { }
+    while (uncached_load(sync_flags) < completion_count) { }
 
     qps[qp_indices[j]].quiet_single();
 
-    pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
   }
 
   if (is_thread_zero_in_block()) {
@@ -1733,6 +1856,13 @@ __device__ __forceinline__ uint32_t GDAContext::get_qp_index(int pe,
   qp_index = __shfl_sync(wf_info.pe_group_mask, qp_index, wf_info.pe_group_first_phys_lane_id);
 
   return qp_index;
+}
+
+__device__ __forceinline__ uint32_t GDAContext::get_team_qp_index(
+    const GDATeam *team_obj, int pe) {
+  const uint32_t qp_slot =
+      static_cast<uint32_t>(team_obj->pool_index_) % num_qps_per_pe;
+  return qp_slot * constmem.num_pes + pe;
 }
 
 /******************************************************************************

@@ -309,11 +309,11 @@ __device__ void QueuePair::quiet_dp_single_lane() {
  ****************************** SHMEM INTERFACE *******************************
  *****************************************************************************/
 __device__ void QueuePair::put_nbi(void *dest, const void *source,
-    size_t length, ActiveWFInfo &wf_info) {
+    size_t length, ActiveWFInfo &wf_info, bool ring_db) {
   uint32_t dst_rkey = rkey;
   uint32_t src_lkey = (static_cast<int32_t>(length) <= static_cast<int32_t>(inline_threshold))
       ? 0 : get_lkey(reinterpret_cast<uintptr_t>(source));
-  put_nbi(dest, dst_rkey, source, src_lkey, length, wf_info);
+  put_nbi(dest, dst_rkey, source, src_lkey, length, wf_info, ring_db);
 }
 
 __device__ void QueuePair::put_nbi(void *raddr, uint32_t rkey,

@@ -46,6 +46,14 @@ GDATeam::GDATeam(Backend *backend, const TeamInfo& team_info_parent,
   bcast_pSync = &(b->bcast_pSync_pool[pool_index * ROCSHMEM_BCAST_SYNC_SIZE]);
   alltoall_pSync = &(b->alltoall_pSync_pool[pool_index * ROCSHMEM_ALLTOALL_SYNC_SIZE]);
 
+  CHECK_HIP(hipMemset(barrier_pSync, 0,
+                      sizeof(long) * ROCSHMEM_BARRIER_SYNC_SIZE));
+  CHECK_HIP(hipMemset(reduce_pSync, 0,
+                      sizeof(long) * ROCSHMEM_REDUCE_SYNC_SIZE));
+  CHECK_HIP(hipMemset(bcast_pSync, 0,
+                      sizeof(long) * ROCSHMEM_BCAST_SYNC_SIZE));
+  CHECK_HIP(hipMemset(alltoall_pSync, 0,
+                      sizeof(long) * ROCSHMEM_ALLTOALL_SYNC_SIZE));
   pWrk = reinterpret_cast<char *>(b->pWrk_pool) + ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double) * pool_index;
 }
 
