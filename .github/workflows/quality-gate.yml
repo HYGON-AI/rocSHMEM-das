@@ -16,6 +16,10 @@ concurrency:
 jobs:
   gate:
     name: Checks
-    uses: HYGON-AI/quality-gate/.github/workflows/pr-quality-gate.yml@v2.0.3
+    # v2.0.1 explicitly declares runner_labels; route the checks to the same
+    # general self-hosted runner pool used by the HCU workflows.
+    uses: HYGON-AI/quality-gate/.github/workflows/pr-quality-gate.yml@v2.0.1
+    with:
+      runner_labels: '["self-hosted","Linux","X64","ci"]'
     permissions:
       contents: read
