@@ -17,10 +17,5 @@ jobs:
   gate:
     name: Checks
     uses: HYGON-AI/quality-gate/.github/workflows/pr-quality-gate.yml@v2.0.3
-    with:
-      # Match Mooncake's general HCU runner pool. Without this override the
-      # reusable workflow requests the isolated `quality` label and can wait
-      # forever when no quality-labelled runner is online.
-      runner_labels: '["self-hosted","Linux","X64","ci"]'
     permissions:
       contents: read
