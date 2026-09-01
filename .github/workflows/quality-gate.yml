@@ -17,5 +17,10 @@ jobs:
   gate:
     name: Checks
     uses: HYGON-AI/quality-gate/.github/workflows/pr-quality-gate.yml@v2.0.1
+    with:
+      # The dedicated quality runner group only permits selected workflow files.
+      # Run the reusable workflow's jobs on the generally available CI pool so
+      # pull requests cannot remain queued when that allowlist is misconfigured.
+      runner_labels: '["self-hosted","Linux","X64","ci"]'
     permissions:
       contents: read
