@@ -1,0 +1,103 @@
+name: rocSHMEM CI
+
+on:
+  pull_request:
+    branches: [develop]
+    types: [opened, synchronize, reopened, ready_for_review]
+  schedule:
+    - cron: "0 18 1 * *"
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: rocSHMEM test suite
+        required: true
+        default: standard
+        type: choice
+        options: [standard, full]
+
+permissions:
+  contents: read
+
+
+concurrency:
+  group: rocshmem-hygon-github-nmz1-nmz2
+  # A new PR commit supersedes the old validation run. Scheduled/manual full
+  # runs remain serialized and are never cancelled by another invocation.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-and-test:
+    name: Test (${{ github.event_name == 'schedule' && 'full' || 'standard' }})
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, ci, nmz1, bw1100]
+    timeout-minutes: 360
+    env:
+      ROCSHMEM_CI_IMAGE: ${{ vars.IMAGE }}
+      ROCSHMEM_CI_DEVPI_URL: ${{ vars.DEVPI_URL }}
+      PIP_INDEX_URL: ${{ vars.PIP_INDEX_URL }}
+      PIP_TRUSTED_HOST: ${{ vars.PIP_TRUSTED_HOST }}
+      ROCSHMEM_CI_PRIMARY_HOST: github-nmz1
+      ROCSHMEM_CI_SECONDARY_HOST: github-nmz2
+      ROCSHMEM_CI_PRIMARY_IP: 10.17.1.1
+      ROCSHMEM_CI_SECONDARY_IP: 10.17.1.2
+      ROCSHMEM_CI_REMOTE_USER: github
+      ROCSHMEM_CI_GID_INDEX: "3"
+      ROCSHMEM_CI_PRIMARY_NIC: mlx5_6
+      ROCSHMEM_CI_PRIMARY_NIC_INDEX: "6"
+      ROCSHMEM_CI_SECONDARY_NIC: mlx5_0
+      ROCSHMEM_CI_SECONDARY_NIC_INDEX: "0"
+      ROCSHMEM_CI_SETUP_TIMEOUT: "3600"
+      ROCSHMEM_CI_TEST_TIMEOUT: "18000"
+      ROCSHMEM_CI_LOCK_TIMEOUT: "900"
+      ROCSHMEM_CI_PORT_RANGE_MIN: "20000"
+      ROCSHMEM_CI_PORT_RANGE_MAX: "29999"
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Validate repository variables
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for variable_name in \
+              ROCSHMEM_CI_IMAGE ROCSHMEM_CI_DEVPI_URL \
+              PIP_INDEX_URL PIP_TRUSTED_HOST; do
+            if [[ -z "${!variable_name}" ]]; then
+              echo "::error::Required repository variable for ${variable_name} is empty."
+              exit 1
+            fi
+          done
+
+      - name: Select test suite
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          suite=standard
+          if [[ "${GITHUB_EVENT_NAME}" == schedule ]]; then
+            suite=full
+          elif [[ "${GITHUB_EVENT_NAME}" == workflow_dispatch ]]; then
+            suite="${{ inputs.suite }}"
+          fi
+          echo "ROCSHMEM_CI_SUITE=${suite}" >> "${GITHUB_ENV}"
+
+      - name: Build and run rocSHMEM tests
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          export ROCSHMEM_CI_DTK_URL="${ROCSHMEM_CI_DEVPI_URL%/}/ArchivedFile/dtk-pkg/dtk26.04/DTK-26.04-rc4-centos8-x86_64.tar.gz"
+          export ROCSHMEM_CI_LOG_DIR="${RUNNER_TEMP}/rocshmem-logs/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          bash scripts/ci/run_hygon_multi_node_ci.sh
+
+      - name: Upload build and test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rocshmem-hygon-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rocshmem-logs
+          if-no-files-found: warn
+          retention-days: 14
