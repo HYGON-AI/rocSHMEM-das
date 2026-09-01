@@ -26,11 +26,26 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  quality:
+    name: Security and quality checks
+    if: github.event_name == 'pull_request'
+    uses: HYGON-AI/quality-gate/.github/workflows/pr-quality-gate.yml@v2.0.1
+    with:
+      # Use the general CI pool. The dedicated quality runner group is
+      # restricted to a different workflow allowlist and otherwise queues
+      # these reusable-workflow jobs indefinitely.
+      runner_labels: '["self-hosted","Linux","X64","ci"]'
+    permissions:
+      contents: read
+
   build-and-test:
     name: Build and run two-node rocSHMEM tests
+    needs: quality
     if: >-
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      always() &&
+      (github.event_name != 'pull_request' || needs.quality.result == 'success') &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: [self-hosted, Linux, X64, ci, nmz1, bw1100]
     timeout-minutes: 360
     env:
