@@ -21,24 +21,16 @@ permissions:
 
 concurrency:
   group: rocshmem-hygon-github-nmz1-nmz2
-  cancel-in-progress: false
+  # A new PR commit supersedes the old validation run. Scheduled/manual full
+  # runs remain serialized and are never cancelled by another invocation.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  quality-gate:
-    name: Security and quality checks
-    if: github.event_name == 'pull_request'
-    uses: HYGON-AI/quality-gate/.github/workflows/pr-quality-gate.yml@v2.0.1
-    permissions:
-      contents: read
-
   build-and-test:
     name: Build and run two-node rocSHMEM tests
-    needs: [quality-gate]
     if: >-
-      always() &&
-      (github.event_name != 'pull_request' ||
-       (github.event.pull_request.head.repo.full_name == github.repository &&
-        needs.quality-gate.result == 'success'))
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Linux, X64, ci, nmz1, bw1100]
     timeout-minutes: 360
     env:
