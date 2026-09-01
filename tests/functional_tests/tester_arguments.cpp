@@ -126,6 +126,17 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     } else if (arg == "-b" || arg == "-batch") {
       i++;
       batch = atoi(argv[i]);
+    } else if (arg == "-bq") {
+      if (i + 1 >= argc) {
+        std::cerr << "-bq requires 0 or 1" << std::endl;
+        exit(-1);
+      }
+      std::string value = argv[++i];
+      if (value != "0" && value != "1") {
+        std::cerr << "-bq expects 0 or 1" << std::endl;
+        exit(-1);
+      }
+      batch_quiet = (value == "1");
     } else if (arg == "-noverif" || arg == "-nocheck") {
       verif = false;
     } else if (arg == "-localbuftype") {
@@ -262,6 +273,7 @@ void TesterArguments::show_usage(std::string executable_name) {
   std::cout << "\t-nlarge Set loop_large count\n";
   std::cout << "\t-nskip Set skip/warmup count\n";
   std::cout << "\t-b|-batch Set buffer rotation batch size (default: loop count)\n";
+  std::cout << "\t-bq <0|1> enable batch-boundary quiet (default: 1; disabled by -noverif)\n";
   std::cout << "\t-noverif|-nocheck disable buffer verification\n";
 }
 

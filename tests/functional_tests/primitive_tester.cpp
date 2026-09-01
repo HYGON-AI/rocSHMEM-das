@@ -35,7 +35,7 @@ __global__ void PrimitiveTest(int loop, int skip, long long int *start_time,
                               long long int *end_time, char *source,
                               char *dest, size_t size, TestType type,
                               ShmemContextType ctx_type, int wf_size,
-                              int batch, int *grid_psync) {
+                              int batch, bool batch_quiet, int *grid_psync) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
   int t_id  = get_flat_block_id();
@@ -64,8 +64,10 @@ __global__ void PrimitiveTest(int loop, int skip, long long int *start_time,
   for (int i = 0; i < loop + skip; i++) {
     size_t offset = ((start_slot + i) % batch) * size;
 
-    // Quiet at batch boundaries to allow safe buffer reuse
-    if (offset == 0) {
+    // When batch_quiet is enabled, quiet before reusing a buffer slot.
+    // The warmup/timed boundary is always quieted, and the final quiet after
+    // the loop completes all timed NBI operations.
+    if (i == skip || (batch_quiet && offset == 0)) {
       __syncthreads();
       if(is_thread_zero_in_block()) {
         rocshmem_ctx_quiet(ctx);
@@ -216,7 +218,7 @@ void PrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
   hipLaunchKernelGGL(PrimitiveTest, gridSize, blockSize, shared_bytes, stream,
                      loop, args.skip, start_time, end_time, source, dest,
                      size, _type, _shmem_context, wf_size,
-                     batch_size, grid_psync);
+                     batch_size, args.use_batch_quiet(), grid_psync);
 
   num_msgs = (loop + args.skip) * gridSize.x * blockSize.x;
   num_timed_msgs = loop * gridSize.x * blockSize.x;

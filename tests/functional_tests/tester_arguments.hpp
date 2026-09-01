@@ -111,7 +111,10 @@ public:
   int loop_large = 20;
   int batch = 0;
   bool verif = true;
+  bool batch_quiet = true;
   size_t large_message_size = 32768;
+
+  bool use_batch_quiet() const { return verif && batch_quiet; }
 
   TeamSplitType team_type = ROCSHMEM_TEST_TEAM_DUP;
 };

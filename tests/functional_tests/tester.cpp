@@ -118,7 +118,7 @@ Tester::Tester(TesterArguments args) : args(args) {
   CHECK_HIP(hipHostMalloc((void**)&verification_error, sizeof(bool)));
   *verification_error = false;
 
-  batch_size = (args.batch > 0) ? args.batch : 1;
+  batch_size = (args.batch > 0) ? args.batch : (args.verif ? 2 : 1);
   if (const char* env_p = std::getenv("ROCSHMEM_TEST_BATCH_SIZE")) {
     int env_val = std::atoi(env_p);
     if (env_val > 0) batch_size = env_val;
