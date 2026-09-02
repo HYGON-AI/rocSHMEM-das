@@ -1101,13 +1101,11 @@ namespace rocshmem
 
     const char* userTopo = std::getenv("ROCSHMEM_TOPO_FILE_FORCE");
     if (userTopo){
-      int deviceId = -1;
       std::string nicName;
-      hipGetDevice(&deviceId);
       GPU2NIC map;
       std::string busStr;
       char busId[64] = {0};
-      hipDeviceGetPCIBusId(busId, sizeof(busId), deviceId);
+      hipDeviceGetPCIBusId(busId, sizeof(busId), gpuIndex);
       busStr = std::string(busId);
       readBusToNic(userTopo, map);
       auto it = map.find(busStr);
