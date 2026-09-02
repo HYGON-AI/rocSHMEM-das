@@ -9,9 +9,6 @@
 namespace rocshmem {
 
 __device__ void QueuePair::shca_ring_doorbell(uint64_t db_val, uint64_t my_sq_counter) {
-  if (gpuHdpReg != nullptr) {
-    __hip_atomic_store(reinterpret_cast<uint32_t*>(gpuHdpReg), (uint32_t)0x1, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
-  }
   *dbrec = (uint32_t)my_sq_counter;
   __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
@@ -149,10 +146,10 @@ __device__ __forceinline__ void QueuePair::shca_build_rma_wqe(
   if (size <= inline_threshold && opcode == gda_op_rdma_write) {
     seg_build.update_inl_data_seg(reinterpret_cast<const void*>(laddr), size);
   } else {
-    // if (flag == 0) // TODO: normal mode dont use XDP for now.
-    //   seg_build.update_data_seg(laddr, size, lkey_hdp);
-    // else
-    seg_build.update_data_seg(laddr, size, lkey);
+    if (flag == 0)
+      seg_build.update_data_seg(laddr, size, lkey_hdp);
+    else
+      seg_build.update_data_seg(laddr, size, lkey);
   }
 }
 
@@ -213,6 +210,8 @@ __device__ void QueuePair::shca_post_wqe_rma(int32_t size, uintptr_t laddr,
 
   __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
+  __hip_atomic_store(reinterpret_cast<uint32_t*>(gpuHdpReg), (uint32_t)0x1, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
+
   // 4. Leader rings doorbell for the wave
   if (is_leader) {
     shca_ring_doorbell(wave_sq_counter, num_wqes);
@@ -247,7 +246,7 @@ __device__ __forceinline__ void QueuePair::shca_build_amo_wqe(
   SegmentBuilder_SHCA seg_build(my_sq_index, sq_buf);
   seg_build.update_ctrl_seg(my_sq_counter, opcode, 0, qp_num,
                             SHCA_WQE_CTRL_CQ_ALWAYS, 4, 0, 0);
-  seg_build.update_raddr_seg(raddr, rkey);
+  seg_build.update_raddr_seg(raddr, rkey_hdp);
   seg_build.update_atomic_seg(atomic_data, atomic_cmp);
 
   if (fetching) {

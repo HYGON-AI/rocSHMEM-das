@@ -156,7 +156,7 @@ __device__ void QueuePair::post_wqe_rma_turn(int pe, int32_t size, uintptr_t lad
       uint8_t lane = __ffsll((unsigned long long)turns) - 1;
       int pe_turn = __shfl(pe, lane);
       if (pe_turn == pe) {
-        post_wqe_rma_mt(pe, size, laddr, raddr, opcode);
+        post_wqe_rma_mt(pe, size, laddr, raddr, opcode, flag);
         need_turn = false;
       }
       turns = __ballot(need_turn);
