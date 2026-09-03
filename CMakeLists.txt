@@ -1,6 +1,5 @@
 ###############################################################################
 # Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
-# Copyright (c) 2026 Hygon Information Technology Co., Ltd.
 #
 # SPDX-License-Identifier: MIT
 #
@@ -70,7 +69,7 @@ option(BUILD_TOOLS "Build binary tools (e.g., rocshmem_info)" ON)
 option(BUILD_LOCAL_GPU_TARGET_ONLY "Build only for GPUs detected on this machine" OFF)
 option(BUILD_CODE_COVERAGE "Build with code coverage flags (gcc only)" OFF)
 
-option(GDA_IONIC "Build for AMD Pensando IONIC RDMA provider" OFF)
+option(GDA_IONIC "Build for the IONIC RDMA provider" OFF)
 option(GDA_BNXT "Build for Broadcom RDMA provider" OFF)
 option(GDA_MLX5 "Build for Mellanox MLX5 RDMA provider" OFF)
 option(GDA_SHCA "Build for Dawning SHCA RDMA provider" OFF)

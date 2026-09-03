@@ -2,7 +2,6 @@
  * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
  * Modifications Copyright (c) Microsoft Corporation.
  * Modifications Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- * Modifications Copyright (c) 2026 Hygon Information Technology Co., Ltd.
  *
  * SPDX-License-Identifier: MIT
  *
