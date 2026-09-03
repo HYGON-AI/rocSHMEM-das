@@ -1616,6 +1616,10 @@ void GDABackend::create_queues() {
   int ncqes;
   uint32_t sq_size = envvar::gda::sq_size;
 
+  if (gda_provider == GDAProvider::SHCA) {
+    sq_size = std::max(sq_size, static_cast<uint32_t>(2048));
+  }
+
   if (gda_provider == GDAProvider::IONIC) {
     ncqes = sq_size << 1;
   } else {
