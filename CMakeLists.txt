@@ -78,7 +78,7 @@ option(BUILD_DEBUG_TRACE_HOST "Compile in host-side trace logging (LOG_API/TRACE
 option(BUILD_DEBUG_TRACE_DEVICE "Compile in device-side trace logging (LOGD_API/TRACE)" OFF)
 option(BUILD_DEBUG_DEVICE "Compile in device-side logging (LOGD_WARN/INFO and GDA error checking)" OFF)
 
-option(GDA_IONIC "Build for AMD Pensando IONIC RDMA provider" OFF)
+option(GDA_IONIC "Build for the IONIC RDMA provider" OFF)
 option(GDA_BNXT "Build for Broadcom RDMA provider" OFF)
 option(GDA_MLX5 "Build for Mellanox MLX5 RDMA provider" OFF)
 option(GDA_SHCA "Build for Dawning SHCA RDMA provider" OFF)
@@ -127,7 +127,7 @@ endif()
 #############################################################################
 # DETECT POD CAPABILITY
 #############################################################################
-# Try to find AMD SMI library
+# Try to find the optional SMI fabric backend
 find_package(amd_smi QUIET)
 
 if(TARGET amd_smi)
@@ -135,16 +135,17 @@ if(TARGET amd_smi)
   include(CMakePushCheckState)
   cmake_push_check_state(RESET)
   set(CMAKE_REQUIRED_LIBRARIES amd_smi)
+  set(CMAKE_REQUIRED_QUIET TRUE)
   check_library_exists(amd_smi amdsmi_get_gpu_fabric_info "" HAVE_AMDSMI_GPU_FABRIC_INFO)
   cmake_pop_check_state()
 
   if(HAVE_AMDSMI_GPU_FABRIC_INFO)
-    message(STATUS "AMD SMI library found with fabric info support - enabling pod-based IPC capability detection")
+    message(STATUS "SMI fabric backend found with fabric info support - enabling pod-based IPC capability detection")
   else()
-    message(STATUS "AMD SMI library found but lacks amdsmi_get_gpu_fabric_info - disabling pod-based IPC capability detection")
+    message(STATUS "SMI fabric backend lacks the required fabric info API - disabling pod-based IPC capability detection")
   endif()
 else()
-  message(STATUS "AMD SMI library not found - disabling pod-based IPC capability detection")
+  message(STATUS "SMI fabric backend not found - disabling pod-based IPC capability detection")
 endif()
 
 #############################################################################
@@ -157,8 +158,8 @@ if(USE_HEAP_DEVICE_VMM_FABRIC)
 
   # VMM Fabric allocator requires fabric info support for pod-based IPC
   if(NOT HAVE_AMDSMI_GPU_FABRIC_INFO)
-    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_FABRIC requires AMD SMI library with amdsmi_get_gpu_fabric_info support. "
-                        "Either update to a newer AMD SMI version or disable USE_HEAP_DEVICE_VMM_FABRIC.")
+    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_FABRIC requires an SMI backend with fabric info support. "
+                        "Either update the SMI backend or disable USE_HEAP_DEVICE_VMM_FABRIC.")
   endif()
 
   # Note: Fabric handle support will be available in a future ROCm 7.x release

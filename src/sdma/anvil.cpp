@@ -432,10 +432,10 @@ int AnvilLib::getOamId(int deviceId) {
   int xgmi_physical_id;
   if (file.is_open()) {
     if (!(file >> xgmi_physical_id)) {
-      throw std::runtime_error("Failed to read xGMI physical id from file: " + file_str);
+      throw std::runtime_error("Failed to read the interconnect physical id");
     }
   } else {
-    throw std::runtime_error("Failed to open file: " + file_str);
+    throw std::runtime_error("Failed to open the interconnect topology file");
   }
   return xgmi_physical_id;
 }

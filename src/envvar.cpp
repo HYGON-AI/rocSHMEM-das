@@ -176,7 +176,7 @@ namespace envvar {
 
   namespace gda {
     const var<std::string> provider("PROVIDER",
-      "When rocSHMEM is compiled with support for multiple NIC vendors, the environment variable selects the desired provider. The default value is an empty string and rocSHMEM auto-detects the most appropriate NIC. bnxt: Broadcom Thor 2; pensando: AMD Pensando Pollara; ionic: AMD Pensando Pollara (alias); mlx5: Mellanox ConnectX-7");
+      "When rocSHMEM is compiled with support for multiple NIC vendors, the environment variable selects the desired provider. The default value is an empty string and rocSHMEM auto-detects the most appropriate NIC. bnxt: Broadcom Thor 2; pensando: Pensando Pollara; ionic: Pensando Pollara (alias); mlx5: Mellanox ConnectX-7");
     const var<bool> alternate_qp_ports("ALTERNATE_QP_PORTS",
       "Enables or disables alternating QP mappings across rocSHMEM contexts. 0: Disabled; 1: Enabled. This helps saturate bandwidth on multiport bonded interfaces",
       true);
@@ -440,8 +440,7 @@ namespace envvar {
     if (mode != print_mode::MODIFIED) {
       os << "#\n";
       os << "#------------------------------------------------------------------------------#\n";
-      os << "# For more information, see:\n";
-      os << "# https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/api/env_variables.html\n";
+      os << "# For more information, see the rocSHMEM environment variable reference.\n";
       os << "#------------------------------------------------------------------------------#\n";
     }
     os << "################################################################################\n";

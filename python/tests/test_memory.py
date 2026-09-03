@@ -30,8 +30,8 @@ import rocshmem4py  # noqa: E402
 
 try:
     _hip = ctypes.CDLL("libamdhip64.so")
-except OSError as e:
-    pytest.skip(f"libamdhip64.so not loadable: {e}", allow_module_level=True)
+except OSError:
+    pytest.skip("HIP runtime library not loadable", allow_module_level=True)
 
 HIP_MEMCPY_DEVICE_TO_HOST = 2
 

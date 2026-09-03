@@ -275,7 +275,7 @@ std::vector<int>  TcpBootstrap::Impl::getIpcCapableRanks() {
 #else
   // This function should not be called without HAVE_AMDSMI_GPU_FABRIC_INFO
   // Callers should check allocator type and call getLocalRanks() instead
-  fprintf(stderr, "ROCSHMEM_ERROR: getIpcCapableRanks() called but HAVE_AMDSMI_GPU_FABRIC_INFO is not defined.\n"
+  fprintf(stderr, "ROCSHMEM_ERROR: getIpcCapableRanks() called without fabric-info capability support.\n"
                   "This is a programming error. Use getLocalRanks() instead.\n");
   abort();
 #endif

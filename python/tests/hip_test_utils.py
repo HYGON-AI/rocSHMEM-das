@@ -8,8 +8,8 @@ import pytest
 
 try:
     _hip = ctypes.CDLL("libamdhip64.so")
-except OSError as e:
-    pytest.skip(f"libamdhip64.so not loadable: {e}", allow_module_level=True)
+except OSError:
+    pytest.skip("HIP runtime library not loadable", allow_module_level=True)
 
 
 HIP_MEMCPY_HOST_TO_DEVICE = 1
