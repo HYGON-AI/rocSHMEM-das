@@ -28,7 +28,6 @@ jobs:
       ROCSHMEM_CI_DTK_HOST_PATH: /public/opendas/ArchivedFile/dtk-pkg/dtk26.04/DTK-26.04-rc4-centos8-x86_64.tar.gz
       ROCSHMEM_PACKAGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
       ROCSHMEM_PACKAGE_PR: ${{ github.event.pull_request.number }}
-      ROCSHMEM_PACKAGE_ROOT: ${{ runner.temp }}/rocshmem-deb/${{ github.run_id }}-${{ github.run_attempt }}
       ROCSHMEM_PACKAGE_HOST_DIR: /ci/github_ci_packages/rocshmem
     steps:
       - name: Checkout the exact merged commit
@@ -37,6 +36,13 @@ jobs:
           ref: ${{ github.event.pull_request.merge_commit_sha }}
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Initialize package paths
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          printf 'ROCSHMEM_PACKAGE_ROOT=%s/rocshmem-deb/%s-%s\n' \
+            "${RUNNER_TEMP}" "${GITHUB_RUN_ID}" "${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_ENV}"
 
       - name: Require successful PR quality gate and tests
         uses: actions/github-script@v7
