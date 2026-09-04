@@ -23,6 +23,14 @@ Labels:
 Options:
   --host         MPI host specification for multi-node tests (required)
                  Example: --host host1,host2
+  --topo         Topology config file for GDA backend (optional)
+                 Forwarded to ranks via -x ROCSHMEM_TOPO_FILE_FORCE
+                 Example: --topo path/to/topo.config
+  --ib-gid-index IB GID index forwarded to ROCSHMEM_IB_GID_INDEX and
+                 UCX_IB_GID_INDEX (optional, Default: 1)
+                 Example: --ib-gid-index 3
+  --extra-args   Additional MPI arguments(optional)
+                 Example: --extra-args "-x PATH"
 
 Environment Variables:
   ROCSHMEM_TEST_LOG_DIR      Log directory for both ctest and per-test logs (Default: $(pwd)/test_logs)
@@ -30,6 +38,8 @@ Environment Variables:
 Examples:
   $(basename "$0") quick --host host1,host2
   $(basename "$0") standard --host host1,host2
+  $(basename "$0") quick --host host1,host2 --topo path/to/topo.config
+  $(basename "$0") quick --host host1,host2 --ib-gid-index 3
   ROCSHMEM_TEST_LOG_DIR=/tmp/rocshmem_logs $(basename "$0") quick --host host1,host2
 EOF
     exit 1
@@ -49,11 +59,29 @@ case "$LABEL" in
 esac
 
 HOST_SPEC=""
+TOPO_FILE=""
+IB_GID_INDEX=1
+EXTRA_MPI_ARGS=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --host)
             [[ -z "${2:-}" ]] && { echo "Error: --host requires an argument" >&2; usage; }
             HOST_SPEC="$2"
+            shift 2
+            ;;
+        --topo)
+            [[ -z "${2:-}" ]] && { echo "Error: --topo requires an argument" >&2; usage; }
+            TOPO_FILE="$2"
+            shift 2
+            ;;
+        --ib-gid-index)
+            [[ -z "${2:-}" ]] && { echo "Error: --ib-gid-index requires an argument" >&2; usage; }
+            IB_GID_INDEX="$2"
+            shift 2
+            ;;
+        --extra-args)
+            [[ -z "${2:-}" ]] && { echo "Error: --extra-args requires an argument" >&2; usage; }
+            EXTRA_MPI_ARGS="$2"
             shift 2
             ;;
         *)
@@ -89,29 +117,36 @@ echo "=========================================="
 # Propagated to driver.sh via ROCSHMEM_TEST_HOSTS; driver.sh distributes NUM_RANKS
 # evenly across hosts and builds the --host spec with per-host rank counts.
 
-# IB GID index: forward via -x for multi-node propagation; default to 1 if unset
+# IB GID index: forward via -x for multi-node propagation; shared by ROCSHMEM & UCX
 # Validate to prevent MPI param injection (must be numeric)
-ROCSHMEM_IB_GID="${ROCSHMEM_IB_GID_INDEX:-1}"
-UCX_IB_GID="${UCX_IB_GID_INDEX:-1}"
-[[ "$ROCSHMEM_IB_GID" =~ ^[0-9]+$ ]] || { echo "Error: ROCSHMEM_IB_GID_INDEX must be numeric, got '$ROCSHMEM_IB_GID'" >&2; exit 1; }
-[[ "$UCX_IB_GID" =~ ^[0-9]+$ ]] || { echo "Error: UCX_IB_GID_INDEX must be numeric, got '$UCX_IB_GID'" >&2; exit 1; }
-IB_GID_PARAMS="-x ROCSHMEM_IB_GID_INDEX=$ROCSHMEM_IB_GID -x UCX_IB_GID_INDEX=$UCX_IB_GID"
+[[ "$IB_GID_INDEX" =~ ^[0-9]+$ ]] || { echo "Error: --ib-gid-index must be numeric, got '$IB_GID_INDEX'" >&2; exit 1; }
+IB_GID_PARAMS="-x ROCSHMEM_IB_GID_INDEX=$IB_GID_INDEX -x UCX_IB_GID_INDEX=$IB_GID_INDEX"
+
+# Resolve --topo to an absolute path (MPI -x forwards to remote ranks with different CWD)
+TOPO_PARAM=""
+if [[ -n "$TOPO_FILE" ]]; then
+    [[ -f "$TOPO_FILE" ]] || { echo "Error: topo file not found: $TOPO_FILE" >&2; exit 1; }
+    TOPO_FILE=$(readlink -f "$TOPO_FILE")
+    TOPO_PARAM="-x ROCSHMEM_TOPO_FILE_FORCE=$TOPO_FILE"
+fi
 
 # Common MPI params shared by all backends
-COMMON_MPI="--allow-run-as-root" \
-COMMON_MPI+=" -x ROCSHMEM_HEAP_SIZE=10737418240" \
-COMMON_MPI+=" -x ROCSHMEM_MAX_NUM_CONTEXTS=40" \
-COMMON_MPI+=" -x ROCSHMEM_TEST_UUID=1" \
-COMMON_MPI+=" -x ROCSHMEM_GDR_DISABLE_XDP=1" \
-COMMON_MPI+=" --mca coll_hcoll_enable 0" \
-COMMON_MPI+=" -x UCX_WARN_UNUSED_ENV_VARS=n" \
-COMMON_MPI+=" -x LD_LIBRARY_PATH -x PATH" \
-COMMON_MPI+=" $IB_GID_PARAMS" \
-COMMON_MPI+=" --map-by numa"
+COMMON_MPI="--allow-run-as-root \
+-x ROCSHMEM_TEST_UUID=123 \
+-x ROCSHMEM_HEAP_SIZE=10737418240 \
+-x ROCSHMEM_MAX_NUM_CONTEXTS=40 \
+-x ROCSHMEM_GDR_DISABLE_XDP=1 \
+--mca coll_hcoll_enable 0 \
+-x UCX_WARN_UNUSED_ENV_VARS=n \
+-x LD_LIBRARY_PATH -x PATH \
+-x HSA_USE_SVM=0 \
+$IB_GID_PARAMS \
+--map-by numa \
+$EXTRA_MPI_ARGS"
 
 # Per-backend MPI params (host distribution handled by driver.sh via ROCSHMEM_TEST_HOSTS)
 MPI_PARAMS_IPC="$COMMON_MPI -x ROCSHMEM_BACKEND=ipc"
-MPI_PARAMS_GDA="$COMMON_MPI -x ROCSHMEM_BACKEND=gda"
+MPI_PARAMS_GDA="$COMMON_MPI -x ROCSHMEM_BACKEND=gda $TOPO_PARAM"
 MPI_PARAMS_RO="$COMMON_MPI -mca pml ucx -mca osc ucx -x ROCSHMEM_BACKEND=ro"
 
 # Label config: CTEST_LABEL, BACKENDS
