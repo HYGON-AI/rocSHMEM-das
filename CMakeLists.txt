@@ -67,7 +67,7 @@ option(BUILD_UNIT_TESTS "Build the unit tests (Requires MPI)" OFF)
 option(BUILD_PYTHON_TESTS "Install rocshmem4py test assets (RO execution requires MPI launcher, Python, pip)" OFF)
 option(BUILD_TESTS_ONLY "Build only tests. Used to link against rocSHMEM in a ROCm Release" OFF)
 option(BUILD_TOOLS "Build binary tools (e.g., rocshmem_info)" ON)
-option(BUILD_SPLIT_LIBRARIES "Build separate host shared and device static rocSHMEM libraries" OFF)
+option(BUILD_SPLIT_LIBRARIES "Build separate host shared and device static rocSHMEM libraries" ON)
 option(MONOLITHIC_PACKAGE "Build all components into a single package" ON)
 option(BUILD_CTESTS "Register tests with CTest for tier-based execution" ON)
 

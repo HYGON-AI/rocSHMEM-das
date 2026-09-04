@@ -52,7 +52,7 @@ cmake \
     -DUSE_SINGLE_NODE=ON \
     -DMONOLITHIC_PACKAGE=ON \
     -DASAN=${ASAN:-OFF} \
-    -DBUILD_SPLIT_LIBRARIES=OFF \
+    -DBUILD_SPLIT_LIBRARIES=ON \
     $* $src_path
 cmake --build . --parallel 64
 cmake --install .
