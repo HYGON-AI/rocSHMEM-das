@@ -141,7 +141,6 @@ COMMON_MPI="--allow-run-as-root \
 --mca coll_hcoll_enable 0 \
 -x UCX_WARN_UNUSED_ENV_VARS=n \
 -x LD_LIBRARY_PATH -x PATH \
--x HSA_USE_SVM=0 \
 $IB_GID_PARAMS \
 --map-by numa \
 $EXTRA_MPI_ARGS"
