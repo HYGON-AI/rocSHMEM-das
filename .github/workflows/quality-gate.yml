@@ -16,6 +16,10 @@ concurrency:
 jobs:
   gate:
     name: Checks
+    # The reusable gate requires Python >= 3.9 with PyYAML.  ci-bw20 is the
+    # validated quality-capable runner in the shared HCU pool.
     uses: HYGON-AI/quality-gate/.github/workflows/pr-quality-gate.yml@v2.0.1
+    with:
+      runner_labels: '["self-hosted","Linux","X64","ci","bw20","bw1000"]'
     permissions:
       contents: read

@@ -1,0 +1,83 @@
+name: rocSHMEM DEB
+
+on:
+  pull_request:
+    branches: [develop]
+    types: [closed]
+
+permissions:
+  contents: read
+  actions: read
+
+# Do not cancel an earlier merged PR's package when another PR is merged.
+concurrency:
+  group: rocshmem-deb-${{ github.event.pull_request.number }}-${{ github.event.pull_request.merge_commit_sha }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Package merged commit
+    if: github.event.pull_request.merged == true
+    runs-on: [self-hosted, Linux, X64, ci, nmz1, bw1100]
+    timeout-minutes: 120
+    env:
+      ROCSHMEM_CI_IMAGE: ${{ vars.IMAGE }}
+      PIP_INDEX_URL: ${{ vars.PIP_INDEX_URL }}
+      PIP_TRUSTED_HOST: ${{ vars.PIP_TRUSTED_HOST }}
+      # Always install this archive; dtk26.04 in the path supplies the dtk2604 label.
+      ROCSHMEM_CI_DTK_HOST_PATH: /public/opendas/ArchivedFile/dtk-pkg/dtk26.04/DTK-26.04-rc4-centos8-x86_64.tar.gz
+      ROCSHMEM_PACKAGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+      ROCSHMEM_PACKAGE_PR: ${{ github.event.pull_request.number }}
+      ROCSHMEM_PACKAGE_HOST_DIR: /ci/github_ci_packages/rocshmem
+    steps:
+      - name: Checkout the exact merged commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Initialize package paths
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          printf 'ROCSHMEM_PACKAGE_ROOT=%s/rocshmem-deb/%s-%s\n' \
+            "${RUNNER_TEMP}" "${GITHUB_RUN_ID}" "${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_ENV}"
+
+      - name: Require successful PR quality gate and tests
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const verify = require('./scripts/ci/verify_package_checks.cjs');
+            const evidence = await verify({ github, context });
+            const fs = require('node:fs');
+            const path = require('node:path');
+            fs.mkdirSync(process.env.ROCSHMEM_PACKAGE_ROOT, { recursive: true });
+            fs.writeFileSync(path.join(process.env.ROCSHMEM_PACKAGE_ROOT, 'pr-checks.json'),
+                             JSON.stringify(evidence, null, 2) + '\n');
+            for (const run of evidence.checks) {
+              core.info(`${run.workflow}: ${run.url} (attempt ${run.attempt})`);
+            }
+
+      - name: Build and validate DEB in a fresh container
+        shell: bash
+        run: bash scripts/ci/package_hygon_deb.sh
+
+      - name: Save DEB and provenance (not a package repository upload)
+        uses: actions/upload-artifact@v4
+        with:
+          name: rocshmem-deb-pr${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.ROCSHMEM_PACKAGE_ROOT }}/packages/
+            ${{ env.ROCSHMEM_PACKAGE_ROOT }}/pr-checks.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Save packaging logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rocshmem-deb-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.ROCSHMEM_PACKAGE_ROOT }}/logs/
+          if-no-files-found: warn
+          retention-days: 14
