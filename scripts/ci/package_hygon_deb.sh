@@ -5,17 +5,19 @@
 set -Eeuo pipefail
 
 package_identity() {
-    local dtk_path="$1" sha="$2" timestamp="$3" run_id="$4" attempt="$5"
+    local dtk_path="$1" sha="$2" timestamp="$3"
     [[ "$dtk_path" =~ dtk([0-9]+)\.([0-9]+) ]] || {
         echo "ERROR: cannot extract dtkXX.YY from DTK path: $dtk_path" >&2; return 1;
     }
     export ROCSHMEM_PACKAGE_DTK_VERSION="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
-    [[ "$sha" =~ ^[0-9a-f]{40}$ && "$timestamp" =~ ^[0-9]{14}$ &&
-       "$run_id" =~ ^[0-9]+$ && "$attempt" =~ ^[0-9]+$ ]] || {
+    [[ "$sha" =~ ^[0-9a-f]{40}$ && "$timestamp" =~ ^[0-9]{12}$ ]] || {
         echo 'ERROR: invalid package identity fields' >&2; return 1;
     }
     export ROCSHMEM_PACKAGE_TIMESTAMP="$timestamp"
-    export ROCSHMEM_PACKAGE_RELEASE="${timestamp}.${sha:0:8}.r${run_id}.a${attempt}"
+    # Keep the Debian revision valid; the exported filename uses a hyphen
+    # between the Git identity and build timestamp for readability.
+    export ROCSHMEM_PACKAGE_RELEASE="g${sha:0:8}.${timestamp}"
+    export ROCSHMEM_PACKAGE_FILENAME_RELEASE="g${sha:0:8}-${timestamp}"
 }
 
 extract_package_dtk() {
@@ -96,7 +98,7 @@ build_package() {
     export ASAN=OFF BUILD_TYPE=Release INSTALL_PREFIX=/opt/rocshmem
     bash ../scripts/build_configs/ipc_ro_mlx5
 
-    local upstream_version deb_version expected_version
+    local upstream_version deb_version expected_version expected_filename
     upstream_version="$(sed -n 's/^set(CPACK_PACKAGE_VERSION "\([^"]*\)")$/\1/p' CPackConfig.cmake)"
     [[ "$upstream_version" =~ ^[0-9][0-9A-Za-z.+~]*$ ]] || {
         echo 'ERROR: missing or unexpected CPACK_PACKAGE_VERSION' >&2; return 1;
@@ -104,6 +106,7 @@ build_package() {
     # Keep the Debian revision free of hyphens. DTK belongs to the version part.
     deb_version="${upstream_version}-dtk${ROCSHMEM_PACKAGE_DTK_VERSION}"
     expected_version="${deb_version}-${ROCSHMEM_PACKAGE_RELEASE}"
+    expected_filename="rocshmem_${deb_version}-${ROCSHMEM_PACKAGE_FILENAME_RELEASE}_amd64.deb"
     mkdir -p /tmp/rocshmem-deb-output
     cpack --config "$PWD/CPackConfig.cmake" -G DEB \
         -D CPACK_DEBIAN_PACKAGE_ARCHITECTURE=amd64 \
@@ -142,7 +145,7 @@ build_package() {
 
     # Export only final deliverables, not CPack's duplicate staging packages.
     mkdir /tmp/rocshmem-deb-artifacts
-    cp "$deb" /tmp/rocshmem-deb-artifacts/
+    cp "$deb" "/tmp/rocshmem-deb-artifacts/${expected_filename}"
     cp "$inspect/control/control" /tmp/rocshmem-deb-artifacts/package-control.txt
     {
         printf 'merge_commit=%s\npr=%s\nrun_id=%s\nrun_attempt=%s\n' \
@@ -186,7 +189,7 @@ done
 }
 [[ "$ROCSHMEM_PACKAGE_SHA" =~ ^[0-9a-f]{40}$ ]]
 package_identity "$ROCSHMEM_CI_DTK_HOST_PATH" "$ROCSHMEM_PACKAGE_SHA" \
-    "$(TZ=UTC-8 date +%Y%m%d%H%M%S)" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+    "$(TZ=UTC-8 date +%y%m%d%H%M%S)"
 [[ "$(git rev-parse HEAD)" == "$ROCSHMEM_PACKAGE_SHA" ]]
 [[ "$(git rev-parse --is-shallow-repository)" == false ]]
 test -f "$ROCSHMEM_CI_DTK_HOST_PATH"
@@ -232,6 +235,7 @@ docker create --name "$container_name" --user root \
     -v "$ROCSHMEM_CI_DTK_HOST_PATH:/tmp/rocshmem-dtk.tar.gz:ro" \
     -e ROCSHMEM_PACKAGE_CONTAINER=1 \
     -e ROCSHMEM_PACKAGE_SHA -e ROCSHMEM_PACKAGE_PR -e ROCSHMEM_PACKAGE_RELEASE \
+    -e ROCSHMEM_PACKAGE_FILENAME_RELEASE \
     -e ROCSHMEM_PACKAGE_DTK_VERSION -e ROCSHMEM_PACKAGE_TIMESTAMP -e ROCSHMEM_CI_DTK_HOST_PATH \
     -e GITHUB_RUN_ID -e GITHUB_RUN_ATTEMPT -e PIP_INDEX_URL -e PIP_TRUSTED_HOST \
     "$image_id" tail -f /dev/null
