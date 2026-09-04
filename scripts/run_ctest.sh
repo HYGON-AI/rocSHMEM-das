@@ -25,6 +25,8 @@ Options:
   --ib-gid-index IB GID index forwarded to ROCSHMEM_IB_GID_INDEX and
                  UCX_IB_GID_INDEX (optional, Default: 1)
                  Example: --ib-gid-index 3
+  --extra-args   Additional MPI arguments(optional)
+                 Example: --extra-args "-x PATH"
 
 Environment Variables:
   ROCSHMEM_TEST_DIR          ctest directory (Default: /opt/rocshmem/bin/rocshmem)
@@ -56,6 +58,7 @@ esac
 HOST_SPEC=""
 TOPO_FILE=""
 IB_GID_INDEX=1
+EXTRA_MPI_ARGS=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --host)
@@ -71,6 +74,11 @@ while [[ $# -gt 0 ]]; do
         --ib-gid-index)
             [[ -z "${2:-}" ]] && { echo "Error: --ib-gid-index requires an argument" >&2; usage; }
             IB_GID_INDEX="$2"
+            shift 2
+            ;;
+        --extra-args)
+            [[ -z "${2:-}" ]] && { echo "Error: --extra-args requires an argument" >&2; usage; }
+            EXTRA_MPI_ARGS="$2"
             shift 2
             ;;
         *)
@@ -133,8 +141,10 @@ COMMON_MPI="--allow-run-as-root \
 --mca coll_hcoll_enable 0 \
 -x UCX_WARN_UNUSED_ENV_VARS=n \
 -x LD_LIBRARY_PATH -x PATH \
+-x HSA_USE_SVM=0 \
 $IB_GID_PARAMS \
---map-by numa"
+--map-by numa \
+$EXTRA_MPI_ARGS"
 
 # Per-backend MPI params
 MPI_PARAMS_IPC="$COMMON_MPI -x ROCSHMEM_BACKEND=ipc"
@@ -148,7 +158,8 @@ parse_label() {
         quick|smoke|standard)
             BACKENDS="ipc gda";     EXTRA_ARGS=(-R '_uuid$' -E '^unit') ;;
         pr|comprehensive|nightly|full)
-            BACKENDS="ipc gda ro"; EXTRA_ARGS=(-E '^unit') ;;
+            # RO backend is not currently supported in the test matrix
+            BACKENDS="ipc gda"; EXTRA_ARGS=(-E '^unit') ;;
         *)
             echo "Error: Unknown label '$1'" >&2; usage ;;
     esac
