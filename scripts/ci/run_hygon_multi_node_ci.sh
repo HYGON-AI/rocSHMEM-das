@@ -79,9 +79,9 @@ generate_topology() {
 install_dtk() {
     local dtk_source="$1"
     local tarball="$dtk_source"
-    local extracted
+    local extracted root
 
-    if [[ ! -f /opt/dtk/env.sh ]]; then
+    # Always use the selected Ubuntu archive, including when the image contains DTK.
         if [[ "$dtk_source" =~ ^https?:// ]]; then
             tarball="/opt/$(basename "$dtk_source")"
             curl --fail --location --retry 3 "$dtk_source" --output "$tarball"
@@ -91,26 +91,26 @@ install_dtk() {
                 exit 1
             }
         fi
-        tar -xzf "$tarball" -C /opt
-        extracted="$(find /opt -mindepth 1 -maxdepth 1 -type d -name 'dtk-*' | sort | tail -n 1)"
-        [[ -n "$extracted" ]] || { echo "ERROR: DTK directory was not created" >&2; exit 1; }
-        ln -sfn "$extracted" /opt/dtk
-    fi
+        root="$(mktemp -d /opt/rocshmem-ci-dtk.XXXXXX)"
+        tar -xzf "$tarball" -C "$root"
+        local candidates=()
+        for extracted in "$root"/dtk-*; do
+            [[ -f "$extracted/env.sh" ]] && candidates+=("$extracted")
+        done
+        [[ ${#candidates[@]} -eq 1 ]] || { echo 'ERROR: expected one DTK directory' >&2; exit 1; }
+        if [[ -L /opt/dtk ]]; then
+            rm -- /opt/dtk
+        elif [[ -e /opt/dtk ]]; then
+            mv -- /opt/dtk "$root/image-dtk"
+        fi
+        ln -s "${candidates[0]}" /opt/dtk
     test -f /opt/dtk/env.sh
 }
 
 upgrade_rdma_core() {
-    dnf --refresh install -y \
-        rdma-core rdma-core-devel \
-        libibverbs libibverbs-devel libibverbs-utils
-
-    local rdma_version
-    rdma_version="$(rpm -q --qf '%{VERSION}' rdma-core)"
-    if [[ "$(printf '%s\n' 45 "$rdma_version" | sort -V | head -n 1)" != 45 ]]; then
-        echo "ERROR: rdma-core >= 45 is required; installed version is ${rdma_version}" >&2
-        exit 1
-    fi
-    rpm -q rdma-core libibverbs
+    apt-get install -y --no-install-recommends \
+        rdma-core libibverbs-dev ibverbs-utils libnuma-dev librdmacm-dev
+    dpkg-query -W rdma-core libibverbs-dev
 }
 
 prepare_container() {
@@ -124,7 +124,15 @@ prepare_container() {
     local primary_ip="$8"
     local secondary_ip="$9"
 
-    dnf install -y curl openssh-clients openssh-server python3-pip iproute procps-ng
+    # shellcheck disable=SC1091
+    source /etc/os-release
+    [[ "$ID" == ubuntu && "$VERSION_ID" == 22.04 ]] || {
+        echo 'ERROR: IMAGE must be the Ubuntu 22.04 build image' >&2; exit 1;
+    }
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        curl ca-certificates openssh-client openssh-server python3-pip iproute2 procps
     upgrade_rdma_core
     install_dtk "$dtk_source"
     activate_dtk
@@ -195,8 +203,7 @@ run_suite() {
     activate_dtk
     export ROCSHMEM_TEST_DIR=/opt/rocshmem/bin/rocshmem
     export ROCSHMEM_TEST_LOG_DIR=/patch/test_log
-    # gda_mlx5 builds IPC and GDA, but does not compile the RO backend.
-    export ROCSHMEM_TEST_BACKENDS="ipc gda"
+    # The updated runner selects IPC/GDA for both standard and full suites.
 
     /opt/rocshmem/share/rocshmem/run_ctest.sh "$suite" \
         --host "${primary_host},${secondary_host}" \
@@ -233,8 +240,7 @@ PRIMARY_IP="${ROCSHMEM_CI_PRIMARY_IP:-10.17.1.1}"
 SECONDARY_IP="${ROCSHMEM_CI_SECONDARY_IP:-10.17.1.2}"
 PRIMARY_NIC="${ROCSHMEM_CI_PRIMARY_NIC:-mlx5_6}"
 SECONDARY_NIC="${ROCSHMEM_CI_SECONDARY_NIC:-mlx5_0}"
-DTK_HOST_PATH="${ROCSHMEM_CI_DTK_HOST_PATH:-/public/opendas/ArchivedFile/dtk-pkg/dtk26.04/DTK-26.04-rc4-centos8-x86_64.tar.gz}"
-DTK_CONTAINER_PATH="/opt/$(basename "$DTK_HOST_PATH")"
+DTK_SOURCE="${ROCSHMEM_CI_DTK_URL:-http://10.16.1.201:8000/dtk-pkg/dtk26.04/DTK-26.04-rc4-ubuntu20.04-x86_64.tar.gz}"
 PRIMARY_NIC_INDEX="${ROCSHMEM_CI_PRIMARY_NIC_INDEX:-6}"
 SECONDARY_NIC_INDEX="${ROCSHMEM_CI_SECONDARY_NIC_INDEX:-0}"
 SETUP_TIMEOUT="${ROCSHMEM_CI_SETUP_TIMEOUT:-3600}"
@@ -369,14 +375,6 @@ done
 [[ -n "$SSH_PORT" ]] || { echo "ERROR: no common free container SSH port in ${PORT_MIN}-${PORT_MAX}" >&2; exit 1; }
 echo "Cross-node locks acquired; selected container SSH port ${SSH_PORT}."
 
-[[ -f "$DTK_HOST_PATH" ]] || {
-    echo "ERROR: DTK archive is missing on ${PRIMARY_HOST}: ${DTK_HOST_PATH}" >&2
-    exit 1
-}
-ssh "${SSH_OPTIONS[@]}" "$REMOTE" "test -f '$DTK_HOST_PATH'" || {
-    echo "ERROR: DTK archive is missing on ${SECONDARY_HOST}: ${DTK_HOST_PATH}" >&2
-    exit 1
-}
 
 ssh "${SSH_OPTIONS[@]}" "$REMOTE" "mkdir -p '$REMOTE_ROOT/ssh' '$REMOTE_ROOT/logs'"
 scp "${SSH_OPTIONS[@]}" "$SOURCE_TAR" "$SCRIPT_PATH" "$SSH_DIR/id_ed25519" "$SSH_DIR/id_ed25519.pub" "${REMOTE}:${REMOTE_ROOT}/"
@@ -386,14 +384,12 @@ docker run --name "$PRIMARY_CONTAINER" -u root \
     --ulimit memlock=-1:-1 --shm-size=32g --privileged \
     --device=/dev/kfd --device=/dev/mkfd --device=/dev/dri/ \
     -v /opt/hyhal:/opt/hyhal:ro --network=host --ipc=host \
-    -v "${DTK_HOST_PATH}:${DTK_CONTAINER_PATH}:ro" \
     --group-add video -d "$ROCSHMEM_CI_IMAGE" tail -f /dev/null
 
 ssh "${SSH_OPTIONS[@]}" "$REMOTE" docker run --name "$SECONDARY_CONTAINER" -u root \
     --ulimit memlock=-1:-1 --shm-size=32g --privileged \
     --device=/dev/kfd --device=/dev/mkfd --device=/dev/dri/ \
     -v /opt/hyhal:/opt/hyhal:ro --network=host --ipc=host \
-    -v "${DTK_HOST_PATH}:${DTK_CONTAINER_PATH}:ro" \
     --group-add video -d "$ROCSHMEM_CI_IMAGE" tail -f /dev/null
 
 docker exec "$PRIMARY_CONTAINER" mkdir -p /work /patch/test_log
@@ -409,7 +405,7 @@ ssh "${SSH_OPTIONS[@]}" "$REMOTE" \
      docker cp '$REMOTE_ROOT/ssh' '${SECONDARY_CONTAINER}:/work/ssh'"
 
 PREPARE_COMMON=(
-    "$DTK_CONTAINER_PATH" "$SSH_PORT" "$PRIMARY_HOST" "$SECONDARY_HOST"
+    "$DTK_SOURCE" "$SSH_PORT" "$PRIMARY_HOST" "$SECONDARY_HOST"
     "$PRIMARY_IP" "$SECONDARY_IP"
 )
 
@@ -427,7 +423,7 @@ ssh "${SSH_OPTIONS[@]}" "$REMOTE" \
        -e 'PIP_INDEX_URL=${PIP_INDEX_URL:-}' -e 'PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST:-}' \
        -e 'ROCSHMEM_CI_GID_INDEX=${GID_INDEX}' \
        '$SECONDARY_CONTAINER' bash /work/run_hygon_multi_node_ci.sh __prepare \
-       /work/source.tar '$DTK_CONTAINER_PATH' '$SECONDARY_NIC' '$SECONDARY_NIC_INDEX' \
+       /work/source.tar '$DTK_SOURCE' '$SECONDARY_NIC' '$SECONDARY_NIC_INDEX' \
        '$SSH_PORT' '$PRIMARY_HOST' '$SECONDARY_HOST' '$PRIMARY_IP' '$SECONDARY_IP'" \
     >"$LOG_ROOT/build-${SECONDARY_HOST}.log" 2>&1 &
 SECONDARY_PID=$!

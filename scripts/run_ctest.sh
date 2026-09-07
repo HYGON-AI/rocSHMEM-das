@@ -11,10 +11,10 @@ Usage: $(basename "$0") <label> --host <host_spec>
 Labels:
   quick|smoke    Quick smoke tests (IPC + GDA)
   standard       Standard tests (IPC + GDA)
-  pr             pr tests (IPC + GDA + RO)
-  comprehensive  Comprehensive tests (IPC + GDA + RO)
-  nightly        nightly tests (IPC + GDA + RO)
-  full           Full tests (IPC + GDA + RO)
+  pr             pr tests (IPC + GDA)
+  comprehensive  Comprehensive tests (IPC + GDA)
+  nightly        nightly tests (IPC + GDA)
+  full           Full tests (IPC + GDA)
 
 Options:
   --host         MPI host specification for multi-node tests (required)
@@ -25,11 +25,12 @@ Options:
   --ib-gid-index IB GID index forwarded to ROCSHMEM_IB_GID_INDEX and
                  UCX_IB_GID_INDEX (optional, Default: 1)
                  Example: --ib-gid-index 3
+  --extra-args   Additional MPI arguments(optional)
+                 Example: --extra-args "-x PATH"
 
 Environment Variables:
   ROCSHMEM_TEST_DIR          ctest directory (Default: /opt/rocshmem/bin/rocshmem)
   ROCSHMEM_TEST_LOG_DIR      Log directory for both ctest and per-test logs (Default: $(pwd)/test_logs)
-  ROCSHMEM_TEST_BACKENDS     Space-separated backend override (ipc, gda, ro)
 
 Examples:
   $(basename "$0") quick --host host1,host2
@@ -57,6 +58,7 @@ esac
 HOST_SPEC=""
 TOPO_FILE=""
 IB_GID_INDEX=1
+EXTRA_MPI_ARGS=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --host)
@@ -72,6 +74,11 @@ while [[ $# -gt 0 ]]; do
         --ib-gid-index)
             [[ -z "${2:-}" ]] && { echo "Error: --ib-gid-index requires an argument" >&2; usage; }
             IB_GID_INDEX="$2"
+            shift 2
+            ;;
+        --extra-args)
+            [[ -z "${2:-}" ]] && { echo "Error: --extra-args requires an argument" >&2; usage; }
+            EXTRA_MPI_ARGS="$2"
             shift 2
             ;;
         *)
@@ -135,7 +142,8 @@ COMMON_MPI="--allow-run-as-root \
 -x UCX_WARN_UNUSED_ENV_VARS=n \
 -x LD_LIBRARY_PATH -x PATH \
 $IB_GID_PARAMS \
---map-by numa"
+--map-by numa \
+$EXTRA_MPI_ARGS"
 
 # Per-backend MPI params
 MPI_PARAMS_IPC="$COMMON_MPI -x ROCSHMEM_BACKEND=ipc"
@@ -149,13 +157,11 @@ parse_label() {
         quick|smoke|standard)
             BACKENDS="ipc gda";     EXTRA_ARGS=(-R '_uuid$' -E '^unit') ;;
         pr|comprehensive|nightly|full)
-            BACKENDS="ipc gda ro"; EXTRA_ARGS=(-E '^unit') ;;
+            # RO backend is not currently supported in the test matrix
+            BACKENDS="ipc gda"; EXTRA_ARGS=(-E '^unit') ;;
         *)
             echo "Error: Unknown label '$1'" >&2; usage ;;
     esac
-    if [[ -n "${ROCSHMEM_TEST_BACKENDS:-}" ]]; then
-        BACKENDS="${ROCSHMEM_TEST_BACKENDS}"
-    fi
 }
 
 # Run one backend: run_backend <backend> <mpi_params> <ctest_label> <extra_args...>
