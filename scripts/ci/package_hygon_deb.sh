@@ -138,15 +138,21 @@ build_package() {
         grep -qx 'GDA_SHCA:BOOL=OFF' CMakeCache.txt
     fi
 
-    local upstream_version deb_version expected_version expected_filename
+    local upstream_version deb_version variant_suffix expected_version expected_filename
     upstream_version="$(sed -n 's/^set(CPACK_PACKAGE_VERSION "\([^"]*\)")$/\1/p' CPackConfig.cmake)"
     [[ "$upstream_version" =~ ^[0-9][0-9A-Za-z.+~]*$ ]] || {
         echo 'ERROR: missing or unexpected CPACK_PACKAGE_VERSION' >&2; return 1;
     }
     # Keep the Debian revision free of hyphens. DTK belongs to the version part.
-    deb_version="${upstream_version}-gda-${ROCSHMEM_PACKAGE_VARIANT}-dtk${ROCSHMEM_PACKAGE_DTK_VERSION}"
+    # mlx5 is the default transport and carries no marker; shca keeps its marker.
+    # The marker is a hyphen, not an underscore: '_' is not a legal Debian version
+    # character and would make dpkg reject the package on install.
+    variant_suffix=""
+    [[ "$ROCSHMEM_PACKAGE_VARIANT" == shca ]] && variant_suffix="-shca"
+    deb_version="${upstream_version}${variant_suffix}-dtk${ROCSHMEM_PACKAGE_DTK_VERSION}"
     expected_version="${deb_version}-${ROCSHMEM_PACKAGE_RELEASE}"
-    expected_filename="rocshmem_${deb_version}-${ROCSHMEM_PACKAGE_FILENAME_RELEASE}_amd64.deb"
+    # Only the exported filename uses _shca; the control Version retains -shca.
+    expected_filename="rocshmem_${upstream_version}${variant_suffix/-/_}-dtk${ROCSHMEM_PACKAGE_DTK_VERSION}-${ROCSHMEM_PACKAGE_FILENAME_RELEASE}_amd64.deb"
     mkdir -p /tmp/rocshmem-deb-output
     cpack --config "$PWD/CPackConfig.cmake" -G DEB \
         -D CPACK_DEBIAN_PACKAGE_ARCHITECTURE=amd64 \
