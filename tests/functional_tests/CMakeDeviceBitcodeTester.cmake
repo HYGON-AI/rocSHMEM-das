@@ -170,6 +170,8 @@ add_custom_target(device_bitcode_tester_hsacos ALL
   DEPENDS ${ALL_TESTER_HSACOS}
 )
 
-add_dependencies(${PROJECT_NAME} device_bitcode_tester_hsacos)
+foreach(_t IN LISTS FUNCTIONAL_TEST_TARGETS)
+  add_dependencies(${_t} device_bitcode_tester_hsacos)
+endforeach()
 
 message(STATUS "Device bitcode test (in rocshmem_functional_tests) enabled for: ${BITCODE_GPU_ARCHS}")

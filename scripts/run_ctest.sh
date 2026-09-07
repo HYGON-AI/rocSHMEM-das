@@ -11,10 +11,10 @@ Usage: $(basename "$0") <label> --host <host_spec>
 Labels:
   quick|smoke    Quick smoke tests (IPC + GDA)
   standard       Standard tests (IPC + GDA)
-  pr             pr tests (IPC + GDA)
-  comprehensive  Comprehensive tests (IPC + GDA)
-  nightly        nightly tests (IPC + GDA)
-  full           Full tests (IPC + GDA)
+  pr             pr tests (IPC + GDA + RO)
+  comprehensive  Comprehensive tests (IPC + GDA + RO)
+  nightly        nightly tests (IPC + GDA + RO)
+  full           Full tests (IPC + GDA + RO)
 
 Options:
   --host         MPI host specification for multi-node tests (required)

@@ -38,15 +38,20 @@ option(ASAN "Enable AddressSanitizer" ${ASAN})
 ###############################################################################
 add_executable(${PROJECT_NAME} "")
 
-target_include_directories(
-  ${PROJECT_NAME}
-  PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-)
+# In split-library mode, also build a second executable that links against the
+# separate rocshmem_host (shared) and rocshmem_device (static) libraries so
+# both link scenarios are exercised. The original executable always links the
+# combined roc::rocshmem target.
+set(FUNCTIONAL_TEST_TARGETS ${PROJECT_NAME})
+set(FUNCTIONAL_TEST_SPLIT OFF)
+if(TARGET roc::rocshmem_host AND TARGET roc::rocshmem_device)
+  set(FUNCTIONAL_TEST_SPLIT_TARGET ${PROJECT_NAME}_splitlibs)
+  add_executable(${FUNCTIONAL_TEST_SPLIT_TARGET} "")
+  list(APPEND FUNCTIONAL_TEST_TARGETS ${FUNCTIONAL_TEST_SPLIT_TARGET})
+  set(FUNCTIONAL_TEST_SPLIT ON)
+endif()
 
-target_sources(
-  ${PROJECT_NAME}
-  PRIVATE
+set(FUNCTIONAL_TEST_SOURCES
     barrier_all_tester.cpp
     sync_all_tester.cpp
     test_driver.cpp
@@ -82,6 +87,19 @@ target_sources(
     tile_allgather_tester.cpp
 )
 
+foreach(_t IN LISTS FUNCTIONAL_TEST_TARGETS)
+  target_include_directories(
+    ${_t}
+    PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}
+  )
+  target_sources(
+    ${_t}
+    PRIVATE
+      ${FUNCTIONAL_TEST_SOURCES}
+  )
+endforeach()
+
 ###############################################################################
 # ROCSHMEM
 ###############################################################################
@@ -92,71 +110,86 @@ if (BUILD_TESTS_ONLY)
   find_package(Threads REQUIRED)
   find_package(rocshmem REQUIRED)
 
-  target_include_directories(
-    ${PROJECT_NAME}
-    PRIVATE
-      $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
-      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../src>
-  )
+  foreach(_t IN LISTS FUNCTIONAL_TEST_TARGETS)
+    target_include_directories(
+      ${_t}
+      PRIVATE
+        $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../src>
+    )
+  endforeach()
 endif()
 
 find_package(PMIx)
 
-target_compile_definitions(
-  ${PROJECT_NAME}
-  PRIVATE
-    $<$<TARGET_EXISTS:PMIx::pmix>:HAVE_PMIX=1>
-    CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
-    CMAKE_BINARY_DIR="${CMAKE_BINARY_DIR}"
-)
+foreach(_t IN LISTS FUNCTIONAL_TEST_TARGETS)
+  target_compile_definitions(
+    ${_t}
+    PRIVATE
+      $<$<TARGET_EXISTS:PMIx::pmix>:HAVE_PMIX=1>
+      CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+      CMAKE_BINARY_DIR="${CMAKE_BINARY_DIR}"
+  )
+endforeach()
 
 configure_file(../../scripts/functional_tests/driver.sh rocshmem_functional_driver.sh COPYONLY)
 rocm_install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/rocshmem_functional_driver.sh COMPONENT tests DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
-install(TARGETS rocshmem_functional_tests COMPONENT tests RUNTIME DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
+foreach(_t IN LISTS FUNCTIONAL_TEST_TARGETS)
+  install(TARGETS ${_t} COMPONENT tests RUNTIME DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
+endforeach()
 
-if(TARGET roc::rocshmem_host AND TARGET roc::rocshmem_device)
+# Common link libraries shared by all functional test executables.
+set(FUNCTIONAL_TEST_COMMON_LINK_LIBS
+  $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>
+  $<TARGET_NAME_IF_EXISTS:PMIx::pmix>
+  hiprtc
+)
+
+# ${PROJECT_NAME} always links the combined roc::rocshmem library.
+target_link_libraries(
+  ${PROJECT_NAME}
+  PRIVATE
+    roc::rocshmem
+    ${FUNCTIONAL_TEST_COMMON_LINK_LIBS}
+)
+
+# In split-library mode, the _splitlibs executable links the separate
+# rocshmem_host (shared) and rocshmem_device (static) libraries.
+if(FUNCTIONAL_TEST_SPLIT)
   target_link_libraries(
-    ${PROJECT_NAME}
+    ${FUNCTIONAL_TEST_SPLIT_TARGET}
     PRIVATE
       roc::rocshmem_host
       -Wl,--whole-archive
       roc::rocshmem_device
       -Wl,--no-whole-archive
-      $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>
-      $<TARGET_NAME_IF_EXISTS:PMIx::pmix>
-      hiprtc
+      ${FUNCTIONAL_TEST_COMMON_LINK_LIBS}
   )
-  target_link_options(${PROJECT_NAME} PRIVATE -Wl,--export-dynamic)
-else()
-  target_link_libraries(
-    ${PROJECT_NAME}
-    PRIVATE
-      roc::rocshmem
-      $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>
-      $<TARGET_NAME_IF_EXISTS:PMIx::pmix>
-      hiprtc
-  )
+  target_link_options(${FUNCTIONAL_TEST_SPLIT_TARGET} PRIVATE -Wl,--export-dynamic)
 endif()
 
 if(${ROCM_MAJOR_VERSION} LESS 7)
   # ROCm 6.x requires us to explicitly enable warp sync builtins
-  target_compile_definitions(${PROJECT_NAME} PRIVATE HIP_ENABLE_WARP_SYNC_BUILTINS=1)
+  foreach(_t IN LISTS FUNCTIONAL_TEST_TARGETS)
+    target_compile_definitions(${_t} PRIVATE HIP_ENABLE_WARP_SYNC_BUILTINS=1)
+  endforeach()
 endif()
 
 ###############################################################################
 # ASAN SETTINGS
 ###############################################################################
-target_compile_options(
-  ${PROJECT_NAME}
-  PRIVATE
-    $<$<BOOL:${ASAN}>:-fsanitize=address -g>
-)
-
-target_link_options(
-  ${PROJECT_NAME}
-  PRIVATE
-    $<$<BOOL:${ASAN}>:-fsanitize=address -g -shared-libsan>
-)
+foreach(_t IN LISTS FUNCTIONAL_TEST_TARGETS)
+  target_compile_options(
+    ${_t}
+    PRIVATE
+      $<$<BOOL:${ASAN}>:-fsanitize=address -g>
+  )
+  target_link_options(
+    ${_t}
+    PRIVATE
+      $<$<BOOL:${ASAN}>:-fsanitize=address -g -shared-libsan>
+  )
+endforeach()
 
 ###############################################################################
 # DEVICE BITCODE TESTER (put/get via HSACO + rocshmem_hipmodule_init)
