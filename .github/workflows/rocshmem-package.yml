@@ -15,16 +15,23 @@ concurrency:
 
 jobs:
   package:
-    name: Package merged commit
+    name: Package merged commit (${{ matrix.variant }})
     if: github.event.pull_request.merged == true
     runs-on: [self-hosted, Linux, X64, ci, nmz1, bw1100]
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      # Both variants publish on nmz1 and share its cross-node CI lock.
+      max-parallel: 1
+      matrix:
+        variant: [mlx5, shca]
     env:
-      ROCSHMEM_CI_IMAGE: ${{ vars.IMAGE }}
+      ROCSHMEM_CI_IMAGE: ${{ vars.BASE_COMPILE_IMAGE_UBUNTU_PY310 }}
+      ROCSHMEM_PACKAGE_VARIANT: ${{ matrix.variant }}
+      RESOURCE_SERVER_URL: ${{ vars.RESOURCE_SERVER_URL || 'http://10.16.1.201:8000' }}
+      ROCSHMEM_PACKAGE_DTK_URL: ${{ format('{0}/dtk-pkg/dtk26.04/DTK-26.04-rc4-ubuntu20.04-x86_64.tar.gz', vars.RESOURCE_SERVER_URL || 'http://10.16.1.201:8000') }}
       PIP_INDEX_URL: ${{ vars.PIP_INDEX_URL }}
       PIP_TRUSTED_HOST: ${{ vars.PIP_TRUSTED_HOST }}
-      # Always install this archive; dtk26.04 in the path supplies the dtk2604 label.
-      ROCSHMEM_CI_DTK_HOST_PATH: /public/opendas/ArchivedFile/dtk-pkg/dtk26.04/DTK-26.04-rc4-centos8-x86_64.tar.gz
       ROCSHMEM_PACKAGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
       ROCSHMEM_PACKAGE_PR: ${{ github.event.pull_request.number }}
       ROCSHMEM_PACKAGE_HOST_DIR: /ci/github_ci_packages/rocshmem
@@ -40,8 +47,12 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          printf 'ROCSHMEM_PACKAGE_ROOT=%s/rocshmem-deb/%s-%s\n' \
-            "${RUNNER_TEMP}" "${GITHUB_RUN_ID}" "${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_ENV}"
+          if [[ -z "$ROCSHMEM_CI_IMAGE" ]]; then
+            echo '::error::Set BASE_COMPILE_IMAGE_UBUNTU_PY310 to the validated Mooncake Ubuntu image.'
+            exit 1
+          fi
+          printf 'ROCSHMEM_PACKAGE_ROOT=%s/rocshmem-deb/%s-%s-%s\n' \
+            "${RUNNER_TEMP}" "${GITHUB_RUN_ID}" "${GITHUB_RUN_ATTEMPT}" "${ROCSHMEM_PACKAGE_VARIANT}" >> "${GITHUB_ENV}"
 
       - name: Build and validate DEB in a fresh container
         shell: bash
@@ -50,7 +61,7 @@ jobs:
       - name: Save DEB and provenance (not a package repository upload)
         uses: actions/upload-artifact@v4
         with:
-          name: rocshmem-deb-pr${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: rocshmem-deb-${{ matrix.variant }}-pr${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.ROCSHMEM_PACKAGE_ROOT }}/packages/
           if-no-files-found: error
           retention-days: 30
@@ -59,7 +70,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: rocshmem-deb-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          name: rocshmem-deb-logs-${{ matrix.variant }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.ROCSHMEM_PACKAGE_ROOT }}/logs/
           if-no-files-found: warn
           retention-days: 14

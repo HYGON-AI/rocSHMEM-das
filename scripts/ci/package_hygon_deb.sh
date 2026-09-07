@@ -52,13 +52,43 @@ build_package() {
     # This entry point is ONLY for the disposable container created below.
     [[ -f /.dockerenv && "${ROCSHMEM_PACKAGE_CONTAINER:-}" == 1 ]]
     [[ "$(uname -m)" == x86_64 ]]
-    dnf install -y git curl python3-pip binutils
-    dnf --refresh install -y rdma-core rdma-core-devel libibverbs libibverbs-devel libibverbs-utils
-    local rdma_version dtk_dir dtk_backup
-    rdma_version="$(rpm -q --qf '%{VERSION}' rdma-core)"
-    [[ "$(printf '%s\n' 45 "$rdma_version" | sort -V | head -n 1)" == 45 ]] || {
-        echo 'ERROR: rdma-core >= 45 is required' >&2; return 1;
-    }
+    local dtk_dir dtk_backup
+    case "$ROCSHMEM_PACKAGE_VARIANT" in
+        mlx5)
+            source /etc/os-release
+            [[ "$ID" == ubuntu && "$VERSION_ID" == 22.04 ]]
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y --no-install-recommends \
+                git curl ca-certificates python3-pip binutils \
+                libnuma-dev rdma-core libibverbs-dev ibverbs-utils
+            ;;
+        shca)
+            # Same user-space SHCA setup as Mooncake, in the disposable container.
+            # shellcheck disable=SC1091
+            source /etc/os-release
+            [[ "$ID" == ubuntu && "$VERSION_ID" == 22.04 ]]
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y --no-install-recommends git curl ca-certificates python3-pip binutils libnuma-dev
+            mkdir /tmp/rocshmem-shca-setup
+            cd /tmp/rocshmem-shca-setup
+            curl --fail --location --retry 3 -o mlxtoshca.sh \
+                "${RESOURCE_SERVER_URL%/}/Jenkins/CompileDep/mooncake/mlxtoshca.sh"
+            curl --fail --location --retry 3 -o shca-tools_2.500.4.B068-Ubuntu22.04_amd64.deb \
+                "${RESOURCE_SERVER_URL%/}/Jenkins/CompileDep/mooncake/shca-tools_2.500.4.B068-Ubuntu22.04_amd64.deb"
+            bash ./mlxtoshca.sh
+            [[ "$(dpkg-query -W -f='${Status}' shca-tools)" == 'install ok installed' ]]
+            test -s /usr/include/infiniband/shca_dv.h
+            test -s /usr/lib/x86_64-linux-gnu/libshca.so
+            ldconfig
+            ldd /usr/lib/x86_64-linux-gnu/libshca.so > shca-ldd.log
+            if grep -F 'not found' shca-ldd.log; then
+                echo 'ERROR: SHCA shared library dependencies are missing' >&2; return 1;
+            fi
+            ;;
+        *) echo 'ERROR: unknown package variant' >&2; return 1 ;;
+    esac
     dtk_dir="$(extract_package_dtk /tmp/rocshmem-dtk.tar.gz /opt)"
     [[ "$(basename "$dtk_dir")" =~ ^dtk-([0-9]+)\.([0-9]+) ]] &&
         [[ "${BASH_REMATCH[1]}${BASH_REMATCH[2]}" == "$ROCSHMEM_PACKAGE_DTK_VERSION" ]] || {
@@ -80,7 +110,9 @@ build_package() {
     [[ "$(readlink -f "$(command -v hipcc)")" == "$dtk_dir/"* ]] || {
         echo 'ERROR: hipcc does not resolve to the selected DTK archive' >&2; return 1;
     }
-    export PATH="/opt/mpi/bin:${PATH}"
+    export PATH="/opt/dtk/llvm/bin:/opt/dtk/bin:/opt/mpi/bin:${PATH}"
+    command -v llvm-ar
+    /opt/mpi/bin/mpicxx --version
     export LD_LIBRARY_PATH="/opt/mpi/lib:/opt/hwloc/lib:${LD_LIBRARY_PATH:-}"
     python3 -m pip install pyyaml
 
@@ -96,7 +128,15 @@ build_package() {
     mkdir build
     cd build
     export ASAN=OFF BUILD_TYPE=Release INSTALL_PREFIX=/opt/rocshmem
-    bash ../scripts/build_configs/ipc_ro_mlx5
+    bash "../scripts/build_configs/gda_${ROCSHMEM_PACKAGE_VARIANT}"
+    grep -qx 'USE_GDA:BOOL=ON' CMakeCache.txt
+    if [[ "$ROCSHMEM_PACKAGE_VARIANT" == shca ]]; then
+        grep -qx 'GDA_SHCA:BOOL=ON' CMakeCache.txt
+        grep -qx 'GDA_MLX5:BOOL=OFF' CMakeCache.txt
+    else
+        grep -qx 'GDA_MLX5:BOOL=ON' CMakeCache.txt
+        grep -qx 'GDA_SHCA:BOOL=OFF' CMakeCache.txt
+    fi
 
     local upstream_version deb_version expected_version expected_filename
     upstream_version="$(sed -n 's/^set(CPACK_PACKAGE_VERSION "\([^"]*\)")$/\1/p' CPackConfig.cmake)"
@@ -104,7 +144,7 @@ build_package() {
         echo 'ERROR: missing or unexpected CPACK_PACKAGE_VERSION' >&2; return 1;
     }
     # Keep the Debian revision free of hyphens. DTK belongs to the version part.
-    deb_version="${upstream_version}-dtk${ROCSHMEM_PACKAGE_DTK_VERSION}"
+    deb_version="${upstream_version}-gda-${ROCSHMEM_PACKAGE_VARIANT}-dtk${ROCSHMEM_PACKAGE_DTK_VERSION}"
     expected_version="${deb_version}-${ROCSHMEM_PACKAGE_RELEASE}"
     expected_filename="rocshmem_${deb_version}-${ROCSHMEM_PACKAGE_FILENAME_RELEASE}_amd64.deb"
     mkdir -p /tmp/rocshmem-deb-output
@@ -152,14 +192,19 @@ build_package() {
             "$ROCSHMEM_PACKAGE_SHA" "$ROCSHMEM_PACKAGE_PR" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
         printf 'package_release=%s\n' "$ROCSHMEM_PACKAGE_RELEASE"
         printf 'package_version=%s\ndtk_version=%s\ndtk_source=%s\ndtk_directory=%s\n' \
-            "$expected_version" "$ROCSHMEM_PACKAGE_DTK_VERSION" "$ROCSHMEM_CI_DTK_HOST_PATH" "$dtk_dir"
+            "$expected_version" "$ROCSHMEM_PACKAGE_DTK_VERSION" "$ROCSHMEM_PACKAGE_DTK_SOURCE" "$dtk_dir"
         printf 'build_timestamp=%s\nbuild_timezone=UTC+08:00\n' "$ROCSHMEM_PACKAGE_TIMESTAMP"
-        printf 'build_config=scripts/build_configs/ipc_ro_mlx5\nstrip=OFF\narchitecture=amd64\n'
+        printf 'build_config=scripts/build_configs/gda_%s\nstrip=OFF\narchitecture=amd64\n' "$ROCSHMEM_PACKAGE_VARIANT"
         cat /etc/os-release
         hipcc --version
         /opt/mpi/bin/mpiexec --version
         cmake --version
-        rpm -q rdma-core libibverbs
+        if [[ "$ROCSHMEM_PACKAGE_VARIANT" == shca ]]; then
+            dpkg-query -W shca-tools
+            sha256sum /tmp/rocshmem-shca-setup/mlxtoshca.sh /tmp/rocshmem-shca-setup/*.deb
+        else
+            dpkg-query -W rdma-core libibverbs-dev ibverbs-utils
+        fi
         sha256sum /tmp/rocshmem-dtk.tar.gz
     } > /tmp/rocshmem-deb-artifacts/build-info.txt
     cd /tmp/rocshmem-deb-artifacts
@@ -178,7 +223,8 @@ if [[ "${1:-}" == __build ]]; then
 fi
 
 for required in ROCSHMEM_CI_IMAGE PIP_INDEX_URL PIP_TRUSTED_HOST \
-    ROCSHMEM_CI_DTK_HOST_PATH ROCSHMEM_PACKAGE_SHA ROCSHMEM_PACKAGE_PR \
+    ROCSHMEM_PACKAGE_VARIANT \
+    ROCSHMEM_PACKAGE_DTK_URL ROCSHMEM_PACKAGE_SHA ROCSHMEM_PACKAGE_PR \
     ROCSHMEM_PACKAGE_ROOT ROCSHMEM_PACKAGE_HOST_DIR \
     GITHUB_RUN_ID GITHUB_RUN_ATTEMPT; do
     [[ -n "${!required:-}" ]] || { echo "ERROR: missing ${required}" >&2; exit 1; }
@@ -188,11 +234,15 @@ done
     echo 'ERROR: unexpected host package directory' >&2; exit 1;
 }
 [[ "$ROCSHMEM_PACKAGE_SHA" =~ ^[0-9a-f]{40}$ ]]
-package_identity "$ROCSHMEM_CI_DTK_HOST_PATH" "$ROCSHMEM_PACKAGE_SHA" \
+case "$ROCSHMEM_PACKAGE_VARIANT" in
+    mlx5|shca) ROCSHMEM_PACKAGE_DTK_SOURCE="$ROCSHMEM_PACKAGE_DTK_URL" ;;
+    *) echo 'ERROR: unknown package variant' >&2; exit 1 ;;
+esac
+export ROCSHMEM_PACKAGE_DTK_SOURCE
+package_identity "$ROCSHMEM_PACKAGE_DTK_SOURCE" "$ROCSHMEM_PACKAGE_SHA" \
     "$(TZ=UTC-8 date +%y%m%d%H%M%S)"
 [[ "$(git rev-parse HEAD)" == "$ROCSHMEM_PACKAGE_SHA" ]]
 [[ "$(git rev-parse --is-shallow-repository)" == false ]]
-test -f "$ROCSHMEM_CI_DTK_HOST_PATH"
 mkdir -p "$ROCSHMEM_PACKAGE_ROOT/logs"
 exec > >(tee "$ROCSHMEM_PACKAGE_ROOT/logs/package.log") 2>&1
 
@@ -200,7 +250,7 @@ exec > >(tee "$ROCSHMEM_PACKAGE_ROOT/logs/package.log") 2>&1
 exec 9>/tmp/mooncake-hcu-cross-node.lock
 flock -w 900 9 || { echo 'ERROR: timed out waiting for nmz1 CI lock'; exit 1; }
 task_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/rocshmem-package.XXXXXX")"
-container_name="rocshmem-deb-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$$"
+container_name="rocshmem-deb-${ROCSHMEM_PACKAGE_VARIANT}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$$"
 container_created=false
 host_copy_temp=""
 cleanup() {
@@ -217,6 +267,7 @@ cleanup() {
     fi
     # Only remove this invocation's known file and then its empty directory.
     rm -f -- "$task_dir/source.bundle" || true
+    rm -f -- "$task_dir/dtk.tar.gz" || true
     rmdir -- "$task_dir" || true
     echo "Packaging exit code: $rc"
     exit "$rc"
@@ -224,6 +275,9 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+dtk_archive="$task_dir/dtk.tar.gz"
+curl --fail --location --retry 3 -o "$dtk_archive" "$ROCSHMEM_PACKAGE_DTK_URL"
+test -s "$dtk_archive"
 git bundle create "$task_dir/source.bundle" HEAD
 image_id="$(package_image_id "$ROCSHMEM_CI_IMAGE")"
 docker image inspect --format '{{json .RepoDigests}}' "$image_id" > "$ROCSHMEM_PACKAGE_ROOT/logs/image-digests.json"
@@ -232,11 +286,13 @@ docker create --name "$container_name" --user root \
     --device=/dev/kfd --device=/dev/mkfd --device=/dev/dri/ \
     --network=host --ipc=host --group-add video \
     -v /opt/hyhal:/opt/hyhal:ro \
-    -v "$ROCSHMEM_CI_DTK_HOST_PATH:/tmp/rocshmem-dtk.tar.gz:ro" \
+    -v "$dtk_archive:/tmp/rocshmem-dtk.tar.gz:ro" \
+    -e ROCSHMEM_PACKAGE_VARIANT -e ROCSHMEM_PACKAGE_DTK_SOURCE -e RESOURCE_SERVER_URL \
     -e ROCSHMEM_PACKAGE_CONTAINER=1 \
     -e ROCSHMEM_PACKAGE_SHA -e ROCSHMEM_PACKAGE_PR -e ROCSHMEM_PACKAGE_RELEASE \
     -e ROCSHMEM_PACKAGE_FILENAME_RELEASE \
-    -e ROCSHMEM_PACKAGE_DTK_VERSION -e ROCSHMEM_PACKAGE_TIMESTAMP -e ROCSHMEM_CI_DTK_HOST_PATH \
+    -e ROCSHMEM_PACKAGE_DTK_VERSION -e ROCSHMEM_PACKAGE_TIMESTAMP \
+    -e ROCSHMEM_PACKAGE_DTK_URL \
     -e GITHUB_RUN_ID -e GITHUB_RUN_ATTEMPT -e PIP_INDEX_URL -e PIP_TRUSTED_HOST \
     "$image_id" tail -f /dev/null
 container_created=true

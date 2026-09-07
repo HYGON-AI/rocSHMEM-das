@@ -29,6 +29,7 @@ Options:
 Environment Variables:
   ROCSHMEM_TEST_DIR          ctest directory (Default: /opt/rocshmem/bin/rocshmem)
   ROCSHMEM_TEST_LOG_DIR      Log directory for both ctest and per-test logs (Default: $(pwd)/test_logs)
+  ROCSHMEM_TEST_BACKENDS     Space-separated backend override (ipc, gda, ro)
 
 Examples:
   $(basename "$0") quick --host host1,host2
@@ -152,6 +153,9 @@ parse_label() {
         *)
             echo "Error: Unknown label '$1'" >&2; usage ;;
     esac
+    if [[ -n "${ROCSHMEM_TEST_BACKENDS:-}" ]]; then
+        BACKENDS="${ROCSHMEM_TEST_BACKENDS}"
+    fi
 }
 
 # Run one backend: run_backend <backend> <mpi_params> <ctest_label> <extra_args...>

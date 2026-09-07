@@ -10,7 +10,7 @@ activate_dtk() {
     # shellcheck disable=SC1091
     source /opt/dtk/env.sh
     set -u
-    export PATH="/opt/mpi/bin:${PATH}"
+    export PATH="/opt/dtk/llvm/bin:/opt/dtk/bin:/opt/mpi/bin:${PATH}"
     export LD_LIBRARY_PATH="/opt/mpi/lib:/opt/hwloc/lib:${LD_LIBRARY_PATH:-}"
 }
 
@@ -179,7 +179,7 @@ EOF
     tar -xf "$source_tar" -C /home/rocSHMEM-das
     install -d /home/rocSHMEM-das/build
     cd /home/rocSHMEM-das/build
-    ../scripts/build_configs/ipc_ro_mlx5
+    ../scripts/build_configs/gda_mlx5
 
     test -x /opt/rocshmem/share/rocshmem/run_ctest.sh
     test -x /opt/rocshmem/share/rocshmem/rocshmem_functional_tests
@@ -195,6 +195,8 @@ run_suite() {
     activate_dtk
     export ROCSHMEM_TEST_DIR=/opt/rocshmem/bin/rocshmem
     export ROCSHMEM_TEST_LOG_DIR=/patch/test_log
+    # gda_mlx5 builds IPC and GDA, but does not compile the RO backend.
+    export ROCSHMEM_TEST_BACKENDS="ipc gda"
 
     /opt/rocshmem/share/rocshmem/run_ctest.sh "$suite" \
         --host "${primary_host},${secondary_host}" \
