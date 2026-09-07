@@ -52,7 +52,7 @@ jobs:
       ROCSHMEM_CI_LOCK_TIMEOUT: "900"
       ROCSHMEM_CI_PORT_RANGE_MIN: "20000"
       ROCSHMEM_CI_PORT_RANGE_MAX: "29999"
-      ROCSHMEM_CI_DTK_HOST_PATH: /public/opendas/ArchivedFile/dtk-pkg/dtk26.04/DTK-26.04-rc4-centos8-x86_64.tar.gz
+      ROCSHMEM_CI_DTK_URL: http://10.16.1.201:8000/dtk-pkg/dtk26.04/DTK-26.04-rc4-ubuntu20.04-x86_64.tar.gz
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
