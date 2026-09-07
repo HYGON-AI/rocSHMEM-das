@@ -128,7 +128,7 @@ __device__ void QueuePair::shca_quiet() {
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
       uint64_t sunk_wqe_id = wqe_broadcast[wavefront_id];
-      __hip_atomic_fetch_max(&sq_sunk, sunk_wqe_id, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+      __hip_atomic_fetch_max(&sq_sunk, sunk_wqe_id + 1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
       __hip_atomic_fetch_add((uint64_t*)&quiet_completed, quiet_amount, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     }
   }
@@ -158,7 +158,7 @@ __device__ void QueuePair::shca_wait_for_free_sq_slots(
     uint64_t num_entries_until_wave_last_entry =
         wave_sq_counter + num_active_lanes - db_touched;
 
-    if (num_free_entries > num_entries_until_wave_last_entry) {
+    if (num_free_entries >= num_entries_until_wave_last_entry) {
       break;
     }
 
@@ -351,10 +351,8 @@ __device__ uint64_t QueuePair::shca_post_wqe_amo(
 
 __device__ void QueuePair::shca_quiet_single() {
   while (true) {
-    uint64_t completed = __hip_atomic_load(&quiet_completed,
-        __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
-    uint64_t posted = __hip_atomic_load(&quiet_posted,
-        __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
+    uint64_t completed = __hip_atomic_load(&quiet_completed, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
+    uint64_t posted = __hip_atomic_load(&quiet_posted, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
     if (completed == posted) return;
 
     uint64_t cq_index = completed % cq_cnt;
@@ -368,14 +366,11 @@ __device__ void QueuePair::shca_quiet_single() {
 
     uint16_t wqe_counter = *((volatile uint16_t*)&cqe->wqe_counter);
     uint64_t wqe_id = outstanding_wqes[wqe_counter];
-    *((volatile uint8_t*)&cqe->own_se_op) =
-        static_cast<uint8_t>((SHCA_CQE_INVALID << 4) | owner_bit);
+    *((volatile uint8_t*)&cqe->own_se_op) = static_cast<uint8_t>((SHCA_CQE_INVALID << 4) | owner_bit);
     __atomic_signal_fence(__ATOMIC_SEQ_CST);
     *cq_dbrec = static_cast<uint32_t>(completed + 1);
-    __hip_atomic_fetch_max(&sq_sunk, wqe_id,
-        __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
-    __hip_atomic_store(&quiet_completed, completed + 1,
-        __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+    __hip_atomic_fetch_max(&sq_sunk, wqe_id + 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+    __hip_atomic_store(&quiet_completed, completed + 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
   }
 }
 
