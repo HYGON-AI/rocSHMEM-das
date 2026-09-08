@@ -683,6 +683,16 @@ __device__ void rocshmem_broadcast_wg(rocshmem_ctx_t ctx,
 }
 
 template <typename T>
+__device__ void rocshmem_broadcast_wg(rocshmem_team_t team, T *dest,
+                                       const T *source, int nelem,
+                                       int pe_root) {
+  LOGD_API("device::broadcast_wg (team=%zd, dest=%p, source=%p, nelem=%d, root=%d)",
+    team, dest, source, nelem, pe_root);
+
+  get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->broadcast<T>(team, dest, source, nelem, pe_root);
+}
+
+template <typename T>
 __device__ void rocshmem_ctx_alltoall_wg(rocshmem_ctx_t ctx,
                                          rocshmem_team_t team, T *dest,
                                          const T *source, int nelem,
@@ -1920,6 +1930,11 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team,
       rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,     \
       int nelem, int pe_root) {                                               \
     rocshmem_broadcast_wg<T>(ctx, team, dest, source, nelem, pe_root);        \
+  }                                                                           \
+  __device__ void rocshmem_##TNAME##_broadcast_wg(                            \
+      rocshmem_team_t team, T *dest, const T *source,                         \
+      int nelem, int pe_root) {                                               \
+    rocshmem_broadcast_wg<T>(team, dest, source, nelem, pe_root);             \
   }                                                                           \
   __device__ void rocshmem_ctx_##TNAME##_alltoall_wg(                         \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,     \

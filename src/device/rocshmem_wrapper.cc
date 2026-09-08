@@ -693,6 +693,12 @@ WRAP_CTX_RMA_EXTENDED(unsigned long long, ulonglong)
     rocshmem::rocshmem_ctx_##TNAME##_broadcast_wg(                           \
         ctx, team, dest, source, nelem, pe_root);                             \
   }                                                                            \
+  ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_broadcast_wg(                   \
+      rocshmem_team_t team, T *dest, const T *source, int nelem,             \
+      int pe_root) {                                                          \
+    rocshmem::rocshmem_##TNAME##_broadcast_wg(                                \
+        team, dest, source, nelem, pe_root);                                  \
+  }                                                                           \
   ROCSHMEM_DEVICE_API void rocshmem_ctx_##TNAME##_alltoall_wg(               \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,    \
       int nelem) {                                                            \
