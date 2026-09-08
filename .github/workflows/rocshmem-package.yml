@@ -1,7 +1,8 @@
 name: rocSHMEM DEB
 
 on:
-  pull_request:
+  # Use base-repository variables for both internal and fork PRs after merge.
+  pull_request_target:
     branches: [develop]
     types: [closed]
 
