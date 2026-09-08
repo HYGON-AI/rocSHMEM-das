@@ -14,10 +14,9 @@ package_identity() {
         echo 'ERROR: invalid package identity fields' >&2; return 1;
     }
     export ROCSHMEM_PACKAGE_TIMESTAMP="$timestamp"
-    # Keep the Debian revision valid; the exported filename uses a hyphen
-    # between the Git identity and build timestamp for readability.
+    # Keep seconds in the internal revision; exported names use minute precision.
     export ROCSHMEM_PACKAGE_RELEASE="g${sha:0:8}.${timestamp}"
-    export ROCSHMEM_PACKAGE_FILENAME_RELEASE="g${sha:0:8}-${timestamp}"
+    export ROCSHMEM_PACKAGE_FILENAME_RELEASE="${timestamp:0:10}.g${sha:0:8}"
 }
 
 extract_package_dtk() {
@@ -149,10 +148,10 @@ build_package() {
     # character and would make dpkg reject the package on install.
     variant_suffix=""
     [[ "$ROCSHMEM_PACKAGE_VARIANT" == shca ]] && variant_suffix="-shca"
-    deb_version="${upstream_version}${variant_suffix}-dtk${ROCSHMEM_PACKAGE_DTK_VERSION}"
+    deb_version="${upstream_version}${variant_suffix}+dtk${ROCSHMEM_PACKAGE_DTK_VERSION}"
     expected_version="${deb_version}-${ROCSHMEM_PACKAGE_RELEASE}"
     # Only the exported filename uses _shca; the control Version retains -shca.
-    expected_filename="rocshmem_${upstream_version}${variant_suffix/-/_}-dtk${ROCSHMEM_PACKAGE_DTK_VERSION}-${ROCSHMEM_PACKAGE_FILENAME_RELEASE}_amd64.deb"
+    expected_filename="rocshmem_${upstream_version}${variant_suffix/-/_}+dtk${ROCSHMEM_PACKAGE_DTK_VERSION}.${ROCSHMEM_PACKAGE_FILENAME_RELEASE}_amd64.deb"
     mkdir -p /tmp/rocshmem-deb-output
     cpack --config "$PWD/CPackConfig.cmake" -G DEB \
         -D CPACK_DEBIAN_PACKAGE_ARCHITECTURE=amd64 \
