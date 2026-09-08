@@ -100,7 +100,14 @@ set_property(CACHE USE_EXTERNAL_MPI PROPERTY STRINGS AUTO ON OFF)
 include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
 
 ## Setup VERSION
-set(VERSION_STRING 3.5.0)
+# Original upstream version
+# set(VERSION_STRING 3.5.0)
+
+# Self-developed version (default 1.0.0), can be overridden via ROCSHMEM_VERSION env var
+set(VERSION_STRING "1.0.0")
+if(DEFINED ENV{ROCSHMEM_VERSION})
+    set(VERSION_STRING $ENV{ROCSHMEM_VERSION})
+endif()
 message(STATUS "rocSHMEM Version: " "${VERSION_STRING}")
 
 project(rocshmem VERSION ${VERSION_STRING} LANGUAGES CXX)
