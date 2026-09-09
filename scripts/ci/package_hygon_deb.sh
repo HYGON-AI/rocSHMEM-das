@@ -151,9 +151,9 @@ build_package() {
     deb_version="${upstream_version}${variant_suffix}+dtk${ROCSHMEM_PACKAGE_DTK_VERSION}"
     expected_version="${deb_version}-${ROCSHMEM_PACKAGE_RELEASE}"
     # Only the exported filename uses _shca; the control Version retains -shca.
-    expected_filename="rocshmem_${upstream_version}+dtk${ROCSHMEM_PACKAGE_DTK_VERSION}.${ROCSHMEM_PACKAGE_FILENAME_RELEASE}_amd64.deb"
+    expected_filename="rocshmem-${upstream_version}+dtk${ROCSHMEM_PACKAGE_DTK_VERSION}.${ROCSHMEM_PACKAGE_FILENAME_RELEASE}_amd64.deb"
     if [[ "$ROCSHMEM_PACKAGE_VARIANT" == shca ]]; then
-        expected_filename="${expected_filename/rocshmem_/rocshmem_shca-}"
+        expected_filename="${expected_filename/rocshmem-/rocshmem_shca-}"
     fi
     mkdir -p /tmp/rocshmem-deb-output
     cpack --config "$PWD/CPackConfig.cmake" -G DEB \
