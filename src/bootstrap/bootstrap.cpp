@@ -99,6 +99,28 @@ struct ExtInfo {
    //LOG_TRACE("groupAllGather: rank %d nranks %d size %d - DONE", rank, nRanks, size);
  }
 
+void Bootstrap::groupAllGather(void* allData, int size, int rank_start,
+                               int rank_stride, int rank_count) {
+  char* data = static_cast<char*>(allData);
+  int rank = this->getRank();
+  int rank_pos = rank_stride > 0 ? (rank - rank_start) / rank_stride : -1;
+  if (rank_count <= 0 || rank_pos < 0 || rank_pos >= rank_count ||
+      rank_start + rank_pos * rank_stride != rank) {
+    ERROR("groupAllGather: called with process that is not in the team");
+  }
+
+  int sendto = (rank_pos + 1) % rank_count;
+  int recvfrom = (rank_pos - 1 + rank_count) % rank_count;
+  for (int i = 0; i < rank_count - 1; ++i) {
+    int recv_slice = (rank_pos - i - 1 + rank_count) % rank_count;
+    int send_slice = (rank_pos - i + rank_count) % rank_count;
+    this->send(data + send_slice * size, size,
+               rank_start + sendto * rank_stride, i);
+    this->recv(data + recv_slice * size, size,
+               rank_start + recvfrom * rank_stride, i);
+  }
+}
+
  void Bootstrap::groupAlltoall(void* allData, int size, const std::vector<int>& ranks) {
    char* data = static_cast<char*>(allData);
    int num_pes = ranks.size();
