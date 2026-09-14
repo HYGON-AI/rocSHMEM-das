@@ -31,10 +31,9 @@ jobs:
     runs-on: [self-hosted, Linux, X64, ci, nmz1, bw1100]
     timeout-minutes: 360
     env:
-      # Fork PRs may not receive repository variables; use the validated public configuration.
-      ROCSHMEM_CI_IMAGE: ${{ vars.IMAGE || 'harbor.sourcefind.cn:5443/dcu/admin/base/dev:ubuntu22.04-mpi5.0-gcc11.4-cmake3.29-py3.10' }}
-      PIP_INDEX_URL: ${{ vars.PIP_INDEX_URL || 'http://10.16.1.201:9929/nightly/dtk2604/+simple/' }}
-      PIP_TRUSTED_HOST: ${{ vars.PIP_TRUSTED_HOST || '10.16.1.201' }}
+      ROCSHMEM_CI_IMAGE: ${{ vars.IMAGE}}
+      PIP_INDEX_URL: ${{ vars.PIP_INDEX_URL}}
+      PIP_TRUSTED_HOST: ${{ vars.PIP_TRUSTED_HOST}}
       ROCSHMEM_CI_PRIMARY_HOST: github-nmz1
       ROCSHMEM_CI_SECONDARY_HOST: github-nmz2
       ROCSHMEM_CI_PRIMARY_IP: 10.17.1.1
