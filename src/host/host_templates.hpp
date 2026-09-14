@@ -179,19 +179,6 @@ __host__ void HostInterface::broadcast_internal(MPI_Comm mpi_comm, T* dest,
   }
 
   /*
-   * Flush my HDP so that the NIC does not read stale values
-   */
-  hdp_policy_->hdp_flush();
-
-#if defined(USE_RCCL)
-  const size_t bytes = static_cast<size_t>(nelems) * sizeof(T);
-  RcclCommContext* rccl_comm = get_rccl_comm(mpi_comm, bytes);
-  if (rccl_broadcast(rccl_comm, source, dest, bytes, pe_root, nullptr, true)) {
-    return;
-  }
-#endif
-
-  /*
    * Offload the broadcast to MPI
    */
   mpilib_ftable_.Bcast(buffer, nelems * sizeof(T), MPI_CHAR, pe_root, mpi_comm);
@@ -213,6 +200,16 @@ __host__ void HostInterface::broadcast(T* dest, const T* source, int nelems,
    */
   MPI_Comm mpi_comm{get_mpi_comm(pe_start, log_pe_stride, pe_size)};
 
+  hdp_policy_->hdp_flush();
+
+#if defined(USE_RCCL)
+  const size_t bytes = static_cast<size_t>(nelems) * sizeof(T);
+  RcclCommContext* rccl_comm = get_rccl_comm(mpi_comm, bytes);
+  if (rccl_broadcast(rccl_comm, source, dest, bytes, pe_root, nullptr, true)) {
+    return;
+  }
+#endif
+
   broadcast_internal<T>(mpi_comm, dest, source, nelems, pe_root);
 
   return;
@@ -230,8 +227,9 @@ __host__ void HostInterface::broadcast(rocshmem_team_t team, T* dest,
   Team* team_obj{get_internal_team(team)};
   MPI_Comm mpi_comm{team_obj->mpi_comm};
 
-#if defined(USE_RCCL)
   hdp_policy_->hdp_flush();
+
+#if defined(USE_RCCL)
   if (rccl_broadcast(team_obj, host_bootstrap_, source, dest,
                      static_cast<size_t>(nelems) * sizeof(T), pe_root, nullptr,
                      true)) {
@@ -381,24 +379,6 @@ __host__ void HostInterface::to_all_internal(MPI_Comm mpi_comm, T* dest,
   void* recv_buf{const_cast<T*>(dest)};
 
   /*
-   * Flush my HDP so that the NIC does not read stale values
-   */
-  hdp_policy_->hdp_flush();
-
-#if defined(USE_RCCL)
-  constexpr ncclDataType_t rccl_type = to_rccl_data_type<T>();
-  constexpr ncclRedOp_t rccl_op = to_rccl_reduce_op<Op>();
-  const size_t bytes = static_cast<size_t>(nreduce) * sizeof(T);
-  RcclCommContext* rccl_comm =
-      rccl_type != ncclNumTypes && rccl_op != ncclNumOps
-          ? get_rccl_comm(mpi_comm, bytes)
-          : nullptr;
-  if (rccl_all_reduce(rccl_comm, source, dest, nreduce, rccl_type, rccl_op, nullptr, true)) {
-    return;
-  }
-#endif
-
-  /*
    * Offload the allreduce to MPI
    */
   mpilib_ftable_.Allreduce((dest == source) ? MPI_IN_PLACE : send_buf, recv_buf, nreduce,
@@ -421,6 +401,21 @@ __host__ void HostInterface::to_all(T* dest, const T* source, int nreduce,
    */
   MPI_Comm mpi_comm{get_mpi_comm(pe_start, log_pe_stride, pe_size)};
 
+  hdp_policy_->hdp_flush();
+
+#if defined(USE_RCCL)
+  constexpr ncclDataType_t rccl_type = to_rccl_data_type<T>();
+  constexpr ncclRedOp_t rccl_op = to_rccl_reduce_op<Op>();
+  const size_t bytes = static_cast<size_t>(nreduce) * sizeof(T);
+  RcclCommContext* rccl_comm =
+      rccl_type != ncclNumTypes && rccl_op != ncclNumOps
+          ? get_rccl_comm(mpi_comm, bytes)
+          : nullptr;
+  if (rccl_all_reduce(rccl_comm, source, dest, nreduce, rccl_type, rccl_op, nullptr, true)) {
+    return;
+  }
+#endif
+
   to_all_internal<T, Op>(mpi_comm, dest, source, nreduce);
 
   return;
@@ -437,8 +432,9 @@ __host__ int HostInterface::reduce(rocshmem_team_t team, T* dest,
   Team* team_obj{get_internal_team(team)};
   MPI_Comm mpi_comm{team_obj->mpi_comm};
 
-#if defined(USE_RCCL)
   hdp_policy_->hdp_flush();
+
+#if defined(USE_RCCL)
   if (rccl_all_reduce<T, Op>(team_obj, host_bootstrap_, source, dest, nreduce,
                              nullptr, true)) {
     return ROCSHMEM_SUCCESS;
