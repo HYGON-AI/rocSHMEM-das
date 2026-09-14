@@ -16,7 +16,7 @@ find_program(LLVM_LINK llvm-link
                ${ROCM_PATH}/llvm/bin
                ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin
                NO_DEFAULT_PATH QUIET)
-find_program(LLVM_OPT opt
+find_program(LLVM_OPT NAMES opt gcvm-opt
              PATHS
                ${ROCM_PATH}/llvm/bin
                ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin
