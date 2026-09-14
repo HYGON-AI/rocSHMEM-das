@@ -58,6 +58,7 @@ jobs:
             ${{ github.event_name == 'pull_request_target' &&
                 format('refs/pull/{0}/merge', github.event.pull_request.number) ||
                 github.ref }}
+          allow-unsafe-pr-checkout: true
           persist-credentials: false
           submodules: recursive
 
