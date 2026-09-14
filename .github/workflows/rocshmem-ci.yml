@@ -28,9 +28,6 @@ concurrency:
 jobs:
   build-and-test:
     name: Test (${{ github.event_name == 'schedule' && 'full' || 'standard' }})
-    if: >-
-      github.event_name != 'pull_request_target' ||
-      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
     runs-on: [self-hosted, Linux, X64, ci, nmz1, bw1100]
     timeout-minutes: 360
     env:
