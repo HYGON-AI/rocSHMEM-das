@@ -57,7 +57,10 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request_target' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref }}
+          ref: >-
+            ${{ github.event_name == 'pull_request_target' &&
+                format('refs/pull/{0}/merge', github.event.pull_request.number) ||
+                github.ref }}
           persist-credentials: false
           submodules: recursive
 
