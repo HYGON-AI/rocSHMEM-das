@@ -28,6 +28,7 @@
 #include "backend_bc.hpp"
 #include "util.hpp"
 #include "mpi_instance.hpp"
+#include "host/rccl.hpp"
 
 namespace rocshmem {
 
@@ -93,6 +94,15 @@ __host__ Team::Team(Backend* handle, const TeamInfo& team_info_wrt_parent,
   if (_mpi_comm != MPI_COMM_NULL) {
     mpilib_ftable_.Comm_dup (_mpi_comm, &mpi_comm);
   }
+#if defined(USE_RCCL)
+  if (rccl_eager_init_enabled()) {
+    rccl_context = rccl_comm_context_create();
+    if (!rccl_team_prepare(this, handle->backend_bootstr)) {
+      LOG_WARN("RCCL preparation failed for team; host collectives will use "
+               "the rocSHMEM fallback");
+    }
+  }
+#endif
 }
 
 __host__ __device__ int Team::get_pe_in_world(int pe) {
@@ -123,6 +133,9 @@ __host__ __device__ int Team::get_pe_in_my_team(int pe_in_world) {
 }
 
 __host__ Team::~Team() {
+#if defined(USE_RCCL)
+  rccl_team_destroy(this);
+#endif
   if (team_info_block_) {
     CHECK_HIP(hipFree(team_info_block_));
     team_info_block_ = nullptr;
