@@ -29,6 +29,7 @@
 #include "rocshmem/rocshmem_SIG_OP.hpp"
 #include "envvar.hpp"
 #include "host_helpers.hpp"
+#include "rccl.hpp"
 #include "memory/window_info.hpp"
 #include "util.hpp"
 #include "log.hpp"
@@ -193,6 +194,11 @@ __host__ HostInterface::HostInterface(HdpPolicy* hdp_policy,
 }
 
 __host__ HostInterface::~HostInterface() {
+#if defined(USE_RCCL)
+  for (auto& entry : rccl_comm_map_) {
+    rccl_comm_context_destroy(entry.second);
+  }
+#endif
 #if defined USE_HDP_FLUSH
   mpilib_ftable_.Win_unlock_all(hdp_win);
 
@@ -212,6 +218,28 @@ __host__ HostInterface::~HostInterface() {
     mpilib_ftable_.Comm_free(&host_comm_world_);
   }
 }
+
+#if defined(USE_RCCL)
+__host__ RcclCommContext* HostInterface::get_rccl_comm(MPI_Comm mpi_comm,
+                                                       size_t bytes) {
+  if (mpi_comm == MPI_COMM_NULL || !should_use_rccl(bytes)) return nullptr;
+  RcclCommContext* context = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(rccl_comm_map_mutex_);
+    auto entry = rccl_comm_map_.emplace(mpi_comm, nullptr).first;
+    if (entry->second == nullptr) {
+      entry->second = rccl_comm_context_create();
+    }
+    context = entry->second;
+  }
+  int rank = 0;
+  int size = 0;
+  mpilib_ftable_.Comm_rank(mpi_comm, &rank);
+  mpilib_ftable_.Comm_size(mpi_comm, &size);
+  if (!rccl_mpi_comm_init(mpi_comm, rank, size, context)) return nullptr;
+  return context;
+}
+#endif
 
 __host__ void HostInterface::putmem_nbi(void* dest, const void* source,
                                         size_t nelems, int pe,
@@ -422,6 +450,11 @@ __host__ void HostInterface::alltoallmem_on_stream(rocshmem_team_t team,
                                                    const void *source,
                                                    size_t size,
                                                    hipStream_t stream) {
+#if defined(USE_RCCL)
+  Team* team_obj{get_internal_team(team)};
+  if (rccl_alltoall(team_obj, host_bootstrap_, source, dest, size, stream))
+    return;
+#endif
   if (CollectiveLauncher::use_single_wg(team, size)) {
     CollectiveLauncher::enqueue_single_wg<rocshmem_alltoallmem_kernel>(
         team, dest, source, size, stream);
@@ -450,6 +483,13 @@ __host__ void HostInterface::broadcastmem_on_stream(rocshmem_team_t team,
                                                     size_t nelems,
                                                     int pe_root,
                                                     hipStream_t stream) {
+#if defined(USE_RCCL)
+  Team* team_obj{get_internal_team(team)};
+  if (rccl_broadcast(team_obj, host_bootstrap_, source, dest, nelems, pe_root,
+                     stream)) {
+    return;
+  }
+#endif
   if (CollectiveLauncher::use_single_wg(team, nelems)) {
     CollectiveLauncher::enqueue_single_wg<rocshmem_broadcastmem_kernel>(
         team, dest, source, nelems, stream, pe_root);

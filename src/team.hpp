@@ -36,6 +36,7 @@ class Team;
 class ROTeam;
 class IPCTeam;
 class GDATeam;
+class RcclCommContext;
 
 class TeamInfo {
  public:
@@ -159,6 +160,11 @@ class Team {
    * @brief This teams mpi communicator.
    */
   MPI_Comm mpi_comm{MPI_COMM_NULL};
+
+  /**
+   * @brief Optional RCCL communicator, initialized lazily by host collectives.
+   */
+  RcclCommContext* rccl_context{nullptr};
 
   /**
    * @brief The backend type.
