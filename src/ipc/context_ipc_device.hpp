@@ -201,7 +201,7 @@ class IPCContext : public Context {
 
   template <typename T, ROCSHMEM_OP Op>
   __device__ int reduce_wave(rocshmem_team_t team, T *dest, const T *source, int nreduce);
-  
+
   template <typename T, ROCSHMEM_OP Op>
   __device__ int reduce_scatter_wave(rocshmem_team_t team, T *dest, const T *source,
                                      int nreduce);
@@ -237,10 +237,10 @@ class IPCContext : public Context {
                             int wg_count = 1);
 
   template <typename T>
-  __device__ int alltoall_wave(rocshmem_team_t team, T* dest, 
+  __device__ int alltoall_wave(rocshmem_team_t team, T* dest,
                                   const T* source, int nelems);
 
-  __device__ int alltoallmem_wave(rocshmem_team_t team, void* dest, 
+  __device__ int alltoallmem_wave(rocshmem_team_t team, void* dest,
                                   const void* source, int nelems);
 
   template <typename T>
@@ -507,7 +507,7 @@ class IPCContext : public Context {
                                       int stride, int pe_size,
                                       long *p_sync);
 
-  __device__ void internal_put_broadcastmem_wave(void *dst, const void *src, int nelems, 
+  __device__ void internal_put_broadcastmem_wave(void *dst, const void *src, int nelems,
                                                  int pe_root, int pe_start, int stride, int pe_size);
 
   __device__ void internal_get_broadcastmem_wave(void *dst, const void *src, int nelems, int pe_root);
@@ -517,14 +517,14 @@ class IPCContext : public Context {
                                       int pe_root, int pe_start,
                                       int stride, int pe_size,
                                       long *p_sync);
-  
+
   template <typename T>
-  __device__ void internal_put_broadcast_wave(T *dst, const T *src, int nelems, 
+  __device__ void internal_put_broadcast_wave(T *dst, const T *src, int nelems,
                                                  int pe_root, int pe_start, int stride, int pe_size);
 
   template <typename T>
   __device__ void internal_get_broadcast_wave(T *dst, const T *src, int nelems, int pe_root);
-                                  
+
   __device__ void fcollectmem_linear_wg(rocshmem_team_t team, void *dest,
                                   const void *source, int nelems);
 
