@@ -169,7 +169,7 @@ class ROContext : public Context {
 
   __device__ void broadcastmem_wg(rocshmem_team_t team, void *dest, const void *source,
                             int nelems, int pe_root);
-                            
+
   template <typename T>
   __device__ int broadcast_wave(rocshmem_team_t team,
                                 T *dest, const T* source, int nelems, int PE_root);
@@ -194,10 +194,10 @@ class ROContext : public Context {
                             int wg_count = 1);
 
   template <typename T>
-  __device__ int alltoall_wave(rocshmem_team_t team, T* dest, 
+  __device__ int alltoall_wave(rocshmem_team_t team, T* dest,
                                   const T* source, int nelems);
 
-  __device__ int alltoallmem_wave(rocshmem_team_t team, void* dest, 
+  __device__ int alltoallmem_wave(rocshmem_team_t team, void* dest,
                                   const void* source, int nelems);
 
   template <typename T>

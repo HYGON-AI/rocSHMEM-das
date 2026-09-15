@@ -243,7 +243,7 @@ class GDAContext : public Context {
 
   template <typename T, ROCSHMEM_OP Op>
   __device__ int reduce_wave(rocshmem_team_t team, T *dest, const T *source, int nreduce);
-  
+
   template <typename T, ROCSHMEM_OP Op>
   __device__ int reduce_scatter_wave(rocshmem_team_t team, T *dest, const T *source,
                                      int nreduce);
@@ -295,10 +295,10 @@ class GDAContext : public Context {
                                 int wg_count);
 
   template <typename T>
-  __device__ int alltoall_wave(rocshmem_team_t team, T* dest, 
+  __device__ int alltoall_wave(rocshmem_team_t team, T* dest,
                                   const T* source, int nelems);
 
-  __device__ int alltoallmem_wave(rocshmem_team_t team, void* dest, 
+  __device__ int alltoallmem_wave(rocshmem_team_t team, void* dest,
                                   const void* source, int nelems);
 
   template <typename T>
@@ -454,7 +454,7 @@ class GDAContext : public Context {
   __device__ void internal_put_broadcastmem_wave(void *dst, const void *src,
     int nelems, int pe_root, int pe_start, int stride, int pe_size,
     ActiveWFInfo &wf_info);
-      
+
   __device__ void fcollectmem_linear_wg(rocshmem_team_t team, void *dest,
       const void *source, int nelems);
 

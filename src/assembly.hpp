@@ -503,8 +503,8 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
   }
 }
 
-__device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src, 
-                                        [[maybe_unused]] uint8_t* dst, 
+__device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
+                                        [[maybe_unused]] uint8_t* dst,
                                         int size) {
   switch (size) {
     case 1: [[unlikely]] {
@@ -779,7 +779,7 @@ __device__ void llvm_amdgcn_raw_buffer_store_b8(
 // ==============================================================================
 enum class CachePolicy {
   Standard,      // Normal C++ load/store (L1 and L2 cached)
-  FlatCache,     // Flat load/store with L1 and L2 caching 
+  FlatCache,     // Flat load/store with L1 and L2 caching
   NonTemporal,   // Streaming data (nt / glc slc)
   DeviceScope,   // Bypass L1 (sc0 / glc / scope:DEV)
   SystemScope,   // Bypass L1 and L2 (sc0 sc1 / glc slc / scope:SYS)
