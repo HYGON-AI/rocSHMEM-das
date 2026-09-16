@@ -87,6 +87,7 @@ build_package() {
     local dtk_dir dtk_backup
     case "$ROCSHMEM_PACKAGE_VARIANT" in
         mlx5)
+            # shellcheck source=/dev/null
             source /etc/os-release
             [[ "$ID" == ubuntu && "$VERSION_ID" == 22.04 ]]
             export DEBIAN_FRONTEND=noninteractive
@@ -97,7 +98,7 @@ build_package() {
             ;;
         shca)
             # Same user-space SHCA setup as Mooncake, in the disposable container.
-            # shellcheck disable=SC1091
+            # shellcheck source=/dev/null
             source /etc/os-release
             [[ "$ID" == ubuntu && "$VERSION_ID" == 22.04 ]]
             export DEBIAN_FRONTEND=noninteractive
@@ -122,10 +123,11 @@ build_package() {
         *) echo 'ERROR: unknown package variant' >&2; return 1 ;;
     esac
     dtk_dir="$(extract_package_dtk /tmp/rocshmem-dtk.tar.gz /opt)"
-    [[ "$(basename "$dtk_dir")" =~ ^dtk-([0-9]+)\.([0-9]+) ]] &&
-        [[ "${BASH_REMATCH[1]}${BASH_REMATCH[2]}" == "$ROCSHMEM_PACKAGE_DTK_VERSION" ]] || {
-            echo 'ERROR: archive DTK directory version does not match the configured path' >&2; return 1;
-        }
+    if [[ ! "$(basename "$dtk_dir")" =~ ^dtk-([0-9]+)\.([0-9]+) ]]; then
+        echo 'ERROR: archive DTK directory name has an invalid version format' >&2; return 1;
+    elif [[ "${BASH_REMATCH[1]}${BASH_REMATCH[2]}" != "$ROCSHMEM_PACKAGE_DTK_VERSION" ]]; then
+        echo 'ERROR: archive DTK directory version does not match the configured path' >&2; return 1;
+    fi
     if [[ -L /opt/dtk ]]; then
         rm -- /opt/dtk
     elif [[ -e /opt/dtk ]]; then
@@ -179,6 +181,7 @@ build_package() {
     mkdir -p /tmp/rocshmem-run-output
     # The project's post-build hook appends its installer stub to the TGZ.
     cpack --config "$PWD/CPackConfig.cmake" -G TGZ \
+        -D "CPACK_POST_BUILD_SCRIPTS=$PWD/MakeRunPackage.cmake" \
         -D "CPACK_PACKAGE_FILE_NAME=${expected_filename%.run}" \
         -D CPACK_PACKAGING_INSTALL_PREFIX=/opt/rocshmem \
         -D CPACK_INCLUDE_TOPLEVEL_DIRECTORY=ON \
