@@ -1,0 +1,272 @@
+#!/bin/sh
+# Copyright (c) 2026 Hygon Information Technology Co., Ltd.
+# SPDX-License-Identifier: MIT
+
+set -eu
+
+default_prefix="/opt/rocshmem"
+prefix="${ROCSHMEM_INSTALL_PREFIX:-$default_prefix}"
+
+usage() {
+    cat <<EOF
+Usage: $0 [--prefix PATH] [--help]
+
+Install rocSHMEM @VERSION_STRING@ into PATH.
+The default installation path is $default_prefix.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --prefix)
+            [ "$#" -ge 2 ] || { echo "ERROR: --prefix requires a path" >&2; exit 2; }
+            prefix=$2
+            shift 2
+            ;;
+        --prefix=*)
+            prefix=${1#--prefix=}
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "ERROR: unknown option: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+case "$prefix" in
+    ""|/)
+        echo "ERROR: unsafe installation path: $prefix" >&2
+        exit 2
+        ;;
+    /*/*) ;;
+    /*)
+        echo "ERROR: refusing to install into a top-level system directory: $prefix" >&2
+        exit 2
+        ;;
+    *)
+        echo "ERROR: installation path must be absolute: $prefix" >&2
+        exit 2
+        ;;
+esac
+
+payload_line=$(awk '/^# __ROCSHMEM_TGZ_BELOW__$/ { print NR + 1; exit }' "$0")
+[ -n "$payload_line" ] || { echo "ERROR: installer payload is missing" >&2; exit 1; }
+
+if ! mkdir -p "$prefix" 2>/dev/null; then
+    echo "ERROR: cannot create $prefix (try running this installer with sudo)" >&2
+    exit 1
+fi
+
+# Resolve '..' and symlinks before extracting, then repeat the safety check on
+# the actual destination.
+prefix=$(cd "$prefix" && pwd -P)
+case "$prefix" in
+    ""|/)
+        echo "ERROR: resolved installation path is unsafe: $prefix" >&2
+        exit 2
+        ;;
+    /*/*) ;;
+    /*)
+        echo "ERROR: resolved path is a top-level system directory: $prefix" >&2
+        exit 2
+        ;;
+esac
+
+echo "Installing rocSHMEM @VERSION_STRING@ to $prefix"
+tail -n +"$payload_line" "$0" | tar -xzf - -C "$prefix" \
+    --strip-components=@ROCSHMEM_TGZ_STRIP_COMPONENTS@
+
+# Create one reusable environment setup script. Quote single quotes in the
+# installation path so it remains safe when sourced by a shell.
+env_dir="$prefix/share/rocshmem"
+env_script="$env_dir/rocshmem-env.sh"
+install_marker="$prefix/.rocshmem-install"
+mkdir -p "$env_dir"
+escaped_prefix=$(printf '%s' "$prefix" | sed "s/'/'\\\\''/g")
+{
+    cat <<'EOF'
+# Copyright (c) 2026 Hygon Information Technology Co., Ltd.
+#
+# SPDX-License-Identifier: MIT
+
+EOF
+    printf "export ROCSHMEM_HOME='%s'\n" "$escaped_prefix"
+    cat <<'EOF'
+
+if [ -d "${ROCSHMEM_HOME}/bin" ]; then
+    case ":${PATH-}:" in
+        *:"${ROCSHMEM_HOME}/bin":*) ;;
+        *) export PATH="${ROCSHMEM_HOME}/bin${PATH:+:${PATH}}" ;;
+    esac
+fi
+
+for rocshmem_libdir in "${ROCSHMEM_HOME}/lib" "${ROCSHMEM_HOME}/lib64"; do
+    [ -d "$rocshmem_libdir" ] || continue
+    case ":${LD_LIBRARY_PATH-}:" in
+        *:"$rocshmem_libdir":*) ;;
+        *) export LD_LIBRARY_PATH="$rocshmem_libdir${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" ;;
+    esac
+    case ":${LIBRARY_PATH-}:" in
+        *:"$rocshmem_libdir":*) ;;
+        *) export LIBRARY_PATH="$rocshmem_libdir${LIBRARY_PATH:+:${LIBRARY_PATH}}" ;;
+    esac
+done
+unset rocshmem_libdir
+
+if [ -d "${ROCSHMEM_HOME}/include" ]; then
+    case ":${CPATH-}:" in
+        *:"${ROCSHMEM_HOME}/include":*) ;;
+        *) export CPATH="${ROCSHMEM_HOME}/include${CPATH:+:${CPATH}}" ;;
+    esac
+fi
+
+case ":${CMAKE_PREFIX_PATH-}:" in
+    *:"${ROCSHMEM_HOME}":*) ;;
+    *) export CMAKE_PREFIX_PATH="${ROCSHMEM_HOME}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}" ;;
+esac
+
+for rocshmem_pcdir in \
+    "${ROCSHMEM_HOME}/lib/pkgconfig" \
+    "${ROCSHMEM_HOME}/lib64/pkgconfig" \
+    "${ROCSHMEM_HOME}/share/pkgconfig"; do
+    [ -d "$rocshmem_pcdir" ] || continue
+    case ":${PKG_CONFIG_PATH-}:" in
+        *:"$rocshmem_pcdir":*) ;;
+        *) export PKG_CONFIG_PATH="$rocshmem_pcdir${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}" ;;
+    esac
+done
+unset rocshmem_pcdir
+EOF
+} > "$env_script"
+chmod 644 "$env_script"
+{
+    printf 'install_prefix=%s\n' "$prefix"
+    printf 'version=%s\n' '@VERSION_STRING@'
+} > "$install_marker"
+chmod 644 "$install_marker"
+
+# Prefer a system-wide profile fragment for privileged installations. For a
+# user installation, add an idempotent source line to that user's ~/.profile.
+if [ -d /etc/profile.d ] && [ -w /etc/profile.d ]; then
+    cp "$env_script" /etc/profile.d/rocshmem.sh
+    chmod 644 /etc/profile.d/rocshmem.sh
+    active_env_script=/etc/profile.d/rocshmem.sh
+    profile_file=/etc/profile.d/rocshmem.sh
+    profile_line=
+else
+    user_profile=${HOME:-}/.profile
+    if [ -n "${HOME:-}" ]; then
+        escaped_env_script=$(printf '%s' "$env_script" | sed "s/'/'\\\\''/g")
+        profile_line=". '$escaped_env_script' # rocSHMEM environment"
+        if [ ! -f "$user_profile" ] || ! grep -Fqx "$profile_line" "$user_profile"; then
+            printf '\n%s\n' "$profile_line" >> "$user_profile"
+        fi
+        active_env_script=$env_script
+        profile_file=$user_profile
+    else
+        active_env_script=$env_script
+        profile_file=
+        profile_line=
+        echo "WARNING: HOME is not set; automatic shell profile setup was skipped." >&2
+    fi
+fi
+
+# Generate an uninstaller bound to the actual installation path and profile
+# configuration selected above.
+uninstall_script="$prefix/bin/rocshmem-uninstall"
+escaped_env_script=$(printf '%s' "$env_script" | sed "s/'/'\\\\''/g")
+escaped_install_marker=$(printf '%s' "$install_marker" | sed "s/'/'\\\\''/g")
+escaped_profile_file=$(printf '%s' "$profile_file" | sed "s/'/'\\\\''/g")
+escaped_profile_line=$(printf '%s' "$profile_line" | sed "s/'/'\\\\''/g")
+{
+    cat <<'EOF'
+#!/bin/sh
+# Copyright (c) 2026 Hygon Information Technology Co., Ltd.
+#
+# SPDX-License-Identifier: MIT
+
+set -eu
+EOF
+    printf "install_prefix='%s'\n" "$escaped_prefix"
+    printf "env_script='%s'\n" "$escaped_env_script"
+    printf "install_marker='%s'\n" "$escaped_install_marker"
+    printf "profile_file='%s'\n" "$escaped_profile_file"
+    printf "profile_line='%s'\n" "$escaped_profile_line"
+    cat <<'EOF'
+
+case "$install_prefix" in
+    ""|/)
+        echo "ERROR: refusing to remove unsafe installation path: $install_prefix" >&2
+        exit 1
+        ;;
+    /*/*) ;;
+    /*)
+        echo "ERROR: refusing to remove a top-level system directory: $install_prefix" >&2
+        exit 1
+        ;;
+    *)
+        echo "ERROR: installation path is not absolute: $install_prefix" >&2
+        exit 1
+        ;;
+esac
+
+if [ ! -f "$install_marker" ] ||
+   ! grep -Fqx "install_prefix=$install_prefix" "$install_marker"; then
+    echo "ERROR: rocSHMEM installation marker is missing or invalid." >&2
+    exit 1
+fi
+
+case "${1:-}" in
+    --yes) ;;
+    -h|--help)
+        echo "Usage: $0 [--yes]"
+        exit 0
+        ;;
+    "")
+        printf "Remove rocSHMEM from %s? [y/N] " "$install_prefix"
+        read -r answer
+        case "$answer" in y|Y|yes|YES) ;; *) echo "Uninstall cancelled."; exit 0 ;; esac
+        ;;
+    *)
+        echo "ERROR: unknown option: $1" >&2
+        exit 2
+        ;;
+esac
+
+if [ -n "$profile_file" ] && [ -e "$profile_file" ]; then
+    if [ -z "$profile_line" ]; then
+        if [ -e "$env_script" ] && cmp -s "$profile_file" "$env_script"; then
+            rm -f -- "$profile_file"
+        else
+            echo "WARNING: $profile_file was modified; leaving it in place." >&2
+        fi
+    else
+        profile_tmp=$(mktemp "${profile_file}.rocshmem-uninstall.XXXXXX")
+        trap 'rm -f -- "$profile_tmp"' 0 HUP INT TERM
+        grep -Fvx "$profile_line" "$profile_file" > "$profile_tmp" || true
+        cat "$profile_tmp" > "$profile_file"
+        rm -f -- "$profile_tmp"
+        trap - 0 HUP INT TERM
+    fi
+fi
+
+rm -rf -- "$install_prefix"
+echo "rocSHMEM was removed from $install_prefix."
+echo "Open a new shell to discard environment variables from the current shell."
+EOF
+} > "$uninstall_script"
+chmod 755 "$uninstall_script"
+
+echo "rocSHMEM installation completed successfully."
+echo "Environment setup: $active_env_script"
+echo "Uninstaller: $uninstall_script"
+echo "Run '. \"$active_env_script\"' to enable it in the current shell."
+exit 0
+
+# __ROCSHMEM_TGZ_BELOW__
