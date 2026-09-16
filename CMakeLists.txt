@@ -92,7 +92,7 @@ include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
 
 ## Setup VERSION
 # Original upstream version
-# set(VERSION_STRING 3.7.0)
+# set(VERSION_STRING 3.8.0)
 
 # Self-developed version (initial v1.0.0), overridable via ROCSHMEM_VERSION or tag
 # Prefer an explicit environment version, then a release tag, then the default.
