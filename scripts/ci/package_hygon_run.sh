@@ -14,9 +14,42 @@ package_identity() {
         echo 'ERROR: invalid package identity fields' >&2; return 1;
     }
     export ROCSHMEM_PACKAGE_TIMESTAMP="$timestamp"
-    # Keep seconds in the internal revision; exported names use minute precision.
-    export ROCSHMEM_PACKAGE_RELEASE="g${sha:0:8}.${timestamp}"
+    # Preserve the existing exported names' minute precision.
     export ROCSHMEM_PACKAGE_FILENAME_RELEASE="${timestamp:0:10}.g${sha:0:8}"
+}
+
+package_filename() {
+    local version="$1" name=rocshmem
+    [[ "$version" =~ ^[0-9][0-9A-Za-z.+~]*$ ]] || {
+        echo 'ERROR: missing or unexpected CPACK_PACKAGE_VERSION' >&2; return 1;
+    }
+    case "$ROCSHMEM_PACKAGE_VARIANT" in
+        mlx5) ;;
+        shca) name=rocshmem_shca ;;
+        *) echo 'ERROR: unknown package variant' >&2; return 1 ;;
+    esac
+    printf '%s-%s+dtk%s.%s_amd64.run\n' "$name" "$version" \
+        "$ROCSHMEM_PACKAGE_DTK_VERSION" "$ROCSHMEM_PACKAGE_FILENAME_RELEASE"
+}
+
+validate_run_package() {
+    local installer="$1" destination="$2" payload_line
+    test -s "$installer" && test -x "$installer" || return 1
+    payload_line="$(awk '/^# __ROCSHMEM_TGZ_BELOW__$/ { print NR + 1; exit }' "$installer")"
+    [[ "$payload_line" =~ ^[0-9]+$ ]] || {
+        echo 'ERROR: RUN installer payload is missing' >&2; return 1;
+    }
+    tail -n +"$payload_line" "$installer" | gzip -t || return 1
+    sh "$installer" --help || return 1
+    # Smoke-install only inside the disposable build container; no hardware tests.
+    sh "$installer" --prefix "$destination" || return 1
+    test -s "$destination/lib/librocshmem.a" &&
+        test -s "$destination/lib/cmake/rocshmem/rocshmem-config.cmake" &&
+        test -x "$destination/share/rocshmem/rocshmem_functional_tests" &&
+        test -x "$destination/share/rocshmem/run_ctest.sh" &&
+        test -s "$destination/share/rocshmem/rocshmem-env.sh" &&
+        test -x "$destination/bin/rocshmem-uninstall" &&
+        grep -qxF "install_prefix=$destination" "$destination/.rocshmem-install"
 }
 
 extract_package_dtk() {
@@ -137,68 +170,39 @@ build_package() {
         grep -qx 'GDA_SHCA:BOOL=OFF' CMakeCache.txt
     fi
 
-    local upstream_version deb_version variant_suffix expected_version expected_filename
+    local upstream_version expected_filename expected_version
     upstream_version="$(sed -n 's/^set(CPACK_PACKAGE_VERSION "\([^"]*\)")$/\1/p' CPackConfig.cmake)"
-    [[ "$upstream_version" =~ ^[0-9][0-9A-Za-z.+~]*$ ]] || {
-        echo 'ERROR: missing or unexpected CPACK_PACKAGE_VERSION' >&2; return 1;
-    }
-    # Keep the Debian revision free of hyphens. DTK belongs to the version part.
-    # mlx5 is the default transport and carries no marker; shca keeps its marker.
-    # The marker is a hyphen, not an underscore: '_' is not a legal Debian version
-    # character and would make dpkg reject the package on install.
-    variant_suffix=""
-    [[ "$ROCSHMEM_PACKAGE_VARIANT" == shca ]] && variant_suffix="-shca"
-    deb_version="${upstream_version}${variant_suffix}+dtk${ROCSHMEM_PACKAGE_DTK_VERSION}"
-    expected_version="${deb_version}-${ROCSHMEM_PACKAGE_RELEASE}"
-    # Only the exported filename uses _shca; the control Version retains -shca.
-    expected_filename="rocshmem-${upstream_version}+dtk${ROCSHMEM_PACKAGE_DTK_VERSION}.${ROCSHMEM_PACKAGE_FILENAME_RELEASE}_amd64.deb"
-    if [[ "$ROCSHMEM_PACKAGE_VARIANT" == shca ]]; then
-        expected_filename="${expected_filename/rocshmem-/rocshmem_shca-}"
-    fi
-    mkdir -p /tmp/rocshmem-deb-output
-    cpack --config "$PWD/CPackConfig.cmake" -G DEB \
-        -D CPACK_DEBIAN_PACKAGE_ARCHITECTURE=amd64 \
-        -D CPACK_DEBIAN_FILE_NAME=DEB-DEFAULT \
-        -D "CPACK_DEBIAN_PACKAGE_VERSION=${deb_version}" \
-        -D "CPACK_DEBIAN_PACKAGE_RELEASE=${ROCSHMEM_PACKAGE_RELEASE}" \
+    expected_filename="$(package_filename "$upstream_version")"
+    expected_version="${upstream_version}+dtk${ROCSHMEM_PACKAGE_DTK_VERSION}.${ROCSHMEM_PACKAGE_FILENAME_RELEASE}"
+    test -s MakeRunPackage.cmake
+    test -s rocshmem.run.stub
+    mkdir -p /tmp/rocshmem-run-output
+    # The project's post-build hook appends its installer stub to the TGZ.
+    cpack --config "$PWD/CPackConfig.cmake" -G TGZ \
+        -D "CPACK_PACKAGE_FILE_NAME=${expected_filename%.run}" \
+        -D CPACK_PACKAGING_INSTALL_PREFIX=/opt/rocshmem \
+        -D CPACK_INCLUDE_TOPLEVEL_DIRECTORY=ON \
+        -D CPACK_MONOLITHIC_INSTALL=ON \
         -D CPACK_STRIP_FILES=OFF \
-        -D 'CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA=' \
-        -B /tmp/rocshmem-deb-output
+        -B /tmp/rocshmem-run-output
 
-    local deb_files deb inspect control_member data_member
+    local run_files installer inspect
     shopt -s nullglob
-    deb_files=(/tmp/rocshmem-deb-output/*.deb)
-    [[ "${#deb_files[@]}" -eq 1 ]] || { echo 'ERROR: expected one monolithic DEB'; return 1; }
-    deb="${deb_files[0]}"
-    inspect="$(mktemp -d /tmp/rocshmem-deb-inspect.XXXXXX)"
-    ar t "$deb" > "$inspect/members"
-    control_member="$(grep -E '^control\.tar\.(gz|xz|zst)$' "$inspect/members")"
-    data_member="$(grep -E '^data\.tar\.(gz|xz|zst)$' "$inspect/members")"
-    [[ "$(ar p "$deb" debian-binary)" == 2.0 ]]
-    ar p "$deb" "$control_member" > "$inspect/$control_member"
-    ar p "$deb" "$data_member" > "$inspect/$data_member"
-    mkdir "$inspect/control" "$inspect/data"
-    tar -xf "$inspect/$control_member" -C "$inspect/control"
-    tar -xf "$inspect/$data_member" -C "$inspect/data"
-    grep -qx 'Package: rocshmem' "$inspect/control/control"
-    grep -qx 'Architecture: amd64' "$inspect/control/control"
-    grep -qxF "Version: ${expected_version}" "$inspect/control/control"
-    [[ "$(basename "$deb")" == "rocshmem_${expected_version}_amd64.deb" ]]
-    [[ ! -e "$inspect/control/postinst" && ! -e "$inspect/control/prerm" ]]
-    test -s "$inspect/data/opt/rocshmem/lib/librocshmem.a"
-    test -s "$inspect/data/opt/rocshmem/lib/cmake/rocshmem/rocshmem-config.cmake"
-    test -x "$inspect/data/opt/rocshmem/share/rocshmem/rocshmem_functional_tests"
-    test -x "$inspect/data/opt/rocshmem/share/rocshmem/run_ctest.sh"
-    (cd "$inspect/data"; md5sum --check "$inspect/control/md5sums")
+    run_files=(/tmp/rocshmem-run-output/*.run)
+    [[ "${#run_files[@]}" -eq 1 ]] || { echo 'ERROR: expected one monolithic RUN'; return 1; }
+    installer="${run_files[0]}"
+    [[ "$(basename "$installer")" == "$expected_filename" ]]
+    inspect="$(mktemp -d /tmp/rocshmem-run-inspect.XXXXXX)"
+    validate_run_package "$installer" "$inspect/install"
 
     # Export only final deliverables, not CPack's duplicate staging packages.
-    mkdir /tmp/rocshmem-deb-artifacts
-    cp "$deb" "/tmp/rocshmem-deb-artifacts/${expected_filename}"
-    cp "$inspect/control/control" /tmp/rocshmem-deb-artifacts/package-control.txt
+    mkdir /tmp/rocshmem-run-artifacts
+    cp "$installer" "/tmp/rocshmem-run-artifacts/${expected_filename}"
+    chmod 0755 "/tmp/rocshmem-run-artifacts/${expected_filename}"
     {
-        printf 'merge_commit=%s\npr=%s\nrun_id=%s\nrun_attempt=%s\n' \
-            "$ROCSHMEM_PACKAGE_SHA" "$ROCSHMEM_PACKAGE_PR" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
-        printf 'package_release=%s\n' "$ROCSHMEM_PACKAGE_RELEASE"
+        printf 'commit=%s\nrun_id=%s\nrun_attempt=%s\n' \
+            "$ROCSHMEM_PACKAGE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+        printf 'package_format=run\npackage_filename=%s\nupstream_version=%s\n' "$expected_filename" "$upstream_version"
         printf 'package_version=%s\ndtk_version=%s\ndtk_source=%s\ndtk_directory=%s\n' \
             "$expected_version" "$ROCSHMEM_PACKAGE_DTK_VERSION" "$ROCSHMEM_PACKAGE_DTK_SOURCE" "$dtk_dir"
         printf 'build_timestamp=%s\nbuild_timezone=UTC+08:00\n' "$ROCSHMEM_PACKAGE_TIMESTAMP"
@@ -214,9 +218,9 @@ build_package() {
             dpkg-query -W rdma-core libibverbs-dev ibverbs-utils
         fi
         sha256sum /tmp/rocshmem-dtk.tar.gz
-    } > /tmp/rocshmem-deb-artifacts/build-info.txt
-    cd /tmp/rocshmem-deb-artifacts
-    sha256sum ./*.deb > SHA256SUMS
+    } > /tmp/rocshmem-run-artifacts/build-info.txt
+    cd /tmp/rocshmem-run-artifacts
+    sha256sum ./*.run > SHA256SUMS
     sha256sum --check SHA256SUMS
 }
 
@@ -232,7 +236,7 @@ fi
 
 for required in ROCSHMEM_CI_IMAGE PIP_INDEX_URL PIP_TRUSTED_HOST \
     ROCSHMEM_PACKAGE_VARIANT \
-    ROCSHMEM_PACKAGE_DTK_URL ROCSHMEM_PACKAGE_SHA ROCSHMEM_PACKAGE_PR \
+    ROCSHMEM_PACKAGE_DTK_URL ROCSHMEM_PACKAGE_SHA \
     ROCSHMEM_PACKAGE_ROOT ROCSHMEM_PACKAGE_HOST_DIR \
     GITHUB_RUN_ID GITHUB_RUN_ATTEMPT; do
     [[ -n "${!required:-}" ]] || { echo "ERROR: missing ${required}" >&2; exit 1; }
@@ -258,7 +262,7 @@ exec > >(tee "$ROCSHMEM_PACKAGE_ROOT/logs/package.log") 2>&1
 exec 9>/tmp/mooncake-hcu-cross-node.lock
 flock -w 900 9 || { echo 'ERROR: timed out waiting for nmz1 CI lock'; exit 1; }
 task_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/rocshmem-package.XXXXXX")"
-container_name="rocshmem-deb-${ROCSHMEM_PACKAGE_VARIANT}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$$"
+container_name="rocshmem-run-${ROCSHMEM_PACKAGE_VARIANT}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$$"
 container_created=false
 host_copy_temp=""
 cleanup() {
@@ -297,7 +301,7 @@ docker create --name "$container_name" --user root \
     -v "$dtk_archive:/tmp/rocshmem-dtk.tar.gz:ro" \
     -e ROCSHMEM_PACKAGE_VARIANT -e ROCSHMEM_PACKAGE_DTK_SOURCE -e RESOURCE_SERVER_URL \
     -e ROCSHMEM_PACKAGE_CONTAINER=1 \
-    -e ROCSHMEM_PACKAGE_SHA -e ROCSHMEM_PACKAGE_PR -e ROCSHMEM_PACKAGE_RELEASE \
+    -e ROCSHMEM_PACKAGE_SHA \
     -e ROCSHMEM_PACKAGE_FILENAME_RELEASE \
     -e ROCSHMEM_PACKAGE_DTK_VERSION -e ROCSHMEM_PACKAGE_TIMESTAMP \
     -e ROCSHMEM_PACKAGE_DTK_URL \
@@ -306,31 +310,31 @@ docker create --name "$container_name" --user root \
 container_created=true
 docker start "$container_name"
 docker cp "$task_dir/source.bundle" "$container_name:/tmp/rocshmem-source.bundle"
-docker cp scripts/ci/package_hygon_deb.sh "$container_name:/tmp/package_hygon_deb.sh"
+docker cp scripts/ci/package_hygon_run.sh "$container_name:/tmp/package_hygon_run.sh"
 timeout --signal=TERM --kill-after=30s 6000s \
-    docker exec "$container_name" bash /tmp/package_hygon_deb.sh __build
+    docker exec "$container_name" bash /tmp/package_hygon_run.sh __build
 mkdir -p "$ROCSHMEM_PACKAGE_ROOT/packages"
-docker cp "$container_name:/tmp/rocshmem-deb-artifacts/." "$ROCSHMEM_PACKAGE_ROOT/packages/"
+docker cp "$container_name:/tmp/rocshmem-run-artifacts/." "$ROCSHMEM_PACKAGE_ROOT/packages/"
 printf 'image_id=%s\n' "$image_id" >> "$ROCSHMEM_PACKAGE_ROOT/packages/build-info.txt"
 cp "$ROCSHMEM_PACKAGE_ROOT/logs/image-digests.json" "$ROCSHMEM_PACKAGE_ROOT/packages/"
 (cd "$ROCSHMEM_PACKAGE_ROOT/packages"; sha256sum --check SHA256SUMS)
 
-# Publish the verified DEB onto the nmz1 host. Copy to a hidden temporary file
+# Publish the verified RUN onto the nmz1 host. Copy to a hidden temporary file
 # first so consumers never observe a partially copied package.
 shopt -s nullglob
-host_debs=("$ROCSHMEM_PACKAGE_ROOT"/packages/*.deb)
-[[ "${#host_debs[@]}" -eq 1 ]] || {
-    echo 'ERROR: expected exactly one verified DEB on the host' >&2; exit 1;
+host_runs=("$ROCSHMEM_PACKAGE_ROOT"/packages/*.run)
+[[ "${#host_runs[@]}" -eq 1 ]] || {
+    echo 'ERROR: expected exactly one verified RUN on the host' >&2; exit 1;
 }
 mkdir -p -- "$ROCSHMEM_PACKAGE_HOST_DIR"
-host_package="$ROCSHMEM_PACKAGE_HOST_DIR/$(basename "${host_debs[0]}")"
-host_copy_temp="$ROCSHMEM_PACKAGE_HOST_DIR/.$(basename "${host_debs[0]}").tmp-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$$"
+host_package="$ROCSHMEM_PACKAGE_HOST_DIR/$(basename "${host_runs[0]}")"
+host_copy_temp="$ROCSHMEM_PACKAGE_HOST_DIR/.$(basename "${host_runs[0]}").tmp-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$$"
 [[ ! -e "$host_package" && ! -e "$host_copy_temp" ]] || {
     echo "ERROR: refusing to overwrite existing host package: $host_package" >&2; exit 1;
 }
-cp -- "${host_debs[0]}" "$host_copy_temp"
-chmod 0644 "$host_copy_temp"
-cmp -s -- "${host_debs[0]}" "$host_copy_temp" || {
+cp -- "${host_runs[0]}" "$host_copy_temp"
+chmod 0755 "$host_copy_temp"
+cmp -s -- "${host_runs[0]}" "$host_copy_temp" || {
     echo 'ERROR: host package copy verification failed' >&2; exit 1;
 }
 mv -- "$host_copy_temp" "$host_package"
