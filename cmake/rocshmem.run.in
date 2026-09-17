@@ -92,7 +92,6 @@ escaped_prefix=$(printf '%s' "$prefix" | sed "s/'/'\\\\''/g")
 {
     cat <<'EOF'
 # Copyright (c) 2026 Hygon Information Technology Co., Ltd.
-#
 # SPDX-License-Identifier: MIT
 
 EOF
@@ -188,7 +187,6 @@ escaped_profile_line=$(printf '%s' "$profile_line" | sed "s/'/'\\\\''/g")
     cat <<'EOF'
 #!/bin/sh
 # Copyright (c) 2026 Hygon Information Technology Co., Ltd.
-#
 # SPDX-License-Identifier: MIT
 
 set -eu
@@ -230,7 +228,9 @@ case "${1:-}" in
         ;;
     "")
         printf "Remove rocSHMEM from %s? [y/N] " "$install_prefix"
-        read -r answer
+        if ! read -r answer; then
+            answer=
+        fi
         case "$answer" in y|Y|yes|YES) ;; *) echo "Uninstall cancelled."; exit 0 ;; esac
         ;;
     *)

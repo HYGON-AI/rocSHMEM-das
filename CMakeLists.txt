@@ -534,29 +534,7 @@ if (NOT BUILD_TESTS_ONLY)
   # 禁止strip操作，避免HSACO文件（非ELF格式）被错误处理
   set(CPACK_RPM_SPEC_MORE_DEFINE "%define __strip /bin/true")
 
-  # Append a self-extracting .run installer after CPack creates the TGZ.
-  # This is a post-package step and does not invoke CPack a second time.
-  string(REGEX REPLACE "^/+" "" _run_install_prefix "${CMAKE_INSTALL_PREFIX}")
-  string(REPLACE "/" ";" _run_install_prefix_parts "${_run_install_prefix}")
-  list(FILTER _run_install_prefix_parts EXCLUDE REGEX "^$")
-  list(LENGTH _run_install_prefix_parts _run_install_prefix_depth)
-  # CPack's TGZ contains one package-name directory followed by the absolute
-  # install prefix (for example: rocshmem-1.0.0-Linux/opt/rocshmem/...).
-  math(EXPR ROCSHMEM_TGZ_STRIP_COMPONENTS "${_run_install_prefix_depth} + 1")
-  configure_file(
-    "${CMAKE_SOURCE_DIR}/cmake/rocshmem.run.in"
-    "${CMAKE_BINARY_DIR}/rocshmem.run.stub"
-    @ONLY
-    NEWLINE_STYLE UNIX
-  )
-  configure_file(
-    "${CMAKE_SOURCE_DIR}/cmake/MakeRunPackage.cmake.in"
-    "${CMAKE_BINARY_DIR}/MakeRunPackage.cmake"
-    @ONLY
-  )
-  list(APPEND CPACK_POST_BUILD_SCRIPTS
-    "${CMAKE_BINARY_DIR}/MakeRunPackage.cmake"
-  )
+  include(cmake/ConfigurePackaging.cmake)
 
   rocm_create_package(
     NAME "rocSHMEM"
