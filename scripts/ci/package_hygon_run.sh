@@ -4,34 +4,6 @@
 
 set -Eeuo pipefail
 
-package_identity() {
-    local dtk_path="$1" sha="$2" timestamp="$3"
-    [[ "$dtk_path" =~ dtk([0-9]+)\.([0-9]+) ]] || {
-        echo "ERROR: cannot extract dtkXX.YY from DTK path: $dtk_path" >&2; return 1;
-    }
-    export ROCSHMEM_PACKAGE_DTK_VERSION="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
-    [[ "$sha" =~ ^[0-9a-f]{40}$ && "$timestamp" =~ ^[0-9]{12}$ ]] || {
-        echo 'ERROR: invalid package identity fields' >&2; return 1;
-    }
-    export ROCSHMEM_PACKAGE_TIMESTAMP="$timestamp"
-    # Preserve the existing exported names' minute precision.
-    export ROCSHMEM_PACKAGE_FILENAME_RELEASE="${timestamp:0:10}.g${sha:0:8}"
-}
-
-package_filename() {
-    local version="$1" name=rocshmem
-    [[ "$version" =~ ^[0-9][0-9A-Za-z.+~]*$ ]] || {
-        echo 'ERROR: missing or unexpected CPACK_PACKAGE_VERSION' >&2; return 1;
-    }
-    case "$ROCSHMEM_PACKAGE_VARIANT" in
-        mlx5) ;;
-        shca) name=rocshmem_shca ;;
-        *) echo 'ERROR: unknown package variant' >&2; return 1 ;;
-    esac
-    printf '%s-%s+dtk%s.%s_amd64.run\n' "$name" "$version" \
-        "$ROCSHMEM_PACKAGE_DTK_VERSION" "$ROCSHMEM_PACKAGE_FILENAME_RELEASE"
-}
-
 validate_run_package() {
     local installer="$1" destination="$2" payload_line
     test -s "$installer" && test -x "$installer" || return 1
@@ -84,7 +56,7 @@ build_package() {
     # This entry point is ONLY for the disposable container created below.
     [[ -f /.dockerenv && "${ROCSHMEM_PACKAGE_CONTAINER:-}" == 1 ]]
     [[ "$(uname -m)" == x86_64 ]]
-    local dtk_dir dtk_backup
+    local dtk_dir dtk_backup dtk_version
     case "$ROCSHMEM_PACKAGE_VARIANT" in
         mlx5)
             # shellcheck source=/dev/null
@@ -122,10 +94,14 @@ build_package() {
             ;;
         *) echo 'ERROR: unknown package variant' >&2; return 1 ;;
     esac
+    if [[ ! "$ROCSHMEM_PACKAGE_DTK_SOURCE" =~ dtk([0-9]+)\.([0-9]+) ]]; then
+        echo 'ERROR: configured DTK path has an invalid version format' >&2; return 1;
+    fi
+    dtk_version="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
     dtk_dir="$(extract_package_dtk /tmp/rocshmem-dtk.tar.gz /opt)"
     if [[ ! "$(basename "$dtk_dir")" =~ ^dtk-([0-9]+)\.([0-9]+) ]]; then
         echo 'ERROR: archive DTK directory name has an invalid version format' >&2; return 1;
-    elif [[ "${BASH_REMATCH[1]}${BASH_REMATCH[2]}" != "$ROCSHMEM_PACKAGE_DTK_VERSION" ]]; then
+    elif [[ "${BASH_REMATCH[1]}${BASH_REMATCH[2]}" != "$dtk_version" ]]; then
         echo 'ERROR: archive DTK directory version does not match the configured path' >&2; return 1;
     fi
     if [[ -L /opt/dtk ]]; then
@@ -161,7 +137,7 @@ build_package() {
     rm -rf -- /opt/rocshmem
     mkdir build
     cd build
-    export ASAN=OFF BUILD_TYPE=Release INSTALL_PREFIX=/opt/rocshmem
+    export ASAN=OFF BUILD_TYPE=Release INSTALL_PREFIX=/opt/rocshmem TZ=UTC-8
     bash "../scripts/build_configs/gda_${ROCSHMEM_PACKAGE_VARIANT}"
     grep -qx 'USE_GDA:BOOL=ON' CMakeCache.txt
     if [[ "$ROCSHMEM_PACKAGE_VARIANT" == shca ]]; then
@@ -172,17 +148,19 @@ build_package() {
         grep -qx 'GDA_SHCA:BOOL=OFF' CMakeCache.txt
     fi
 
-    local upstream_version expected_filename expected_version
+    local upstream_version expected_filename
     upstream_version="$(sed -n 's/^set(CPACK_PACKAGE_VERSION "\([^"]*\)")$/\1/p' CPackConfig.cmake)"
-    expected_filename="$(package_filename "$upstream_version")"
-    expected_version="${upstream_version}+dtk${ROCSHMEM_PACKAGE_DTK_VERSION}.${ROCSHMEM_PACKAGE_FILENAME_RELEASE}"
+    expected_filename="$(sed -n 's/^set(CPACK_PACKAGE_FILE_NAME "\([^"]*\)")$/\1/p' CPackConfig.cmake)"
+    [[ -n "$upstream_version" && -n "$expected_filename" ]] || {
+        echo 'ERROR: generated CPack package identity is missing' >&2; return 1;
+    }
+    expected_filename+='.run'
     test -s MakeRunPackage.cmake
     test -s rocshmem.run.stub
     mkdir -p /tmp/rocshmem-run-output
     # The project's post-build hook appends its installer stub to the TGZ.
     cpack --config "$PWD/CPackConfig.cmake" -G TGZ \
         -D "CPACK_POST_BUILD_SCRIPTS=$PWD/MakeRunPackage.cmake" \
-        -D "CPACK_PACKAGE_FILE_NAME=${expected_filename%.run}" \
         -D CPACK_PACKAGING_INSTALL_PREFIX=/opt/rocshmem \
         -D CPACK_INCLUDE_TOPLEVEL_DIRECTORY=ON \
         -D CPACK_MONOLITHIC_INSTALL=ON \
@@ -200,16 +178,17 @@ build_package() {
 
     # Export only final deliverables, not CPack's duplicate staging packages.
     mkdir /tmp/rocshmem-run-artifacts
-    cp "$installer" "/tmp/rocshmem-run-artifacts/${expected_filename}"
+    cp "$installer" /tmp/rocshmem-run-artifacts/
     chmod 0755 "/tmp/rocshmem-run-artifacts/${expected_filename}"
     {
         printf 'commit=%s\nrun_id=%s\nrun_attempt=%s\n' \
             "$ROCSHMEM_PACKAGE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
         printf 'package_format=run\npackage_filename=%s\nupstream_version=%s\n' "$expected_filename" "$upstream_version"
-        printf 'package_version=%s\ndtk_version=%s\ndtk_source=%s\ndtk_directory=%s\n' \
-            "$expected_version" "$ROCSHMEM_PACKAGE_DTK_VERSION" "$ROCSHMEM_PACKAGE_DTK_SOURCE" "$dtk_dir"
-        printf 'build_timestamp=%s\nbuild_timezone=UTC+08:00\n' "$ROCSHMEM_PACKAGE_TIMESTAMP"
-        printf 'build_config=scripts/build_configs/gda_%s\nstrip=OFF\narchitecture=amd64\n' "$ROCSHMEM_PACKAGE_VARIANT"
+        printf 'dtk_version=%s\ndtk_source=%s\ndtk_directory=%s\n' \
+            "$dtk_version" "$ROCSHMEM_PACKAGE_DTK_SOURCE" "$dtk_dir"
+        printf 'build_timezone=UTC+08:00\n'
+        printf 'build_config=scripts/build_configs/gda_%s\nstrip=OFF\narchitecture=%s\n' \
+            "$ROCSHMEM_PACKAGE_VARIANT" "$(uname -m)"
         cat /etc/os-release
         hipcc --version
         /opt/mpi/bin/mpiexec --version
@@ -254,8 +233,6 @@ case "$ROCSHMEM_PACKAGE_VARIANT" in
     *) echo 'ERROR: unknown package variant' >&2; exit 1 ;;
 esac
 export ROCSHMEM_PACKAGE_DTK_SOURCE
-package_identity "$ROCSHMEM_PACKAGE_DTK_SOURCE" "$ROCSHMEM_PACKAGE_SHA" \
-    "$(TZ=UTC-8 date +%y%m%d%H%M%S)"
 [[ "$(git rev-parse HEAD)" == "$ROCSHMEM_PACKAGE_SHA" ]]
 [[ "$(git rev-parse --is-shallow-repository)" == false ]]
 mkdir -p "$ROCSHMEM_PACKAGE_ROOT/logs"
@@ -305,8 +282,6 @@ docker create --name "$container_name" --user root \
     -e ROCSHMEM_PACKAGE_VARIANT -e ROCSHMEM_PACKAGE_DTK_SOURCE -e RESOURCE_SERVER_URL \
     -e ROCSHMEM_PACKAGE_CONTAINER=1 \
     -e ROCSHMEM_PACKAGE_SHA \
-    -e ROCSHMEM_PACKAGE_FILENAME_RELEASE \
-    -e ROCSHMEM_PACKAGE_DTK_VERSION -e ROCSHMEM_PACKAGE_TIMESTAMP \
     -e ROCSHMEM_PACKAGE_DTK_URL \
     -e GITHUB_RUN_ID -e GITHUB_RUN_ATTEMPT -e PIP_INDEX_URL -e PIP_TRUSTED_HOST \
     "$image_id" tail -f /dev/null

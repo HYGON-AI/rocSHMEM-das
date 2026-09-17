@@ -58,7 +58,13 @@ jobs:
 
       - name: Build and validate RUN in a fresh container
         shell: bash
-        run: bash scripts/ci/package_hygon_run.sh
+        run: |
+          set -Eeuo pipefail
+          package_script=scripts/ci/upload_package.sh
+          if [[ ! -f "$package_script" ]]; then
+            package_script=scripts/ci/package_hygon_run.sh
+          fi
+          bash "$package_script"
 
       - name: Save RUN and provenance (host publishing happens in the build step)
         uses: actions/upload-artifact@v4

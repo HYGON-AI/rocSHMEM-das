@@ -44,8 +44,12 @@ else()
   set(ROCSHMEM_PACKAGE_DEB_ARCH "${ROCSHMEM_PACKAGE_ARCH}")
 endif()
 
+set(_rocshmem_package_name "rocshmem")
+if(GDA_SHCA)
+  set(_rocshmem_package_name "rocshmem_shca")
+endif()
 string(CONCAT ROCSHMEM_PACKAGE_FILE_BASE
-  "rocshmem-${VERSION_STRING}+dtk${ROCSHMEM_PACKAGE_DTK_VERSION}."
+  "${_rocshmem_package_name}-${VERSION_STRING}+dtk${ROCSHMEM_PACKAGE_DTK_VERSION}."
   "${ROCSHMEM_PACKAGE_TIMESTAMP}.g${ROCSHMEM_PACKAGE_GIT_SHORT}")
 set(CPACK_PACKAGE_FILE_NAME
   "${ROCSHMEM_PACKAGE_FILE_BASE}_${ROCSHMEM_PACKAGE_ARCH}")
