@@ -1,23 +1,21 @@
-name: rocSHMEM DEB
+name: rocSHMEM RUN
 
 on:
-  # Use base-repository variables for both internal and fork PRs after merge.
-  pull_request_target:
+  # Package code only after it enters develop, including merged fork PRs.
+  push:
     branches: [develop]
-    types: [closed]
 
 permissions:
   contents: read
 
 # Do not cancel an earlier merged PR's package when another PR is merged.
 concurrency:
-  group: rocshmem-deb-${{ github.event.pull_request.number }}-${{ github.event.pull_request.merge_commit_sha }}
+  group: rocshmem-run-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
   package:
     name: Package merged commit (${{ matrix.variant }})
-    if: github.event.pull_request.merged == true
     runs-on: [self-hosted, Linux, X64, ci, nmz1, bw1100]
     timeout-minutes: 120
     strategy:
@@ -37,14 +35,13 @@ jobs:
       ROCSHMEM_PACKAGE_DTK_URL: http://10.16.1.201:8000/dtk-pkg/dtk26.04/DTK-26.04-rc4-ubuntu20.04-x86_64.tar.gz
       PIP_INDEX_URL: ${{ vars.PIP_INDEX_URL }}
       PIP_TRUSTED_HOST: ${{ vars.PIP_TRUSTED_HOST }}
-      ROCSHMEM_PACKAGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
-      ROCSHMEM_PACKAGE_PR: ${{ github.event.pull_request.number }}
+      ROCSHMEM_PACKAGE_SHA: ${{ github.sha }}
       ROCSHMEM_PACKAGE_HOST_DIR: /ci/github_ci_packages/rocshmem
     steps:
       - name: Checkout the exact merged commit
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -56,17 +53,17 @@ jobs:
             echo '::error::Set the rocSHMEM repository variable IMAGE to the validated Ubuntu build image.'
             exit 1
           fi
-          printf 'ROCSHMEM_PACKAGE_ROOT=%s/rocshmem-deb/%s-%s-%s\n' \
+          printf 'ROCSHMEM_PACKAGE_ROOT=%s/rocshmem-run/%s-%s-%s\n' \
             "${RUNNER_TEMP}" "${GITHUB_RUN_ID}" "${GITHUB_RUN_ATTEMPT}" "${ROCSHMEM_PACKAGE_VARIANT}" >> "${GITHUB_ENV}"
 
-      - name: Build and validate DEB in a fresh container
+      - name: Build and validate RUN in a fresh container
         shell: bash
-        run: bash scripts/ci/package_hygon_deb.sh
+        run: bash scripts/ci/package_hygon_run.sh
 
-      - name: Save DEB and provenance (not a package repository upload)
+      - name: Save RUN and provenance (host publishing happens in the build step)
         uses: actions/upload-artifact@v4
         with:
-          name: rocshmem-deb-${{ matrix.variant }}-pr${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: rocshmem-run-${{ matrix.variant }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.ROCSHMEM_PACKAGE_ROOT }}/packages/
           if-no-files-found: error
           retention-days: 30
@@ -75,7 +72,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: rocshmem-deb-logs-${{ matrix.variant }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: rocshmem-run-logs-${{ matrix.variant }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.ROCSHMEM_PACKAGE_ROOT }}/logs/
           if-no-files-found: warn
           retention-days: 14
