@@ -98,7 +98,11 @@ jobs:
         run: |
           set -Eeuo pipefail
           export ROCSHMEM_CI_LOG_DIR="${RUNNER_TEMP}/rocshmem-logs/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          bash scripts/ci/run_multi_node_ci.sh
+          ci_script=scripts/ci/run_multi_node_ci.sh
+          if [[ ! -f "$ci_script" ]]; then
+            ci_script=scripts/ci/run_hygon_multi_node_ci.sh
+          fi
+          bash "$ci_script"
 
       - name: Upload build and test logs
         if: always()
