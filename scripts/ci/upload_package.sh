@@ -288,9 +288,9 @@ docker create --name "$container_name" --user root \
 container_created=true
 docker start "$container_name"
 docker cp "$task_dir/source.bundle" "$container_name:/tmp/rocshmem-source.bundle"
-docker cp scripts/ci/package_hygon_run.sh "$container_name:/tmp/package_hygon_run.sh"
+docker cp scripts/ci/upload_package.sh.sh "$container_name:/tmp/upload_package.sh.sh"
 timeout --signal=TERM --kill-after=30s 6000s \
-    docker exec "$container_name" bash /tmp/package_hygon_run.sh __build
+    docker exec "$container_name" bash /tmp/upload_package.sh.sh __build
 mkdir -p "$ROCSHMEM_PACKAGE_ROOT/packages"
 docker cp "$container_name:/tmp/rocshmem-run-artifacts/." "$ROCSHMEM_PACKAGE_ROOT/packages/"
 printf 'image_id=%s\n' "$image_id" >> "$ROCSHMEM_PACKAGE_ROOT/packages/build-info.txt"

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 # Use one traceable filename identity for every release artifact:
+# rocshmem-<version>+dtk<major><minor>[patch].<YYMMDDHHMM>.g<sha>_<arch>.<ext>
 set(ROCSHMEM_PACKAGE_DTK_VERSION "" CACHE STRING
   "DTK filename version without separators (for example, 2604 or 26042)")
 if(NOT ROCSHMEM_PACKAGE_DTK_VERSION)

@@ -397,11 +397,11 @@ ssh "${SSH_OPTIONS[@]}" "$REMOTE" \
     "docker exec '$SECONDARY_CONTAINER' mkdir -p /work /patch/test_log"
 
 docker cp "$SOURCE_TAR" "${PRIMARY_CONTAINER}:/work/source.tar"
-docker cp "$SCRIPT_PATH" "${PRIMARY_CONTAINER}:/work/run_hygon_multi_node_ci.sh"
+docker cp "$SCRIPT_PATH" "${PRIMARY_CONTAINER}:/work/run_multi_node_ci.sh"
 docker cp "$SSH_DIR" "${PRIMARY_CONTAINER}:/work/ssh"
 ssh "${SSH_OPTIONS[@]}" "$REMOTE" \
     "docker cp '$REMOTE_ROOT/source.tar' '${SECONDARY_CONTAINER}:/work/source.tar' && \
-     docker cp '$REMOTE_ROOT/run_hygon_multi_node_ci.sh' '${SECONDARY_CONTAINER}:/work/run_hygon_multi_node_ci.sh' && \
+     docker cp '$REMOTE_ROOT/run_multi_node_ci.sh' '${SECONDARY_CONTAINER}:/work/run_multi_node_ci.sh' && \
      docker cp '$REMOTE_ROOT/ssh' '${SECONDARY_CONTAINER}:/work/ssh'"
 
 PREPARE_COMMON=(
@@ -413,7 +413,7 @@ timeout "$SETUP_TIMEOUT" docker exec \
     -e "PIP_INDEX_URL=${PIP_INDEX_URL:-}" \
     -e "PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST:-}" \
     -e "ROCSHMEM_CI_GID_INDEX=${GID_INDEX}" \
-    "$PRIMARY_CONTAINER" bash /work/run_hygon_multi_node_ci.sh __prepare \
+    "$PRIMARY_CONTAINER" bash /work/run_multi_node_ci.sh __prepare \
     /work/source.tar "${PREPARE_COMMON[0]}" "$PRIMARY_NIC" "$PRIMARY_NIC_INDEX" \
     "${PREPARE_COMMON[@]:1}" >"$LOG_ROOT/build-${PRIMARY_HOST}.log" 2>&1 &
 PRIMARY_PID=$!
@@ -422,7 +422,7 @@ ssh "${SSH_OPTIONS[@]}" "$REMOTE" \
     "timeout '$SETUP_TIMEOUT' docker exec \
        -e 'PIP_INDEX_URL=${PIP_INDEX_URL:-}' -e 'PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST:-}' \
        -e 'ROCSHMEM_CI_GID_INDEX=${GID_INDEX}' \
-       '$SECONDARY_CONTAINER' bash /work/run_hygon_multi_node_ci.sh __prepare \
+       '$SECONDARY_CONTAINER' bash /work/run_multi_node_ci.sh __prepare \
        /work/source.tar '$DTK_SOURCE' '$SECONDARY_NIC' '$SECONDARY_NIC_INDEX' \
        '$SSH_PORT' '$PRIMARY_HOST' '$SECONDARY_HOST' '$PRIMARY_IP' '$SECONDARY_IP'" \
     >"$LOG_ROOT/build-${SECONDARY_HOST}.log" 2>&1 &
@@ -458,7 +458,7 @@ docker exec "$PRIMARY_CONTAINER" bash -lc \
 
 set -o pipefail
 timeout --signal=TERM --kill-after=30s "$TEST_TIMEOUT" \
-    docker exec "$PRIMARY_CONTAINER" bash /work/run_hygon_multi_node_ci.sh __test \
+    docker exec "$PRIMARY_CONTAINER" bash /work/run_multi_node_ci.sh __test \
     "$ROCSHMEM_CI_SUITE" "$PRIMARY_HOST" "$SECONDARY_HOST" "$GID_INDEX" \
     2>&1 | tee "$LOG_ROOT/${ROCSHMEM_CI_SUITE}-console.log"
 
