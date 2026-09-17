@@ -1,0 +1,21 @@
+# Copyright (c) 2026 Hygon Information Technology Co., Ltd.
+# SPDX-License-Identifier: MIT
+
+# CPack loads this file once per generator after CPackConfig.cmake. Validate
+# release metadata and override generator-specific names that
+# ROCMCreatePackage otherwise derives from its DEB/RPM release fields.
+if("@ROCSHMEM_PACKAGE_GIT_SHORT@" STREQUAL "unknown")
+  message(FATAL_ERROR "A Git commit is required to create release packages")
+endif()
+
+if(CPACK_GENERATOR STREQUAL "DEB")
+  set(_rocshmem_deb_name
+    "@ROCSHMEM_PACKAGE_FILE_BASE@_@ROCSHMEM_PACKAGE_DEB_ARCH@.deb")
+  set(CPACK_DEBIAN_FILE_NAME "${_rocshmem_deb_name}")
+  set(CPACK_DEBIAN_RUNTIME_FILE_NAME "${_rocshmem_deb_name}")
+elseif(CPACK_GENERATOR STREQUAL "RPM")
+  set(_rocshmem_rpm_name
+    "@ROCSHMEM_PACKAGE_FILE_BASE@_@ROCSHMEM_PACKAGE_ARCH@.rpm")
+  set(CPACK_RPM_FILE_NAME "${_rocshmem_rpm_name}")
+  set(CPACK_RPM_RUNTIME_FILE_NAME "${_rocshmem_rpm_name}")
+endif()
