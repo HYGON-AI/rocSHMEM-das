@@ -349,15 +349,26 @@ namespace rocshmem
     static bool isInitialized = false;
     static vector<IbvDevice> ibvDeviceList = {};
     static std::set<std::string> allowedDevices;
+    static bool isExcludeList = false;
 
     // Build list on first use
     if (!isInitialized) {
       char* allowedDevicesEnv = std::getenv("ROCSHMEM_ALLOWED_IBV_DEVICES");
       if (allowedDevicesEnv) {
-          std::stringstream ss(allowedDevicesEnv);
+          std::string envStr(allowedDevicesEnv);
+          // A leading '^' turns the list into an exclusion (blacklist): devices
+          // named in it are dropped and everything else is kept, e.g.
+          //   ^mlx5_6,mlx5_7  ->  exclude mlx5_6 and mlx5_7
+          // Without '^' it stays an inclusion (allowlist, original behavior):
+          //   mlx5_0,mlx5_1   ->  keep only mlx5_0 and mlx5_1
+          if (!envStr.empty() && envStr[0] == '^') {
+              isExcludeList = true;
+              envStr.erase(0, 1);
+          }
+          std::stringstream ss(envStr);
           std::string device;
           while (std::getline(ss, device, ',')) {
-              allowedDevices.insert(device);
+              if (!device.empty()) allowedDevices.insert(device);
           }
       }
 
@@ -374,8 +385,16 @@ namespace rocshmem
           ibvDevice.name = deviceList[i]->name;
           ibvDevice.hasActivePort = false;
 
-          if (!allowedDevices.empty() && allowedDevices.find(ibvDevice.name) == allowedDevices.end())
-              continue;
+          if (!allowedDevices.empty()) {
+            bool inList = allowedDevices.find(ibvDevice.name) != allowedDevices.end();
+            if (isExcludeList) {
+              // Blacklist: drop if named.
+              if (inList) continue;
+            } else {
+              // Allowlist: drop unless named (original behavior).
+              if (!inList) continue;
+            }
+          }
           LOG_INFO("allowed device : %s\n", ibvDevice.name.c_str());
 
           {
@@ -745,7 +764,8 @@ namespace rocshmem
   // that is "closest" to the target (using custom root)
   std::set<int> GetNearestDevicesInTree(std::string              const& targetBusId,
                                         std::vector<std::string> const& candidateBusIdList,
-                                        PCIeNode                 const* root)
+                                        PCIeNode                 const* root,
+                                        int                       isoam)
   {
     int maxDepth = -1;
     int minDistance = std::numeric_limits<int>::max();
@@ -760,17 +780,25 @@ namespace rocshmem
 
       int depth = GetLcaDepth(lca->address, root);
       int currDistance = GetBusIdDistance(targetBusId, candidateBusId);
+      if(isoam == 1) {
+        if (depth >= 5)
+          matches.insert(i);
+        else
+          matches.insert(-1);
+      }
 
       // When more than one LCA match is found, choose the one with smallest busId difference
       // NOTE: currDistance could be -1, which signals problem with parsing, however still
       //       remains a valid "closest" candidate, so is included
-      if (depth > maxDepth || (depth == maxDepth && depth >= 0 && currDistance < minDistance)) {
-        maxDepth = depth;
-        matches.clear();
-        matches.insert(i);
-        minDistance = currDistance;
-      } else if (depth == maxDepth && depth >= 0 && currDistance == minDistance) {
-        matches.insert(i);
+      else {
+        if (depth > maxDepth || (depth == maxDepth && depth >= 0 && currDistance < minDistance)) {
+          maxDepth = depth;
+          matches.clear();
+          matches.insert(i);
+          minDistance = currDistance;
+        } else if (depth == maxDepth && depth >= 0 && currDistance == minDistance) {
+          matches.insert(i);
+        }
       }
     }
     return matches;
@@ -779,9 +807,10 @@ namespace rocshmem
   // Given a target busID and a set of candidate devices, returns a set of indices
   // that is "closest" to the target (using system PCIe tree)
   std::set<int> GetNearestDevicesInTree(std::string              const& targetBusId,
-                                        std::vector<std::string> const& candidateBusIdList)
+                                        std::vector<std::string> const& candidateBusIdList,
+                                        int                       isoam)
   {
-    return GetNearestDevicesInTree(targetBusId, candidateBusIdList, GetPCIeTreeRoot());
+    return GetNearestDevicesInTree(targetBusId, candidateBusIdList, GetPCIeTreeRoot(), isoam);
   }
 
   int GetNumDevices(DeviceType exeType)
@@ -990,11 +1019,155 @@ namespace rocshmem
     return addresses;
   }
 
+  // Collect non-zero KFD GPU ids by scanning sysfs topology nodes
+  // (/sys/.../kfd/topology/nodes/*/gpu_id) into kfdIds[*count].
+  static bool getGpuKfdIds(uint32_t* kfdIds, int* count) {
+    *count = 0;
+    const char* basePath = "/sys/devices/virtual/kfd/kfd/topology/nodes";
+    for (int i = 0; i < MAX_KFD_NODES; i++) {
+        char path[PATH_MAX];
+        snprintf(path, sizeof(path), "%s/%d/gpu_id", basePath, i);
+        FILE* fp = fopen(path, "r");
+        if (!fp) { continue; }
+        uint32_t kfdId = 0;
+        if (fscanf(fp, "%u", &kfdId) == 1) {
+            if (kfdId != 0) {
+                kfdIds[*count] = kfdId;
+                (*count)++;
+            }
+        }
+        fclose(fp);
+    }
+    return true;
+  }
+
+  // Build OAM group -> GPU list mapping via /dev/mkfd ioctl.
+  static int GetOamToGpuMap(std::map<int, std::vector<int>>& OamToGpus, int oamGroupMember) {
+    OamToGpus.clear();
+    int gpuCount = 0;
+    hipGetDeviceCount(&gpuCount);
+    int fd = open("/dev/mkfd", O_RDWR | O_CLOEXEC);
+    if (fd < 0) return -1;
+    uint32_t kfdIds[MAX_KFD_NODES] = {};
+    int kfdGpuCount = 0;
+    if (!getGpuKfdIds(kfdIds, &kfdGpuCount)) {
+      close(fd);
+      return -1;
+    }
+    int usableGpuCount = gpuCount < kfdGpuCount ? gpuCount : kfdGpuCount;
+    for (int gpu = 0; gpu < usableGpuCount; gpu++) {
+      struct mkfd_ioctl_regs_op_args args = {0};
+      args.gpu_id = kfdIds[gpu];
+      args.read = true;
+      args.reg = REG_SOCKET_ID;
+      int ret = ioctl(fd, MKFD_IOC_REGS_OP, &args);
+      if (ret < 0) {
+        printf("DetectTopo GPU %d failed to get OAM.\n", gpu);
+        close(fd);
+        return -1;
+      }
+      OamToGpus[(args.value / oamGroupMember)].push_back(gpu);
+    }
+    close(fd);
+
+    for (const auto& oamToGpus : OamToGpus) {
+      std::string gpuList;
+      for (size_t i = 0; i < oamToGpus.second.size(); ++i) {
+        if (i > 0) gpuList += " ";
+        gpuList += std::to_string(oamToGpus.second[i]);
+      }
+      LOG_INFO("DetectTopo OAM %d GPUs: %s", oamToGpus.first, gpuList.c_str()); // print OAM group.
+    }
+    return 0;
+  }
+
+  // Resolve NIC for this GPU from the ROCSHMEM_TOPO_FILE_FORCE topo file.
+  static bool tryUserForcedTopo(int gpuIndex,
+                         std::vector<int>& closestNicId,
+                         std::string* dev_name,
+                         int* outNicIdx) {
+    const char* userTopo = std::getenv("ROCSHMEM_TOPO_FILE_FORCE");
+    if (!userTopo) return false;
+
+    std::string nicName;
+    GPU2NIC map;
+    char busId[64] = {0};
+    hipDeviceGetPCIBusId(busId, sizeof(busId), gpuIndex);
+    std::string busStr(busId);
+    readBusToNic(userTopo, map);
+
+    auto it = map.find(busStr);
+    if (it != map.end()) {
+      nicName = it->second.nicName;
+      closestNicId[gpuIndex] = it->second.index;
+    } else {
+      LOG_ERROR_EXIT("GPU: %s not found NIC in force topo file\n", busStr.c_str());
+    }
+    LOG_INFO("GPU Device id: %d closest NIC id : %d name: %s\n",
+             gpuIndex, closestNicId[gpuIndex], nicName.c_str());
+    if (dev_name != nullptr) {
+      *dev_name = nicName;
+    }
+    *outNicIdx = closestNicId[gpuIndex];
+    return true;
+  }
+
+  // Pair up GPUs per OAM: lend primary NIC to the side missing one; lender
+  // switches to its spare if any. Returns true (with *outNicIdx) on resolve.
+  // Caller must guard with !disable_autoTopo.
+  static bool tryOamAutoTopo(int gpuIndex,
+                      int numGpus,
+                      std::vector<int>& OamclosestNicId,
+                      const std::vector<IbvDevice>& ibvDeviceList,
+                      std::string* dev_name,
+                      int* outNicIdx) {
+    std::map<int, std::vector<int>> oamToGpus;
+    if (GetOamToGpuMap(oamToGpus, 2) != 0) return false;
+
+    // OamclosestNicId: [0,numGpus)=primary NIC, [numGpus,2*numGpus)=spare NIC.
+    // Pair up GPUs per OAM: lend primary NIC to the side missing one; if the
+    // lender has a spare, switch to it to avoid sharing.
+    auto transferNic = [&](int from, int to) {
+      OamclosestNicId[to] = OamclosestNicId[from];
+      if (OamclosestNicId[from + numGpus] != -1) {
+        OamclosestNicId[from] = OamclosestNicId[from + numGpus];
+      }
+    };
+    for (auto& [oamId, gpus] : oamToGpus) {
+      (void)oamId;  // OAM group id is not used here
+      for (size_t i = 0; i + 1 < gpus.size(); i += 2) {
+        int gpu0 = gpus[i];
+        int gpu1 = gpus[i + 1];
+        if (OamclosestNicId[gpu0] == -1 && OamclosestNicId[gpu1] != -1) {
+          transferNic(gpu1, gpu0);
+        } else if (OamclosestNicId[gpu1] == -1 && OamclosestNicId[gpu0] != -1) {
+          transferNic(gpu0, gpu1);
+        }
+      }
+    }
+
+    int oamNicIdx = OamclosestNicId[gpuIndex];
+    if (oamNicIdx >= 0 && dev_name != nullptr) {
+      LOG_INFO("GPU Device id: %d closest NIC id: %d name: %s\n", gpuIndex, oamNicIdx,
+               ibvDeviceList[oamNicIdx].name.c_str());
+      *dev_name = ibvDeviceList[oamNicIdx].name;
+    }
+    *outNicIdx = oamNicIdx;
+    return true;
+  }
+
   int GetClosestNicToGpu(int gpuIndex, const char* hca_list, std::string *dev_name)
   {
     static bool isInitialized = false;
     static std::vector<int> closestNicId;
+    static std::vector<int> OamclosestNicId;
     static auto const& ibvDeviceList = GetIbvDeviceList();
+    const char* env = std::getenv("ROCSHMEM_DISABLE_AUTOTOPO");
+    bool disable_autoTopo = false;
+    if (env != nullptr) {
+        std::string val(env);
+        disable_autoTopo = !val.empty() && val != "0";
+    }
 
     int numGpus = GetNumDevices(rocshmem::EXE_GPU);
     if (gpuIndex < 0 || gpuIndex >= numGpus) return -1;
@@ -1002,6 +1175,7 @@ namespace rocshmem
     // Build closest NICs per GPU on first use
     if (!isInitialized) {
       closestNicId.resize(numGpus, -1);
+      OamclosestNicId.resize(numGpus*2, -1);
 
       auto ibvAddressList = BuildFilteredNicAddresses(hca_list);
 
@@ -1028,10 +1202,24 @@ namespace rocshmem
           LOG_WARN("Failed to get PCI Bus ID for HIP device %d: %s", i, hipGetErrorString(err));
 #endif
           closestNicId[i] = -1;
+          OamclosestNicId[i] = -1;
+          OamclosestNicId[i+numGpus] = -1;
           continue;
         }
 
-        // Find closest NICs
+        // Find closest NICs — Mode 1: OAM auto-topology (fills OamclosestNicId[])
+        if (!disable_autoTopo) {
+          std::set<int> oamclosestNicIdxs = GetNearestDevicesInTree(hipPciBusId, ibvAddressList, 1);
+          if (!oamclosestNicIdxs.empty()) {
+            OamclosestNicId[i] = *oamclosestNicIdxs.rbegin();
+            if (oamclosestNicIdxs.size() > 1) {
+              OamclosestNicId[i+numGpus] = *std::next(oamclosestNicIdxs.rbegin());
+            }
+          }
+          continue;  // OAM mode handles its own NIC assignment; skip Mode 2
+        }
+
+        // Find closest NICs — Mode 2: Legacy PCIe-distance (fills closestNicId[])
         std::set<int> closestNicIdxs = GetNearestDevicesInTree(hipPciBusId, ibvAddressList);
 
         // Pick the least-used NIC to assign as closest
@@ -1041,7 +1229,7 @@ namespace rocshmem
             closestIdx = idx;
         }
 
-	// Load balance: prefer unused NICs to avoid multiple GPUs competing for the same NIC
+        // Load balance: prefer unused NICs to avoid multiple GPUs competing for the same NIC
         if (closestIdx >= 0 && assignedCount[closestIdx] > 0) {
           auto unusedAddressList = ibvAddressList;
           bool hasUnusedNic = false;
@@ -1098,27 +1286,12 @@ namespace rocshmem
       isInitialized = true;
     }
 
-    const char* userTopo = std::getenv("ROCSHMEM_TOPO_FILE_FORCE");
-    if (userTopo){
-      std::string nicName;
-      GPU2NIC map;
-      std::string busStr;
-      char busId[64] = {0};
-      hipDeviceGetPCIBusId(busId, sizeof(busId), gpuIndex);
-      busStr = std::string(busId);
-      readBusToNic(userTopo, map);
-      auto it = map.find(busStr);
-      if (it != map.end()) {
-        nicName = it->second.nicName;
-        closestNicId[gpuIndex] = it->second.index;
-      } else {
-        printf("GPU: %s not found NIC\n", busStr.c_str());
-      }
-      printf("GPU Device id: %d closest NIC id : %d name: %s\n", gpuIndex, closestNicId[gpuIndex], nicName.c_str());
-      if (dev_name != nullptr) {
-        *dev_name = strdup(nicName.c_str());
-      }
-      return closestNicId[gpuIndex];
+    int nicIdx = -1;
+    if (tryUserForcedTopo(gpuIndex, closestNicId, dev_name, &nicIdx)) return nicIdx;
+    if (!disable_autoTopo &&
+        tryOamAutoTopo(gpuIndex, numGpus,OamclosestNicId,
+                       ibvDeviceList, dev_name, &nicIdx)) {
+      return nicIdx;
     }
 
     int closestIdx = closestNicId[gpuIndex];

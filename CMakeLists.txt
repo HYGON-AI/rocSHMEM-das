@@ -39,6 +39,8 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR AND
   message(FATAL_ERROR "In-source build")
 endif()
 
+add_compile_options(-Wno-return-type -Wno-unused-result)
+
 ###############################################################################
 # CONFIGURATION OPTIONS
 ###############################################################################
