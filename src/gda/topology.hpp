@@ -66,9 +66,6 @@ namespace rocshmem
   using std::set;
   using std::vector;
 
-  #define MAX_KFD_NODES 256
-  #define PATH_MAX 256
-  #define REG_SOCKET_ID 0x5A08C
   struct mkfd_ioctl_regs_op_args {
 	  __u32 gpu_id; /* to KFD */
 	  bool read;
@@ -86,6 +83,8 @@ namespace rocshmem
 	  __u32 value;
   };
 
+  #define MAX_KFD_NODES 256
+  #define REG_SOCKET_ID 0x5A08C
   #define MKFD_IOCTL_BASE 'M'
   #define MKFD_IOWR(nr, type) _IOWR(MKFD_IOCTL_BASE, nr, type)
   #define MKFD_IOC_REGS_OP MKFD_IOWR(0x18, struct mkfd_ioctl_regs_op_args)
