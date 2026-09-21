@@ -117,7 +117,9 @@ project(rocshmem VERSION ${VERSION_STRING} LANGUAGES CXX)
 
 find_package(ROCM PATHS ${ROCM_PATH})
 set(ROCMCHECKS_WARN_TOOLCHAIN_VAR OFF)
-find_package(ROCmCMakeBuildTools)
+# QUIET: DTK merges ROCmCMakeBuildTools modules into the ROCm package itself,
+# so find_package(ROCM) already provides include(ROCMCreatePackage) etc.
+find_package(ROCmCMakeBuildTools QUIET)
 include(ROCMCreatePackage)
 include(ROCMInstallTargets)
 include(ROCMCheckTargetIds)
