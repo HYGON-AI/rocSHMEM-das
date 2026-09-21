@@ -246,7 +246,19 @@ private:
   // 静态函数替代 lambda
   static hipError_t malloc_with_flags(void** ptr, size_t size, unsigned int /*flags*/) {
     // 这里的 flags 参数被忽略，因为我们使用静态标志
-    return hipExtMallocWithFlags(ptr, size, get_malloc_flags());
+    unsigned int flags = get_malloc_flags();
+    hipError_t result = hipExtMallocWithFlags(ptr, size, flags);
+#if defined(HIP_VERSION_PATCH) && (HIP_VERSION_PATCH >= 25521)
+    // XDP 池不足时降级到普通细粒度内存，避免 CHECK_HIP -> LOG_ERROR_ABORT 直接 abort
+    if (flags == hipDeviceMallocUncachedXdp && result != hipSuccess) {
+      fprintf(stderr,
+              "[rocSHMEM] XDP alloc failed (%s, %zu bytes); fall back to "
+              "hipDeviceMallocFinegrained\n",
+              hipGetErrorString(result), size);
+      return hipExtMallocWithFlags(ptr, size, hipDeviceMallocFinegrained);
+    }
+#endif
+    return result;
   }
 };  
 
