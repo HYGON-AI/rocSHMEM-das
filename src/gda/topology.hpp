@@ -44,6 +44,13 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <fstream>
+#include <unordered_map>
+#include <string>
+#include <linux/types.h>
+#include <linux/ioctl.h>
+#include <sys/ioctl.h>
+#include <dirent.h>
+#include <limits.h>
 
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
@@ -58,6 +65,29 @@ namespace rocshmem
   using std::pair;
   using std::set;
   using std::vector;
+
+  struct mkfd_ioctl_regs_op_args {
+	  __u32 gpu_id; /* to KFD */
+	  bool read;
+	  bool pm_pg_lock;
+	  bool use_bank;
+	  bool use_ring;
+	  __u32 se_bank;
+	  __u32 sh_bank;
+	  __u32 instance_bank;
+	  __u32 me;
+	  __u32 pipe;
+	  __u32 queue;
+	  __u32 vmid;
+	  __u32 reg;
+	  __u32 value;
+  };
+
+  #define MAX_KFD_NODES 256
+  #define REG_SOCKET_ID 0x5A08C
+  #define MKFD_IOCTL_BASE 'M'
+  #define MKFD_IOWR(nr, type) _IOWR(MKFD_IOCTL_BASE, nr, type)
+  #define MKFD_IOC_REGS_OP MKFD_IOWR(0x18, struct mkfd_ioctl_regs_op_args)
 
   /**
    * PCIe path types between GPU and NIC, ordered by increasing distance.
@@ -242,10 +272,12 @@ namespace rocshmem
    *
    * @param[in] targetBusId Target device PCIe address
    * @param[in] candidateBusIdList List of candidate device addresses
+   * @param[in] isoam OAM selection mode (1 = use OAM depth threshold, 0 = default)
    * @returns Set of indices of nearest devices from candidate list
    */
   std::set<int> GetNearestDevicesInTree(std::string              const& targetBusId,
-                                        std::vector<std::string> const& candidateBusIdList);
+                                        std::vector<std::string> const& candidateBusIdList,
+                                        int                       isoam = 0);
 
   /**
    * Get nearest devices in PCIe tree based on topology (custom root)
@@ -253,11 +285,13 @@ namespace rocshmem
    * @param[in] targetBusId Target device PCIe address
    * @param[in] candidateBusIdList List of candidate device addresses
    * @param[in] root Custom PCIe tree root to use
+   * @param[in] isoam OAM selection mode (1 = use OAM depth threshold, 0 = default)
    * @returns Set of indices of nearest devices from candidate list
    */
   std::set<int> GetNearestDevicesInTree(std::string              const& targetBusId,
                                         std::vector<std::string> const& candidateBusIdList,
-                                        PCIeNode                 const* root);
+                                        PCIeNode                 const* root,
+                                        int                       isoam = 0);
 
   /**
    * Returns the index of the NUMA node closest to the given GPU

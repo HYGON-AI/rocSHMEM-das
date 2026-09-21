@@ -1459,13 +1459,13 @@ void GDABackend::validate_ib_device(NicDevice &nic) {
     struct ibv_port_attr port_attr;
     if (ibv.query_port(nic.context, port, &port_attr) == 0) {
       if (port_attr.state == IBV_PORT_ACTIVE) {
-        LOG_INFO("Using NIC %s: it has an active RDMA NIC port %d (vendor_id=0x%04x, state=%d, phys_state=%d)",
-                  nicname, port, nic.device_attr.vendor_id, port_attr.state, port_attr.phys_state);
+        LOG_INFO("PE %d Using NIC %s: it has an active RDMA NIC port %d (vendor_id=0x%04x, state=%d, phys_state=%d)",
+                  my_pe, nicname, port, nic.device_attr.vendor_id, port_attr.state, port_attr.phys_state);
         return;
       }
     }
   }
-  LOG_ERROR_EXIT("Could not validate that selected RDMA NIC %s has an active port", debug_str.c_str());
+  LOG_ERROR_EXIT("PE %d Could not validate that selected RDMA NIC %s has an active port", my_pe, debug_str.c_str());
 }
 
 void GDABackend::modify_qps_reset_to_init() {
