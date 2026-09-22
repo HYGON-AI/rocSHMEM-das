@@ -1087,7 +1087,7 @@ namespace rocshmem
   }
 
   // Resolve NIC for this GPU from the ROCSHMEM_TOPO_FILE_FORCE topo file.
-  static bool tryUserForcedTopo(int gpuIndex,
+  static bool GetClosestNicToGpuFromForcedTopo(int gpuIndex,
                          std::vector<int>& closestNicId,
                          std::string* dev_name,
                          int* outNicIdx) {
@@ -1117,55 +1117,85 @@ namespace rocshmem
     return true;
   }
 
-  // Pair up GPUs per OAM: lend primary NIC to the side missing one; lender
-  // switches to its spare if any. Returns true (with *outNicIdx) on resolve.
-  // Caller must guard with !disable_autoTopo.
-  static bool tryOamAutoTopo(int gpuIndex,
-                      int numGpus,
-                      std::vector<int>& OamclosestNicId,
-                      const std::vector<IbvDevice>& ibvDeviceList,
-                      std::string* dev_name,
-                      int* outNicIdx) {
-    std::map<int, std::vector<int>> oamToGpus;
-    if (GetOamToGpuMap(oamToGpus, 2) != 0) return false;
+  // Fill OamclosestNicId for all GPUs via PCIe-tree + OAM pairing, then
+  // return NIC index for gpuIndex (-1 if none) and set *dev_name if found.
+  // Marks OAM-claimed NICs in assignedCount for Mode 3 load-balancing.
+  static int GetClosestNicToGpuFromOam(int gpuIndex,
+                             int numGpus,
+                             const std::vector<std::string>& ibvAddressList,
+                             const std::vector<IbvDevice>& ibvDeviceList,
+                             std::string* dev_name,
+                             std::vector<int>& assignedCount) {
+    static std::vector<int> OamclosestNicId;
+    OamclosestNicId.resize(numGpus*2, -1);
 
-    // OamclosestNicId: [0,numGpus)=primary NIC, [numGpus,2*numGpus)=spare NIC.
-    // Pair up GPUs per OAM: lend primary NIC to the side missing one; if the
-    // lender has a spare, switch to it to avoid sharing.
-    auto transferNic = [&](int from, int to) {
-      OamclosestNicId[to] = OamclosestNicId[from];
-      if (OamclosestNicId[from + numGpus] != -1) {
-        OamclosestNicId[from] = OamclosestNicId[from + numGpus];
+    // Per-GPU PCIe-tree lookup to fill OamclosestNicId[]
+    for (int i = 0; i < numGpus; i++) {
+      char hipPciBusId[64];
+      hipError_t err = hipDeviceGetPCIBusId(hipPciBusId, sizeof(hipPciBusId), i);
+      if (err != hipSuccess) {
+        LOG_WARN("Failed to get PCI Bus ID for HIP device %d: %s", i, hipGetErrorString(err));
+        OamclosestNicId[i] = -1;
+        OamclosestNicId[i + numGpus] = -1;
+        continue;
       }
-    };
-    for (auto& [oamId, gpus] : oamToGpus) {
-      (void)oamId;  // OAM group id is not used here
-      for (size_t i = 0; i + 1 < gpus.size(); i += 2) {
-        int gpu0 = gpus[i];
-        int gpu1 = gpus[i + 1];
-        if (OamclosestNicId[gpu0] == -1 && OamclosestNicId[gpu1] != -1) {
-          transferNic(gpu1, gpu0);
-        } else if (OamclosestNicId[gpu1] == -1 && OamclosestNicId[gpu0] != -1) {
-          transferNic(gpu0, gpu1);
+      auto idxs = GetNearestDevicesInTree(hipPciBusId, ibvAddressList, 1);
+      if (idxs.empty()) {
+        OamclosestNicId[i] = -1;
+        OamclosestNicId[i + numGpus] = -1;
+        continue;
+      }
+      OamclosestNicId[i] = *idxs.rbegin();
+      if (idxs.size() > 1) {
+        OamclosestNicId[i + numGpus] = *std::next(idxs.rbegin());
+      }
+    }
+
+    // Pair up GPUs per OAM: lend primary NIC to the side missing one; lender
+    // switches to its spare if any.
+    std::map<int, std::vector<int>> oamToGpus;
+    if (GetOamToGpuMap(oamToGpus, 2) == 0) {
+      auto transferNic = [&](int from, int to) {
+        OamclosestNicId[to] = OamclosestNicId[from];
+        if (OamclosestNicId[from + numGpus] != -1) {
+          OamclosestNicId[from] = OamclosestNicId[from + numGpus];
+        }
+      };
+
+      for (auto& [oamId, gpus] : oamToGpus) {
+        (void)oamId;
+        for (size_t i = 0; i + 1 < gpus.size(); i += 2) {
+          int gpu0 = gpus[i];
+          int gpu1 = gpus[i + 1];
+          if (OamclosestNicId[gpu0] == -1 && OamclosestNicId[gpu1] != -1) {
+            transferNic(gpu1, gpu0);
+          } else if (OamclosestNicId[gpu1] == -1 && OamclosestNicId[gpu0] != -1) {
+            transferNic(gpu0, gpu1);
+          }
+
+          // Prepare assignedCount for Mode 3 fallback: mark OAM-claimed NICs
+          // so Mode 3 load-balancing avoids reusing them.
+          if (OamclosestNicId[gpu1] != -1) assignedCount[OamclosestNicId[gpu1]]++;
+          if (OamclosestNicId[gpu0] != -1 && OamclosestNicId[gpu0] != OamclosestNicId[gpu1]) {
+            assignedCount[OamclosestNicId[gpu0]]++;
+          }
         }
       }
     }
 
-    int oamNicIdx = OamclosestNicId[gpuIndex];
-    if (oamNicIdx >= 0 && dev_name != nullptr) {
-      LOG_INFO("GPU Device id: %d closest NIC id: %d name: %s\n", gpuIndex, oamNicIdx,
-               ibvDeviceList[oamNicIdx].name.c_str());
-      *dev_name = ibvDeviceList[oamNicIdx].name;
+    int OamclosestIdx = OamclosestNicId[gpuIndex];
+    if (OamclosestIdx >= 0 && dev_name != nullptr) {
+      LOG_INFO("GPU Device id: %d closest NIC id: %d name: %s\n", gpuIndex, OamclosestIdx,
+               ibvDeviceList[OamclosestIdx].name.c_str());
+      *dev_name = ibvDeviceList[OamclosestIdx].name;
     }
-    *outNicIdx = oamNicIdx;
-    return true;
+    return OamclosestIdx;
   }
 
   int GetClosestNicToGpu(int gpuIndex, const char* hca_list, std::string *dev_name)
   {
     static bool isInitialized = false;
     static std::vector<int> closestNicId;
-    static std::vector<int> OamclosestNicId;
     static auto const& ibvDeviceList = GetIbvDeviceList();
     const char* env = std::getenv("ROCSHMEM_DISABLE_AUTOTOPO");
     bool disable_autoTopo = false;
@@ -1180,7 +1210,6 @@ namespace rocshmem
     // Build closest NICs per GPU on first use
     if (!isInitialized) {
       closestNicId.resize(numGpus, -1);
-      OamclosestNicId.resize(numGpus*2, -1);
 
       auto ibvAddressList = BuildFilteredNicAddresses(hca_list);
 
@@ -1196,7 +1225,26 @@ namespace rocshmem
       //  instead of G0->N1, G1->N2, G2->N0
 
       std::vector<int> assignedCount(ibvDeviceList.size(), 0);
+      int nicIdx = -1;
 
+      // Mode 1: user force topo
+      if (GetClosestNicToGpuFromForcedTopo(gpuIndex, closestNicId, dev_name, &nicIdx)) {
+        isInitialized = true;
+        return nicIdx;
+      }
+
+      // Mode 2: OAM auto-topo. Marks OAM-claimed NICs in assignedCount
+      // regardless of success, so Mode 3 load-balancing avoids reusing them.
+      if (!disable_autoTopo) {
+          nicIdx = GetClosestNicToGpuFromOam(gpuIndex, numGpus, ibvAddressList,
+                            ibvDeviceList, dev_name, assignedCount);
+        if (nicIdx >= 0) {
+          isInitialized = true;
+          return nicIdx;
+        }
+      }
+
+      // Mode 3: Legacy PCIe-distance (fills closestNicId[])
       // Loop over each GPU to find the closest NIC(s) based on PCIe address
       for (int i = 0; i < numGpus; i++) {
         // Collect PCIe address for the GPU
@@ -1207,24 +1255,9 @@ namespace rocshmem
           LOG_WARN("Failed to get PCI Bus ID for HIP device %d: %s", i, hipGetErrorString(err));
 #endif
           closestNicId[i] = -1;
-          OamclosestNicId[i] = -1;
-          OamclosestNicId[i+numGpus] = -1;
           continue;
         }
 
-        // Find closest NICs — Mode 1: OAM auto-topology (fills OamclosestNicId[])
-        if (!disable_autoTopo) {
-          std::set<int> oamclosestNicIdxs = GetNearestDevicesInTree(hipPciBusId, ibvAddressList, 1);
-          if (!oamclosestNicIdxs.empty()) {
-            OamclosestNicId[i] = *oamclosestNicIdxs.rbegin();
-            if (oamclosestNicIdxs.size() > 1) {
-              OamclosestNicId[i+numGpus] = *std::next(oamclosestNicIdxs.rbegin());
-            }
-          }
-          continue;  // OAM mode handles its own NIC assignment; skip Mode 2
-        }
-
-        // Find closest NICs — Mode 2: Legacy PCIe-distance (fills closestNicId[])
         std::set<int> closestNicIdxs = GetNearestDevicesInTree(hipPciBusId, ibvAddressList);
 
         // Pick the least-used NIC to assign as closest
@@ -1289,14 +1322,6 @@ namespace rocshmem
         if (closestIdx != -1) assignedCount[closestIdx]++;
       }
       isInitialized = true;
-    }
-
-    int nicIdx = -1;
-    if (tryUserForcedTopo(gpuIndex, closestNicId, dev_name, &nicIdx)) return nicIdx;
-    if (!disable_autoTopo &&
-        tryOamAutoTopo(gpuIndex, numGpus,OamclosestNicId,
-                       ibvDeviceList, dev_name, &nicIdx)) {
-      return nicIdx;
     }
 
     int closestIdx = closestNicId[gpuIndex];
@@ -1466,3 +1491,4 @@ namespace rocshmem
     printf("\n");
   }
 }
+
