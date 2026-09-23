@@ -40,7 +40,7 @@ set(EXPLICIT_ROCM_VERSION "" CACHE STRING "Explicit ROCM version to compile to (
 if(NOT DEFINED ROCM_PATH)
   # Guess default location
   set(ROCM_PATH "/opt/dtk")
-  message(WARNING "Unable to find ROCM_PATH: Falling back to ${ROCM_PATH}")
+  message(STATUS "ROCM_PATH not specified, using default: ${ROCM_PATH}")
 else()
   message(STATUS "ROCM_PATH found: ${ROCM_PATH}")
 endif()

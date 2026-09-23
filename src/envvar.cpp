@@ -155,6 +155,9 @@ namespace envvar {
     const var<size_t> max_wavefront_buffers("MAX_WF_BUFFERS",
       "Maximum number of wavefront buffer arrays in default context (determines size of status, return, and atomic return buffers)",
       1024);
+    const var<bool> align_bw_with_rccl("ALIGN_BW_WITH_RCCL",
+      "Enable bandwidth alignment with RCCL for performance comparison. 0: Disabled; 1: Enabled (default)",
+      true);
   }  // inline namespace _base
 
   namespace bootstrap {

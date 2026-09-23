@@ -529,7 +529,8 @@ if (NOT BUILD_TESTS_ONLY)
 
   if (MONOLITHIC_PACKAGE)
     set(CPACK_MONOLITHIC_INSTALL ON)
-    set(CPACK_COMPONENTS_ALL "")
+    # Disable roc-cmake's devel component to prevent CPACK_COMPONENTS_ALL conflicts
+    set(ROCM_USE_DEV_COMPONENT OFF)
   else()
     rocm_package_setup_component(clients)
     rocm_package_setup_client_component(tests PACKAGE_NAME tests)
