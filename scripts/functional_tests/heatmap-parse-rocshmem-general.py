@@ -156,9 +156,18 @@ failed_format = workbook.add_format({
 # 收集所有环境信息，最后统一写入
 env_data_list = []
 env_sheet_name = "EnvInfo"
+used_sheet_names = set()
 
 for dir, file_names in files_in_dir.items():
-    sheet_name = get_innermost_dir_name(dir)[:31]
+    # Excel sheet名限31字符；多目录最内层名相同时追加序号后缀去重
+    base = get_innermost_dir_name(dir)
+    sheet_name = base[:31]
+    n = 1
+    while sheet_name in used_sheet_names:
+        suffix = f"_{n}"
+        sheet_name = base[:31 - len(suffix)] + suffix
+        n += 1
+    used_sheet_names.add(sheet_name)
     worksheet = workbook.add_worksheet(sheet_name)
     worksheet.set_zoom(70)
     worksheet.set_column(0, 200, 14)  # 足够宽
