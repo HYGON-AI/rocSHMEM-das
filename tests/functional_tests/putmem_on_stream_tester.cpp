@@ -66,7 +66,7 @@ PutmemOnStreamTester::PutmemOnStreamTester(TesterArguments args)
     }
   }
 
-  int num_bytes_stream = args.max_msg_size;
+  int num_bytes_stream = max_msg_size;
   int total_bytes = num_bytes_stream * num_streams;
   buf_size = total_bytes;
 

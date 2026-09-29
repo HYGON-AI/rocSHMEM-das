@@ -56,7 +56,7 @@ TeamBroadcastmemOnStreamTester::TeamBroadcastmemOnStreamTester(TesterArguments a
     }
   }
 
-  size_t num_bytes_wg = args.max_msg_size;
+  size_t num_bytes_wg = max_msg_size;
   size_t total_bytes = num_bytes_wg * static_cast<size_t>(num_teams);
   buf_size = total_bytes;
 
