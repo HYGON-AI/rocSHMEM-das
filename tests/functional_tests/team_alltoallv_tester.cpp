@@ -126,7 +126,7 @@ TeamAlltoallvTester<T1>::TeamAlltoallvTester(TesterArguments args)
   n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
 
   // Number of elements per work group
-  size_t num_elems_wg = (args.max_msg_size / sizeof(T1)) *
+  size_t num_elems_wg = (max_msg_size / sizeof(T1)) *
                         static_cast<size_t>(n_pes);
 
   // Total number of elements in the GPU kernel
@@ -182,7 +182,7 @@ template <typename T1>
 void TeamAlltoallvTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize,
                                           int loop, size_t size) {
   size_t shared_bytes = 0;
-  int num_elems = size / sizeof(T1);
+  size_t num_elems = size / sizeof(T1);
   size_t disp = 0;
 
   for (int wg = 0; wg < args.num_wgs; wg++) {
@@ -245,10 +245,10 @@ void TeamAlltoallvTester<T1>::resetBuffers(size_t size) {
 
 template <typename T1>
 void TeamAlltoallvTester<T1>::verifyResults(size_t size) {
-  int num_elems = size / sizeof(T1);
+  size_t num_elems = size / sizeof(T1);
 
   for (int wg = 0; wg < args.num_wgs; wg++) {
-    const size_t wg_base = static_cast<size_t>(wg) * n_pes * num_elems;
+    const size_t wg_base = static_cast<size_t>(wg) * static_cast<size_t>(n_pes) * num_elems;
     for (int pe = 0; pe < n_pes; pe++) {
       const int meta = wg * n_pes + pe;
       T1* dst = dest_buf + wg_base + dest_displs[meta];

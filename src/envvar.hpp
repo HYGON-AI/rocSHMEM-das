@@ -532,9 +532,9 @@ namespace envvar {
      * rocshmem atomic return buffers.
      */
     extern const var<size_t> max_wavefront_buffers;
-
     extern const var<std::string> requested_nic;
     extern const var<std::string> hca_list;
+    extern const var<bool> align_bw_with_rccl;
   }  // inline namespace _base
 
   namespace bootstrap {

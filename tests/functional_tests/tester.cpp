@@ -32,6 +32,7 @@
 #include <iostream>
 #include <rocshmem/rocshmem.hpp>
 #include <vector>
+#include "../src/envvar.hpp"
 
 #include "amo_bitwise_tester.hpp"
 #include "host_rma_tester.hpp"
@@ -159,14 +160,20 @@ Tester::Tester(TesterArguments args) : args(args) {
         max_msg_size = args.max_volume_size / args.num_wgs;
         break;
       case TeamBroadcastTestType:
+      case TeamBroadcastmemOnStreamTestType:
       case TeamReductionTestType:
+      case ReduceOnStreamTestType:
+        max_msg_size = args.max_volume_size / args.num_wgs;
+        break;
       case TeamReduceScatterTestType:
       case TeamFCollectTestType:
       case CollectTestType:
+        max_msg_size = (!rocshmem::envvar::align_bw_with_rccl.get_value())  ? (args.max_volume_size / args.num_wgs) 
+                       : (args.max_volume_size / args.num_wgs / args.numprocs);
+        break;
       case TeamAllToAllTestType:
       case TeamAllToAllvTestType:
       case TeamAlltoallmemOnStreamTestType:
-      case ReduceOnStreamTestType:
         max_msg_size = args.max_volume_size / args.num_wgs / args.numprocs;
         break;
       default:
@@ -1113,17 +1120,7 @@ bool Tester::peLaunchesKernel() {
 }
 
 bool Tester::AlignBwWithRccl(TesterArguments args, uint64_t size, double time_us, size_t *volume, double *AlgBw_align_rccl, double *BusBw_align_rccl) {
-  auto is_env_enabled = [](const char* env_name) -> bool {
-    const char* env_value = getenv(env_name);
-    if (!env_value) return true;
-
-    std::string value(env_value);
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c){ return std::tolower(c); });
-
-    return (value == "1" || value == "true" || value == "on" || value == "yes");
-  };
-
-  if (!is_env_enabled("ROCSHMEM_ALIGN_BW_WITH_RCCL")) {
+  if (!rocshmem::envvar::align_bw_with_rccl.get_value()) {
     return false;
   }
 

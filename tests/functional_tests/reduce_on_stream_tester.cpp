@@ -47,7 +47,7 @@ ReduceOnStreamTester::ReduceOnStreamTester(TesterArguments args)
 
   num_streams = args.num_wgs;
 
-  buf_size = args.max_msg_size * num_streams;
+  buf_size = max_msg_size * num_streams;
 
   source_buf = static_cast<int *>(alloc_test_buffer(buf_size, args.local_buf_type));
   dest_buf   = static_cast<int *>(alloc_test_buffer(buf_size));

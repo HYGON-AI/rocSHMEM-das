@@ -33,6 +33,10 @@ mode = "--both"  # 默认 both
 out_file = "rocshmem_test" # 默认输出文件
 show_mode = "--v" # 默认按volume显示, --s按msgsize显示
 
+def get_innermost_dir_name(dir_path):
+    path = dir_path.rstrip('/\\')
+    return os.path.basename(path) or os.path.dirname(path)
+
 for arg in sys.argv[1:]:
     if arg in ["--lat", "--bw", "--both"]:
         mode = arg
@@ -43,18 +47,29 @@ for arg in sys.argv[1:]:
     elif arg.startswith("-o="):
         out_file = arg.split("=")[1]
         continue
-    file_names = []
-    if not os.path.isdir (arg):
+    
+    dir_path = os.path.abspath(arg)
+
+    if not os.path.isdir(dir_path):
         continue
-    for entry in os.listdir(arg):
-        full_path = os.path.join(arg, entry)
+
+    file_names = []
+    for entry in os.listdir(dir_path):
+        full_path = os.path.join(dir_path, entry)
         if os.path.isfile(full_path):
             file_names.append(entry)
-    files_in_dir[arg] = file_names
-    files = files + len(file_names)
+
+    if file_names:
+        files_in_dir[dir_path] = file_names
+        files = files + len(file_names)
 
 if not files_in_dir:
     print("用法: python heatmap-parse-rocshmem-general.py [--lat/--bw/--both] [--s/--v] [-o=out_file] 目录1 目录2...\n" \
+         "目录支持绝对路径或相对路径，Sheet名称自动使用最内层目录名\n" \
+         "示例:\n" \
+         "  python heatmap-parse-rocshmem-general.py ./test_data\n" \
+         "  python heatmap-parse-rocshmem-general.py /home/user/perf_data/result1 C:/data/result2\n" \
+         "\n参数说明:\n" \
          "--lat: 只显示延迟,可选\n" \
          "--bw: 只显示带宽,可选\n" \
          "--both: 同时显示延迟和带宽(默认),可选\n" \
@@ -66,12 +81,12 @@ if not files_in_dir:
 unique="rocSHMEM_MI300_Thor2_Heatmap"
 
 ## cols => no. of consecutive runs
-## rows => no. of msg sizes in the sweep -- 35 = 1B-16GB
-cols, rows = 1, 27
+## rows => no. of msg sizes in the sweep -- 29 = 8B-2GB
+cols, rows = 1, 29
 op_interval = 10
 
-x = [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728, 268435456, 536870912, 1073741824]
-x_str = [8,16, 32, 64, 128, 256, 512, '1KB', '2KB', '4KB', '8KB', '16KB', '32KB', '64KB', '128KB', '256KB', '512KB', '1MB', '2MB', '4MB', '8MB', '16MB', '32MB', '64MB', '128MB', '256MB', '512MB', '1GB']
+x = [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728, 268435456, 536870912, 1073741824, 2147483648]
+x_str = [8,16, 32, 64, 128, 256, 512, '1KB', '2KB', '4KB', '8KB', '16KB', '32KB', '64KB', '128KB', '256KB', '512KB', '1MB', '2MB', '4MB', '8MB', '16MB', '32MB', '64MB', '128MB', '256MB', '512MB', '1GB', '2GB']
 
 max_failed_chars = 500  # 失败时总打印字符数
 
@@ -82,8 +97,8 @@ class Measurement:
     msgcount: int
     avg_time: float
     avg_bw: float
-    align_rccl_algbw: float
-    align_rccl_busbw: float
+    align_rccl_algbw: object  # 支持float或str(NA)
+    align_rccl_busbw: object  # 支持float或str(NA)
     msg_rate: float
 
 @dataclass
@@ -141,9 +156,18 @@ failed_format = workbook.add_format({
 # 收集所有环境信息，最后统一写入
 env_data_list = []
 env_sheet_name = "EnvInfo"
+used_sheet_names = set()
 
 for dir, file_names in files_in_dir.items():
-    sheet_name = f"{dir}"[:31]
+    # Excel sheet名限31字符；多目录最内层名相同时追加序号后缀去重
+    base = get_innermost_dir_name(dir)
+    sheet_name = base[:31]
+    n = 1
+    while sheet_name in used_sheet_names:
+        suffix = f"_{n}"
+        sheet_name = base[:31 - len(suffix)] + suffix
+        n += 1
+    used_sheet_names.add(sheet_name)
     worksheet = workbook.add_worksheet(sheet_name)
     worksheet.set_zoom(70)
     worksheet.set_column(0, 200, 14)  # 足够宽
@@ -221,12 +245,19 @@ for dir, file_names in files_in_dir.items():
                     continue
 
                 valid = True
-                for p in parts:
+                for idx, p in enumerate(parts):
+                    if re.match(r'^n/?a$', p, re.IGNORECASE):
+                        continue
                     if not re.match(r'^-?\d+(\.\d+)?$', p):
                         valid = False
                         break
                 if not valid:
                     continue
+
+                def parse_float_or_na(val):
+                    if re.match(r'^n/?a$', val, re.IGNORECASE):
+                        return "N/A"
+                    return float(val)
 
                 if len(parts) == 5:
                     volume1 = 0
@@ -252,8 +283,8 @@ for dir, file_names in files_in_dir.items():
                     msgcount1 = int(parts[2])
                     avg_time1 = float(parts[3])
                     avg_bw1 = float(parts[4])
-                    align_rccl_algbw1 = float(parts[5])
-                    align_rccl_busbw1 = float(parts[6])
+                    align_rccl_algbw1 = parse_float_or_na(parts[5])
+                    align_rccl_busbw1 = parse_float_or_na(parts[6])
                     msg_rate1 = float(parts[7])
 
                 if volume1 < minmsgsize:
@@ -270,10 +301,9 @@ for dir, file_names in files_in_dir.items():
     prev_op = ""
     op_count = 1
     show_mode_info = f" Show Mode: {'Message Size' if show_mode=='--s' else 'Volume Size'}"
-    worksheet.merge_range(1, 2, 1, 10, f"Data directory: {dir}", yellow_format)
-    worksheet.write(1, 12, f"Lat: us\nBw: GB/s", yellow_format)
-    worksheet.merge_range(1, 14, 1, 15, f"{show_mode_info}", yellow_format)
-    worksheet.merge_range(3, 2, 3, 15, f"Note: For OnStream operations, the actual value of w is 1. The actual z varies with size. When it is greater than 256, use 256.", yellow_format)
+    worksheet.write(1, 2, f"Lat: us\nBw: GB/s", yellow_format)
+    worksheet.merge_range(1, 4, 1, 15, f"{show_mode_info}", yellow_format)
+    worksheet.merge_range(3, 2, 3, 15, f"Note: For OnStream operations, the actual values of w and z are automatically adjusted based on the message size.", yellow_format)
     # 在目录sheet第5行第3列添加跳转到对应环境信息工作表的链接
     worksheet.write_url(4, 2, f"internal:'{env_sheet_name}'!A1", string="📎 环境信息")
 
@@ -350,19 +380,26 @@ for dir, file_names in files_in_dir.items():
                     align_rccl_busbw = pt.align_rccl_busbw
                     break
 
+            def fmt_val(v):
+                if v is None:
+                    return ""
+                if isinstance(v, str):
+                    return v
+                return f"{v:.2f}"
+
             # ====================== 最终显示格式 ======================
             if mode == "--lat":
                 val = f"{lat:.2f}" if lat is not None else ""
                 worksheet.write(top_start, i+pad_left+3, val, wrap_format)
             elif mode == "--bw":
                 if bw is not None:
-                    val = f"{bw:.2f}\n{align_rccl_algbw:.2f}\n{align_rccl_busbw:.2f}"
+                    val = f"{bw:.2f}\n{fmt_val(align_rccl_algbw)}\n{fmt_val(align_rccl_busbw)}"
                 else:
                     val = ""
                 worksheet.write(top_start, i+pad_left+3, val, wrap_format)
             else:
                 if lat is not None and bw is not None:
-                    val = f"{bw:.2f}\n{align_rccl_algbw:.2f}\n{align_rccl_busbw:.2f}\n{lat:.2f}"
+                    val = f"{bw:.2f}\n{fmt_val(align_rccl_algbw)}\n{fmt_val(align_rccl_busbw)}\n{lat:.2f}"
                 elif lat is not None:
                     val = f"Lat:{lat:.2f}"
                 elif bw is not None:
