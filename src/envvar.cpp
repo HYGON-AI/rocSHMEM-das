@@ -46,9 +46,13 @@ namespace envvar {
     const var<bool> disable_rccl("DISABLE_RCCL",
       "Disable RCCL host collectives at runtime. 0: Use RCCL when compiled and available; 1: Use the rocSHMEM collective implementation",
       false);
-    const var<size_t> rccl_min_size("RCCL_MIN_SIZE",
-      "Minimum host collective message size in bytes for RCCL. Messages less than or equal to this value use the rocSHMEM implementation",
-      4194304);
+    const var<std::string> rccl_min_size_intra("RCCL_MIN_SIZE_INTRA",
+      "Minimum intra-node host collective message size for RCCL (alltoallv excluded). Accepts a byte value for all collectives, "
+      "or a comma-separated policy such as default:4M,allreduce:1M,alltoall:2M. Smaller messages use rocSHMEM",
+      "default:64K,alltoall:4K,broadcast:16K,fcollect:16K,allreduce:2K,reduce_scatter:8K");
+    const var<std::string> rccl_min_size_inter("RCCL_MIN_SIZE_INTER",
+      "Minimum inter-node host collective message size for RCCL (alltoallv excluded). Accepts bytes or an interface:size policy",
+      "default:1M,alltoall:32K,broadcast:4M,fcollect:64K,allreduce:8K,reduce_scatter:32K");
     const var<bool> rccl_delay_init("RCCL_DELAY_INIT",
       "Delay RCCL communicator initialization until the first eligible host collective. 0: Initialize with the team; 1: Initialize on demand",
       true);

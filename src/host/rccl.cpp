@@ -5,6 +5,7 @@
 
 #if defined(USE_RCCL)
 #include <dlfcn.h>
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <limits>
@@ -13,7 +14,7 @@
 #include <vector>
 
 #include "bootstrap/bootstrap.hpp"
-#include "envvar.hpp"
+#include "bootstrap/utils.hpp"
 #include "log.hpp"
 #include "mpi_instance.hpp"
 #include "team.hpp"
@@ -24,23 +25,6 @@ RcclFunctionTable rccl_ftable{};
 
 enum class RcclCommState { UNINITIALIZED, PREPARED, READY, FAILED };
 
-namespace {
-struct RcclRuntimeConfig {
-  uint64_t min_size;
-  int disabled;
-  int delay_init;
-};
-
-/** @brief Parse and return the process-wide RCCL runtime configuration. */
-const RcclRuntimeConfig& runtime_config() {
-  static const RcclRuntimeConfig config{
-      static_cast<uint64_t>(envvar::rccl_min_size.get_value()),
-      envvar::disable_rccl.get_value() ? 1 : 0,
-      envvar::rccl_delay_init.get_value() ? 1 : 0};
-  return config;
-}
-}  // namespace
-
 class RcclCommContext {
  public:
   std::atomic<RcclCommState> state{RcclCommState::UNINITIALIZED};
@@ -48,41 +32,38 @@ class RcclCommContext {
   ncclComm_t comm{nullptr};
   ncclUniqueId unique_id{};
   uint64_t capabilities{0};
+  RcclScope scope{RcclScope::INTER_NODE};
+  int rank{0};       // Rank within this communicator.
+  int num_ranks{0};  // Number of participating PEs.
 };
 
 namespace {
 void* rccl_handle{nullptr};
 std::once_flag rccl_load_once;
 bool rccl_loaded{false};
-std::atomic<bool> rccl_config_validated{false};
 
-enum RcclCapability : uint64_t {
-  RCCL_CAP_BROADCAST = 1ULL << 0,
-  RCCL_CAP_ALL_REDUCE = 1ULL << 1,
-  RCCL_CAP_REDUCE_SCATTER = 1ULL << 2,
-  RCCL_CAP_ALL_GATHER = 1ULL << 3,
-  RCCL_CAP_REDUCE = 1ULL << 4,
-  RCCL_CAP_GATHER = 1ULL << 5,
-  RCCL_CAP_SCATTER = 1ULL << 6,
-  RCCL_CAP_ALL_TO_ALL = 1ULL << 7,
-  RCCL_CAP_ALL_TO_ALL_V = 1ULL << 8,
-};
+static_assert(kRcclCollectiveCount <= 64,
+              "RCCL capability bitmap supports at most 64 collectives");
 
-enum class RcclSizePolicy { USE_THRESHOLD, IGNORE_THRESHOLD };
+constexpr uint64_t collective_capability(RcclCollective collective) {
+  const size_t index = static_cast<size_t>(collective);
+  return index < kRcclCollectiveCount ? 1ULL << index : 0;
+}
+
+std::array<const char*, kRcclCollectiveCount> rccl_operation_names{};
+uint64_t rccl_local_capabilities{0};
+
+const char* collective_operation(RcclCollective collective) {
+  const size_t index = static_cast<size_t>(collective);
+  if (index >= kRcclCollectiveCount || rccl_operation_names[index] == nullptr) {
+    return "unknown RCCL collective";
+  }
+  return rccl_operation_names[index];
+}
 
 /** @brief Build the bitmap of collective operations supported by this PE. */
 uint64_t local_capabilities() {
-  uint64_t capabilities = 0;
-  if (rccl_ftable.broadcast) capabilities |= RCCL_CAP_BROADCAST;
-  if (rccl_ftable.all_reduce) capabilities |= RCCL_CAP_ALL_REDUCE;
-  if (rccl_ftable.reduce_scatter) capabilities |= RCCL_CAP_REDUCE_SCATTER;
-  if (rccl_ftable.all_gather) capabilities |= RCCL_CAP_ALL_GATHER;
-  if (rccl_ftable.reduce) capabilities |= RCCL_CAP_REDUCE;
-  if (rccl_ftable.gather) capabilities |= RCCL_CAP_GATHER;
-  if (rccl_ftable.scatter) capabilities |= RCCL_CAP_SCATTER;
-  if (rccl_ftable.all_to_all) capabilities |= RCCL_CAP_ALL_TO_ALL;
-  if (rccl_ftable.all_to_all_v) capabilities |= RCCL_CAP_ALL_TO_ALL_V;
-  return capabilities;
+  return rccl_local_capabilities;
 }
 
 /** @brief Return the size in bytes of an RCCL data type. */
@@ -106,9 +87,12 @@ size_t rccl_type_size(ncclDataType_t type) {
   }
 }
 
-/** @brief Check whether a message is large enough to use RCCL. */
-bool rccl_size_enabled(size_t bytes) {
-  return bytes > runtime_config().min_size;
+/** @brief Check whether a collective message is large enough to use RCCL. */
+bool rccl_size_enabled(RcclScope scope, RcclCollective collective, size_t bytes) {
+  if (collective == RcclCollective::ALL_TO_ALL_V) return true;
+  const size_t index = static_cast<size_t>(collective);
+  return index < kRcclCollectiveCount &&
+         bytes >= rccl_runtime_config().min_sizes[static_cast<size_t>(scope)][index];
 }
 
 /** @brief Convert an element count to bytes with overflow checking. */
@@ -140,6 +124,20 @@ void load_optional_symbol(const char* name, T* target) {
   if (*target == nullptr) {
     LOG_INFO("Optional RCCL symbol %s is unavailable; the corresponding "
              "feature will use fallback", name);
+  }
+}
+
+/** @brief Load one optional collective and record its runtime capability. */
+template <typename T>
+void load_collective_symbol(RcclCollective collective, const char* name,
+                            T* target) {
+  const size_t index = static_cast<size_t>(collective);
+  if (index >= kRcclCollectiveCount) return;
+
+  rccl_operation_names[index] = name;
+  load_optional_symbol(name, target);
+  if (*target != nullptr) {
+    rccl_local_capabilities |= collective_capability(collective);
   }
 }
 
@@ -175,15 +173,24 @@ void load_rccl() {
   load_optional_symbol("ncclCommAbort", &rccl_ftable.comm_abort);
   load_optional_symbol("ncclCommGetAsyncError", &rccl_ftable.comm_get_async_error);
   load_optional_symbol("ncclGetLastError", &rccl_ftable.get_last_error);
-  load_optional_symbol("ncclAllReduce", &rccl_ftable.all_reduce);
-  load_optional_symbol("ncclReduceScatter", &rccl_ftable.reduce_scatter);
-  load_optional_symbol("ncclBroadcast", &rccl_ftable.broadcast);
-  load_optional_symbol("ncclAllGather", &rccl_ftable.all_gather);
-  load_optional_symbol("ncclReduce", &rccl_ftable.reduce);
-  load_optional_symbol("ncclGather", &rccl_ftable.gather);
-  load_optional_symbol("ncclScatter", &rccl_ftable.scatter);
-  load_optional_symbol("ncclAllToAll", &rccl_ftable.all_to_all);
-  load_optional_symbol("ncclAllToAllv", &rccl_ftable.all_to_all_v);
+  load_collective_symbol(RcclCollective::BROADCAST, "ncclBroadcast",
+                         &rccl_ftable.broadcast);
+  load_collective_symbol(RcclCollective::ALL_REDUCE, "ncclAllReduce",
+                         &rccl_ftable.all_reduce);
+  load_collective_symbol(RcclCollective::REDUCE_SCATTER, "ncclReduceScatter",
+                         &rccl_ftable.reduce_scatter);
+  load_collective_symbol(RcclCollective::ALL_GATHER, "ncclAllGather",
+                         &rccl_ftable.all_gather);
+  load_collective_symbol(RcclCollective::REDUCE, "ncclReduce",
+                         &rccl_ftable.reduce);
+  load_collective_symbol(RcclCollective::GATHER, "ncclGather",
+                         &rccl_ftable.gather);
+  load_collective_symbol(RcclCollective::SCATTER, "ncclScatter",
+                         &rccl_ftable.scatter);
+  load_collective_symbol(RcclCollective::ALL_TO_ALL, "ncclAllToAll",
+                         &rccl_ftable.all_to_all);
+  load_collective_symbol(RcclCollective::ALL_TO_ALL_V, "ncclAllToAllv",
+                         &rccl_ftable.all_to_all_v);
 
   int version = 0;
   if (rccl_ftable.get_version(&version) == ncclSuccess) {
@@ -198,14 +205,15 @@ struct RcclInitSnapshot {
   RcclRuntimeConfig runtime;
   uint64_t capabilities;
   ncclUniqueId unique_id;  // Root PE generated RCCL communicator ID.
+  uint64_t host_hash;
   int runtime_available;
   int unique_id_valid;  // Whether unique_id was generated successfully.
 };
 
 /** @brief Build the local snapshot used to initialize a Team communicator. */
 RcclInitSnapshot make_init_snapshot(bool root) {
-  const auto& config = runtime_config();
-  RcclInitSnapshot snapshot{config, local_capabilities(), {}, rccl_loaded ? 1 : 0, 0};
+  const auto& config = rccl_runtime_config();
+  RcclInitSnapshot snapshot{config, local_capabilities(), {}, getHostHash(), rccl_loaded ? 1 : 0, 0};
 
   if (root && rccl_loaded) {
     snapshot.unique_id_valid =
@@ -222,10 +230,14 @@ bool apply_init_snapshots(RcclCommContext* context,
   if (snapshots.empty()) return false;
 
   const auto& reference = snapshots[0];
+  context->scope = RcclScope::INTRA_NODE;
   uint64_t global_capabilities = ~uint64_t{0};
   int all_runtimes_available = 1;
   for (const auto& snapshot : snapshots) {
-    if (snapshot.runtime.min_size != reference.runtime.min_size ||
+    if (snapshot.host_hash != reference.host_hash) {
+      context->scope = RcclScope::INTER_NODE;
+    }
+    if (snapshot.runtime.min_sizes != reference.runtime.min_sizes ||
         snapshot.runtime.disabled != reference.runtime.disabled ||
         snapshot.runtime.delay_init != reference.runtime.delay_init) {
       LOG_ERROR_ABORT("RCCL configuration is inconsistent across PEs");
@@ -233,7 +245,6 @@ bool apply_init_snapshots(RcclCommContext* context,
     global_capabilities &= snapshot.capabilities;
     all_runtimes_available &= snapshot.runtime_available;
   }
-  rccl_config_validated.store(true, std::memory_order_release);
   if (reference.runtime.disabled || !all_runtimes_available ||
       !reference.unique_id_valid) {
     context->state.store(RcclCommState::FAILED, std::memory_order_release);
@@ -257,7 +268,7 @@ bool configure_mpi_context(RcclCommContext* context, MPI_Comm mpi_comm) {
     return context->state.load(std::memory_order_relaxed) != RcclCommState::FAILED;
   }
 
-  const auto& config = runtime_config();
+  const auto& config = rccl_runtime_config();
   if (!config.disabled) std::call_once(rccl_load_once, load_rccl);
   int rank = 0;
   if (mpilib_ftable_.Comm_rank(mpi_comm, &rank) != MPI_SUCCESS) {
@@ -282,6 +293,8 @@ bool configure_mpi_context(RcclCommContext* context, MPI_Comm mpi_comm) {
     LOG_WARN("MPI_Allgather failed during RCCL context configuration");
     return false;
   }
+  context->rank = rank;
+  context->num_ranks = comm_size;
   return apply_init_snapshots(context, snapshots);
 }
 
@@ -299,13 +312,15 @@ bool configure_bootstrap_context(RcclCommContext* context, Team* team, Bootstrap
     return context->state.load(std::memory_order_relaxed) != RcclCommState::FAILED;
   }
 
-  const auto& config = runtime_config();
+  const auto& config = rccl_runtime_config();
   if (!config.disabled) std::call_once(rccl_load_once, load_rccl);
   const TeamInfo* info = team->tinfo_wrt_world;
   std::vector<RcclInitSnapshot> snapshots(team->num_pes);
   snapshots[team->my_pe] = make_init_snapshot(team->my_pe == 0);
   bootstrap->groupAllGather(snapshots.data(), sizeof(RcclInitSnapshot),
                             info->pe_start, info->stride, team->num_pes);
+  context->rank = team->my_pe;
+  context->num_ranks = team->num_pes;
   return apply_init_snapshots(context, snapshots);
 }
 
@@ -319,17 +334,19 @@ bool configure_team_context(Team* team, Bootstrap* bootstrap) {
 }  // namespace
 
 /** @brief Return whether RCCL host collectives are enabled at runtime. */
-bool rccl_runtime_enabled() { return !runtime_config().disabled; }
+bool rccl_runtime_enabled() { return !rccl_runtime_config().disabled; }
+
+/** @brief Skip preparation when neither node scope can select RCCL. */
+bool rccl_size_precheck(RcclCollective collective, size_t bytes) {
+  return rccl_runtime_enabled() &&
+         (rccl_size_enabled(RcclScope::INTRA_NODE, collective, bytes) ||
+          rccl_size_enabled(RcclScope::INTER_NODE, collective, bytes));
+}
 
 /** @brief Return whether Team construction should initialize RCCL eagerly. */
 bool rccl_eager_init_enabled() {
-  const auto& config = runtime_config();
+  const auto& config = rccl_runtime_config();
   return !config.disabled && !config.delay_init;
-}
-
-/** @brief Return whether runtime policy selects RCCL for a message. */
-bool should_use_rccl(size_t bytes) {
-  return rccl_runtime_enabled() && rccl_size_enabled(bytes);
 }
 
 /** @brief Report an RCCL operation result. */
@@ -344,7 +361,7 @@ bool rccl_check(ncclResult_t result, const char* operation) {
 
 namespace {
 /** @brief Initialize one communicator with its previously exchanged unique ID. */
-bool rccl_initialize_comm(RcclCommContext* context, int rank, int size) {
+bool rccl_initialize_comm(RcclCommContext* context) {
   if (context->state.load(std::memory_order_acquire) == RcclCommState::READY) {
     return true;
   }
@@ -354,8 +371,8 @@ bool rccl_initialize_comm(RcclCommContext* context, int rank, int size) {
   if (state == RcclCommState::READY) return true;
   if (state != RcclCommState::PREPARED) return false;
 
-  if (!rccl_check(rccl_ftable.comm_init_rank(&context->comm, size,
-                                             context->unique_id, rank),
+  if (!rccl_check(rccl_ftable.comm_init_rank(&context->comm, context->num_ranks,
+                                             context->unique_id, context->rank),
                   "ncclCommInitRank")) {
     context->state.store(RcclCommState::FAILED, std::memory_order_release);
     return false;
@@ -398,41 +415,46 @@ void rccl_comm_context_destroy(RcclCommContext* context) {
   delete context;
 }
 
-/** @brief Initialize an RCCL communicator over an MPI communicator. */
-bool rccl_mpi_comm_init(MPI_Comm mpi_comm, int rank, int size,
-                        RcclCommContext* context) {
-  if (!configure_mpi_context(context, mpi_comm)) return false;
-  return rccl_initialize_comm(context, rank, size);
-}
-
-/** @brief Prepare a Team context, optionally creating its communicator eagerly. */
-bool rccl_team_prepare(Team* team, Bootstrap* bootstrap) {
-  if (team == nullptr || team->rccl_context == nullptr) return false;
-  if (!rccl_config_validated.load(std::memory_order_acquire) &&
-      !configure_team_context(team, bootstrap)) {
-    return runtime_config().disabled ||
-           rccl_config_validated.load(std::memory_order_acquire);
+namespace {
+/** @brief Inspect prepared metadata without changing communicator state. */
+bool should_use_rccl(const RcclCommContext* context, RcclCollective collective,
+                        size_t bytes) {
+  if (context == nullptr || !rccl_runtime_enabled()) return false;
+  const auto state = context->state.load(std::memory_order_acquire);
+  if (state != RcclCommState::PREPARED && state != RcclCommState::READY) {
+    return false;
   }
-  const auto& config = runtime_config();
-  if (config.disabled || config.delay_init) return true;
-  return rccl_team_init(team, bootstrap);
+  const uint64_t capability = collective_capability(collective);
+  return capability != 0 && (context->capabilities & capability) != 0 &&
+         rccl_size_enabled(context->scope, collective, bytes);
 }
 
-/** @brief Lazily initialize the RCCL communicator associated with a Team. */
-bool rccl_team_init(Team* team, Bootstrap* bootstrap) {
+/** @brief Allocate and prepare a team's context; communicator creation is separate. */
+bool prepare_team_context(Team* team, Bootstrap* bootstrap) {
   if (team == nullptr) return false;
   if (team->rccl_context == nullptr) {
     team->rccl_context = rccl_comm_context_create();
   }
-  RcclCommContext* context = team->rccl_context;
-  if (context->state.load(std::memory_order_acquire) == RcclCommState::FAILED) {
+  return configure_team_context(team, bootstrap);
+}
+}  // namespace
+
+/** @brief Prepare, select, and lazily create an MPI-backed RCCL communicator. */
+bool rccl_mpi_comm_init(MPI_Comm mpi_comm, RcclCommContext* context,
+                        RcclCollective collective, size_t bytes) {
+  if (!rccl_size_precheck(collective, bytes) ||
+      !configure_mpi_context(context, mpi_comm)) {
     return false;
   }
-  if (context->state.load(std::memory_order_acquire) == RcclCommState::UNINITIALIZED &&
-      !configure_team_context(team, bootstrap)) {
-    return false;
-  }
-  return rccl_initialize_comm(context, team->my_pe, team->num_pes);
+  return should_use_rccl(context, collective, bytes) &&
+         rccl_initialize_comm(context);
+}
+
+/** @brief Eager team initialization deliberately bypasses message thresholds. */
+bool rccl_team_eager_init(Team* team, Bootstrap* bootstrap) {
+  if (!rccl_runtime_enabled()) return true;
+  return prepare_team_context(team, bootstrap) &&
+         rccl_initialize_comm(team->rccl_context);
 }
 
 /** @brief Destroy the RCCL context associated with a Team. */
@@ -492,8 +514,10 @@ bool rccl_check_async_error(RcclCommContext* context, const char* operation) {
 /** @brief Finish a collective and classify submission or synchronization errors. */
 RcclStatus rccl_finish_collective(ncclResult_t result,
                                   RcclCommContext* context,
-                                  const char* operation, hipStream_t stream,
+                                  RcclCollective collective,
+                                  hipStream_t stream,
                                   bool blocking) {
+  const char* operation = collective_operation(collective);
   if (result != ncclSuccess) {
     rccl_error_abort(context, operation, "submission",
                      rccl_ftable.get_error_string(result),
@@ -513,95 +537,85 @@ RcclStatus rccl_finish_collective(ncclResult_t result,
 
 /** @brief Launch a byte-count collective using a Team context. */
 template <typename Launch>
-RcclStatus run_rccl_collective(Team* team, Bootstrap* bootstrap, size_t bytes,
-                               uint64_t capability, const char* operation,
-                               hipStream_t stream, bool blocking, Launch launch,
-                               RcclSizePolicy size_policy = RcclSizePolicy::USE_THRESHOLD) {
-  if (team == nullptr) return RcclStatus::FALLBACK_SAFE;
-  if (!rccl_runtime_enabled() ||
-      (size_policy == RcclSizePolicy::USE_THRESHOLD &&
-       !rccl_size_enabled(bytes))) {
+RcclStatus run_rccl_collective(Team* team, Bootstrap* bootstrap,
+                               RcclCollective collective, size_t bytes,
+                               hipStream_t stream, bool blocking,
+                               Launch launch) {
+  if (team == nullptr || !rccl_size_precheck(collective, bytes)) {
     return RcclStatus::FALLBACK_SAFE;
   }
-  if (team->rccl_context == nullptr) {
-    team->rccl_context = rccl_comm_context_create();
-  }
+  if (!prepare_team_context(team, bootstrap)) return RcclStatus::FALLBACK_SAFE;
   RcclCommContext* context = team->rccl_context;
-  const auto state = context->state.load(std::memory_order_acquire);
-  if (state == RcclCommState::FAILED) return RcclStatus::FALLBACK_SAFE;
-  if (state == RcclCommState::UNINITIALIZED &&
-      !configure_team_context(team, bootstrap)) {
+  if (!should_use_rccl(context, collective, bytes) ||
+      !rccl_initialize_comm(context)) {
     return RcclStatus::FALLBACK_SAFE;
   }
-  if ((context->capabilities & capability) == 0) {
-    return RcclStatus::FALLBACK_SAFE;
-  }
-  if (!rccl_team_init(team, bootstrap)) return RcclStatus::FALLBACK_SAFE;
-  return rccl_finish_collective(launch(context->comm), context, operation,
+  return rccl_finish_collective(launch(context->comm), context, collective,
                                 stream, blocking);
 }
 
 /** @brief Launch a byte-count collective using an existing context. */
 template <typename Launch>
-RcclStatus run_rccl_collective(RcclCommContext* context, size_t bytes,
-                               uint64_t capability, const char* operation,
+RcclStatus run_rccl_collective(RcclCommContext* context,
+                               RcclCollective collective, size_t bytes,
                                hipStream_t stream, bool blocking,
                                Launch launch) {
-  if (context == nullptr || !should_use_rccl(bytes) ||
-      (context->capabilities & capability) == 0) {
+  if (!should_use_rccl(context, collective, bytes)) {
     return RcclStatus::FALLBACK_SAFE;
   }
   if (context->state.load(std::memory_order_acquire) != RcclCommState::READY) {
     return RcclStatus::FALLBACK_SAFE;
   }
-  return rccl_finish_collective(launch(context->comm), context, operation, stream, blocking);
+  return rccl_finish_collective(launch(context->comm), context, collective,
+                                stream, blocking);
 }
 
 /** @brief Convert an element count and launch a Team collective. */
 template <typename Launch>
 RcclStatus run_rccl_collective(Team* team, Bootstrap* bootstrap, size_t count,
-                               ncclDataType_t type, uint64_t capability,
-                               const char* operation, hipStream_t stream,
-                               bool blocking, Launch launch) {
+                               ncclDataType_t type, RcclCollective collective,
+                               hipStream_t stream, bool blocking,
+                               Launch launch) {
   size_t bytes = 0;
   if (!rccl_count_bytes(count, type, &bytes)) return RcclStatus::FALLBACK_SAFE;
-  return run_rccl_collective(team, bootstrap, bytes, capability, operation,
-                             stream, blocking, launch);
+  return run_rccl_collective(team, bootstrap, collective, bytes, stream,
+                             blocking, launch);
 }
 
 /** @brief Convert an element count and launch a context collective. */
 template <typename Launch>
 RcclStatus run_rccl_collective(RcclCommContext* context, size_t count,
-                               ncclDataType_t type, uint64_t capability,
-                               const char* operation, hipStream_t stream,
-                               bool blocking, Launch launch) {
+                               ncclDataType_t type, RcclCollective collective,
+                               hipStream_t stream, bool blocking,
+                               Launch launch) {
   size_t bytes = 0;
   if (!rccl_count_bytes(count, type, &bytes)) return RcclStatus::FALLBACK_SAFE;
-  return run_rccl_collective(context, bytes, capability, operation, stream, blocking, launch);
+  return run_rccl_collective(context, collective, bytes, stream, blocking,
+                             launch);
 }
 
 /** @brief Validate a reduction operation and launch a Team collective. */
 template <typename Launch>
 RcclStatus run_rccl_collective(Team* team, Bootstrap* bootstrap, size_t count,
                                ncclDataType_t type, ncclRedOp_t op,
-                               uint64_t capability, const char* operation,
+                               RcclCollective collective,
                                hipStream_t stream, bool blocking,
                                Launch launch) {
   if (op == ncclNumOps) return RcclStatus::FALLBACK_SAFE;
-  return run_rccl_collective(team, bootstrap, count, type, capability,
-                             operation, stream, blocking, launch);
+  return run_rccl_collective(team, bootstrap, count, type, collective, stream,
+                             blocking, launch);
 }
 
 /** @brief Validate a reduction operation and launch a context collective. */
 template <typename Launch>
 RcclStatus run_rccl_collective(RcclCommContext* context, size_t count,
                                ncclDataType_t type, ncclRedOp_t op,
-                               uint64_t capability, const char* operation,
+                               RcclCollective collective,
                                hipStream_t stream, bool blocking,
                                Launch launch) {
   if (op == ncclNumOps) return RcclStatus::FALLBACK_SAFE;
-  return run_rccl_collective(context, count, type, capability, operation,
-                             stream, blocking, launch);
+  return run_rccl_collective(context, count, type, collective, stream,
+                             blocking, launch);
 }
 
 }  // namespace
@@ -610,8 +624,8 @@ RcclStatus run_rccl_collective(RcclCommContext* context, size_t count,
 bool rccl_broadcast(Team* team, Bootstrap* bootstrap, const void* source,
                     void* dest, size_t bytes, int root, hipStream_t stream,
                     bool blocking) {
-  return run_rccl_collective(team, bootstrap, bytes, RCCL_CAP_BROADCAST,
-      "ncclBroadcast", stream, blocking,
+  return run_rccl_collective(team, bootstrap, RcclCollective::BROADCAST,
+      bytes, stream, blocking,
       [=](ncclComm_t comm) {
         return rccl_ftable.broadcast(source, dest, bytes, ncclUint8, root, comm, stream);
       }) == RcclStatus::SUCCESS;
@@ -620,8 +634,8 @@ bool rccl_broadcast(Team* team, Bootstrap* bootstrap, const void* source,
 /** @brief Launch RCCL broadcast for an existing context. */
 bool rccl_broadcast(RcclCommContext* context, const void* source, void* dest,
                     size_t bytes, int root, hipStream_t stream, bool blocking) {
-  return run_rccl_collective(context, bytes, RCCL_CAP_BROADCAST,
-      "ncclBroadcast", stream, blocking,
+  return run_rccl_collective(context, RcclCollective::BROADCAST, bytes,
+      stream, blocking,
       [=](ncclComm_t comm) {
         return rccl_ftable.broadcast(source, dest, bytes, ncclUint8, root, comm, stream);
       }) == RcclStatus::SUCCESS;
@@ -630,8 +644,8 @@ bool rccl_broadcast(RcclCommContext* context, const void* source, void* dest,
 /** @brief Launch RCCL all-to-all for a Team. */
 bool rccl_alltoall(Team* team, Bootstrap* bootstrap, const void* source,
                    void* dest, size_t bytes_per_pe, hipStream_t stream) {
-  return run_rccl_collective(team, bootstrap, bytes_per_pe, RCCL_CAP_ALL_TO_ALL,
-      "ncclAllToAll", stream, false,
+  return run_rccl_collective(team, bootstrap, RcclCollective::ALL_TO_ALL,
+      bytes_per_pe, stream, false,
       [=](ncclComm_t comm) {
         return rccl_ftable.all_to_all(source, dest, bytes_per_pe, ncclUint8, comm, stream);
       }) == RcclStatus::SUCCESS;
@@ -648,24 +662,22 @@ bool rccl_alltoallv(Team* team, Bootstrap* bootstrap, const void* source,
       type == ncclNumTypes || team == nullptr) {
     return false;
   }
-  if (!rccl_runtime_enabled()) return false;
   return run_rccl_collective(
-      team, bootstrap, 0, RCCL_CAP_ALL_TO_ALL_V, "ncclAllToAllv", stream,
-      blocking,
+      team, bootstrap, RcclCollective::ALL_TO_ALL_V, 0,
+      stream, blocking,
       [=](ncclComm_t comm) {
         return rccl_ftable.all_to_all_v(
             source, send_counts, send_displs, dest, recv_counts, recv_displs,
             type, comm, stream);
-      },
-      RcclSizePolicy::IGNORE_THRESHOLD) == RcclStatus::SUCCESS;
+      }) == RcclStatus::SUCCESS;
 }
 
 /** @brief Launch RCCL all-gather for a Team. */
 bool rccl_all_gather(Team* team, Bootstrap* bootstrap, const void* source,
                      void* dest, size_t send_count, ncclDataType_t type,
                      hipStream_t stream, bool blocking) {
-  return run_rccl_collective(team, bootstrap, send_count, type, RCCL_CAP_ALL_GATHER,
-      "ncclAllGather", stream, blocking,
+  return run_rccl_collective(team, bootstrap, send_count, type,
+      RcclCollective::ALL_GATHER, stream, blocking,
       [=](ncclComm_t comm) {
         return rccl_ftable.all_gather(source, dest, send_count, type, comm, stream);
       }) == RcclStatus::SUCCESS;
@@ -675,8 +687,8 @@ bool rccl_all_gather(Team* team, Bootstrap* bootstrap, const void* source,
 bool rccl_reduce(Team* team, Bootstrap* bootstrap, const void* source,
                  void* dest, size_t count, ncclDataType_t type,
                  ncclRedOp_t op, int root, hipStream_t stream, bool blocking) {
-  return run_rccl_collective(team, bootstrap, count, type, op, RCCL_CAP_REDUCE,
-      "ncclReduce", stream, blocking,
+  return run_rccl_collective(team, bootstrap, count, type, op,
+      RcclCollective::REDUCE, stream, blocking,
       [=](ncclComm_t comm) {
         return rccl_ftable.reduce(source, dest, count, type, op, root, comm, stream);
       }) == RcclStatus::SUCCESS;
@@ -686,8 +698,8 @@ bool rccl_reduce(Team* team, Bootstrap* bootstrap, const void* source,
 bool rccl_gather(Team* team, Bootstrap* bootstrap, const void* source,
                  void* dest, size_t send_count, ncclDataType_t type, int root,
                  hipStream_t stream, bool blocking) {
-  return run_rccl_collective(team, bootstrap, send_count, type, RCCL_CAP_GATHER,
-      "ncclGather", stream, blocking,
+  return run_rccl_collective(team, bootstrap, send_count, type,
+      RcclCollective::GATHER, stream, blocking,
       [=](ncclComm_t comm) {
         return rccl_ftable.gather(source, dest, send_count, type, root, comm, stream);
       }) == RcclStatus::SUCCESS;
@@ -697,8 +709,8 @@ bool rccl_gather(Team* team, Bootstrap* bootstrap, const void* source,
 bool rccl_scatter(Team* team, Bootstrap* bootstrap, const void* source,
                   void* dest, size_t recv_count, ncclDataType_t type, int root,
                   hipStream_t stream, bool blocking) {
-  return run_rccl_collective(team, bootstrap, recv_count, type, RCCL_CAP_SCATTER,
-      "ncclScatter", stream, blocking,
+  return run_rccl_collective(team, bootstrap, recv_count, type,
+      RcclCollective::SCATTER, stream, blocking,
       [=](ncclComm_t comm) {
         return rccl_ftable.scatter(source, dest, recv_count, type, root, comm, stream);
       }) == RcclStatus::SUCCESS;
@@ -708,8 +720,8 @@ bool rccl_scatter(Team* team, Bootstrap* bootstrap, const void* source,
 bool rccl_all_reduce(RcclCommContext* context, const void* source, void* dest,
                      size_t count, ncclDataType_t type, ncclRedOp_t op,
                      hipStream_t stream, bool blocking) {
-  return run_rccl_collective(context, count, type, op, RCCL_CAP_ALL_REDUCE,
-      "ncclAllReduce", stream, blocking,
+  return run_rccl_collective(context, count, type, op,
+      RcclCollective::ALL_REDUCE, stream, blocking,
       [=](ncclComm_t comm) {
         return rccl_ftable.all_reduce(source, dest, count, type, op, comm, stream);
       }) == RcclStatus::SUCCESS;
@@ -719,8 +731,8 @@ bool rccl_all_reduce(RcclCommContext* context, const void* source, void* dest,
 bool rccl_all_reduce(Team* team, Bootstrap* bootstrap, const void* source,
                      void* dest, size_t count, ncclDataType_t type,
                      ncclRedOp_t op, hipStream_t stream, bool blocking) {
-  return run_rccl_collective(team, bootstrap, count, type, op, RCCL_CAP_ALL_REDUCE,
-      "ncclAllReduce", stream, blocking,
+  return run_rccl_collective(team, bootstrap, count, type, op,
+      RcclCollective::ALL_REDUCE, stream, blocking,
       [=](ncclComm_t comm) {
         return rccl_ftable.all_reduce(source, dest, count, type, op, comm, stream);
       }) == RcclStatus::SUCCESS;
@@ -730,8 +742,8 @@ bool rccl_all_reduce(Team* team, Bootstrap* bootstrap, const void* source,
 bool rccl_reduce_scatter(Team* team, Bootstrap* bootstrap, const void* source,
                          void* dest, size_t count, ncclDataType_t type,
                          ncclRedOp_t op, hipStream_t stream, bool blocking) {
-  return run_rccl_collective(team, bootstrap, count, type, op, RCCL_CAP_REDUCE_SCATTER,
-      "ncclReduceScatter", stream, blocking,
+  return run_rccl_collective(team, bootstrap, count, type, op,
+      RcclCollective::REDUCE_SCATTER, stream, blocking,
       [=](ncclComm_t comm) {
         return rccl_ftable.reduce_scatter(source, dest, count, type, op, comm, stream);
       }) == RcclStatus::SUCCESS;

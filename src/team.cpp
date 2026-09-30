@@ -96,9 +96,8 @@ __host__ Team::Team(Backend* handle, const TeamInfo& team_info_wrt_parent,
   }
 #if defined(USE_RCCL)
   if (rccl_eager_init_enabled()) {
-    rccl_context = rccl_comm_context_create();
-    if (!rccl_team_prepare(this, handle->backend_bootstr)) {
-      LOG_WARN("RCCL preparation failed for team; host collectives will use "
+    if (!rccl_team_eager_init(this, handle->backend_bootstr)) {
+      LOG_WARN("RCCL eager initialization failed for team; host collectives will use "
                "the rocSHMEM fallback");
     }
   }

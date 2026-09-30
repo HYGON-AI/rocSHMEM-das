@@ -6,11 +6,14 @@
 
 #include "rocshmem/rocshmem_config.h"
 #include "rocshmem/rocshmem.hpp"
+#include "rocshmem/rocshmem_mpi.hpp"
 
 #if defined(USE_RCCL)
 #include <climits>
 #include <rccl.h>
 #include <type_traits>
+
+#include "rccl_config.hpp"
 
 namespace rocshmem {
 
@@ -53,15 +56,15 @@ struct RcclFunctionTable {
 extern RcclFunctionTable rccl_ftable;
 
 bool rccl_runtime_enabled();
+// Conservative prefilter before allocating or preparing a context.
+bool rccl_size_precheck(RcclCollective collective, size_t bytes);
 bool rccl_eager_init_enabled();
-bool should_use_rccl(size_t bytes);
 RcclCommContext* rccl_comm_context_create();
 void rccl_comm_context_destroy(RcclCommContext* context);
-bool rccl_team_prepare(Team* team, Bootstrap* bootstrap = nullptr);
-bool rccl_team_init(Team* team, Bootstrap* bootstrap = nullptr);
+bool rccl_team_eager_init(Team* team, Bootstrap* bootstrap = nullptr);
 void rccl_team_destroy(Team* team);
-bool rccl_mpi_comm_init(MPI_Comm mpi_comm, int rank, int size,
-                        RcclCommContext* context);
+bool rccl_mpi_comm_init(MPI_Comm mpi_comm, RcclCommContext* context,
+                        RcclCollective collective, size_t bytes);
 bool rccl_check(ncclResult_t result, const char* operation);
 bool rccl_broadcast(Team* team, Bootstrap* bootstrap, const void* source,
                     void* dest, size_t bytes, int root, hipStream_t stream,

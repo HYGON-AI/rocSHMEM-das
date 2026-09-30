@@ -511,7 +511,8 @@ namespace envvar {
     extern const var<bool> disable_mixed_ipc;
     extern const var<bool> disable_ipc;
     extern const var<bool> disable_rccl;
-    extern const var<size_t> rccl_min_size;
+    extern const var<std::string> rccl_min_size_intra;
+    extern const var<std::string> rccl_min_size_inter;
     extern const var<bool> rccl_delay_init;
 
     /**
