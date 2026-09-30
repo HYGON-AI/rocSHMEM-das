@@ -408,6 +408,7 @@ __host__ void HostInterface::barrier(rocshmem_team_t team,
 }
 
 __host__ void HostInterface::barrier_all_on_stream(hipStream_t stream) {
+  CollectiveLauncher::TeamStreamOrder ordered(ROCSHMEM_TEAM_WORLD, stream);
   // Launch kernel to do barrier with given stream
   rocshmem_barrier_all_kernel<<<1, 1, 0, stream>>>();
 }
@@ -419,6 +420,7 @@ __host__ void HostInterface::barrier_on_stream(rocshmem_team_t team,
   if (team == ROCSHMEM_TEAM_INVALID) {
     return;
   }
+  CollectiveLauncher::TeamStreamOrder ordered(team, stream);
   // Launch kernel to do the team-scoped barrier on the given stream.
   rocshmem_barrier_kernel<<<1, 1, 0, stream>>>(team);
 }
@@ -429,6 +431,7 @@ __host__ void HostInterface::quiet_on_stream(hipStream_t stream) {
 }
 
 __host__ void HostInterface::sync_all_on_stream(hipStream_t stream) {
+  CollectiveLauncher::TeamStreamOrder ordered(ROCSHMEM_TEAM_WORLD, stream);
   // Launch kernel to do sync_all with given stream
   rocshmem_sync_all_kernel<<<1, 1, 0, stream>>>();
 }
@@ -440,6 +443,7 @@ __host__ void HostInterface::sync_on_stream(rocshmem_team_t team,
   if (team == ROCSHMEM_TEAM_INVALID) {
     return;
   }
+  CollectiveLauncher::TeamStreamOrder ordered(team, stream);
   // Launch kernel to do the team-scoped sync on the given stream.
   rocshmem_team_sync_kernel<<<1, 1, 0, stream>>>(team);
 }
@@ -449,31 +453,30 @@ __host__ void HostInterface::alltoallmem_on_stream(rocshmem_team_t team,
                                                    const void *source,
                                                    size_t size,
                                                    hipStream_t stream) {
+  CollectiveLauncher::TeamStreamOrder ordered(team, stream);
 #if defined(USE_RCCL)
   Team* team_obj{get_internal_team(team)};
   if (rccl_alltoall(team_obj, host_bootstrap_, source, dest, size, stream))
     return;
 #endif
-  if (CollectiveLauncher::use_single_wg(team, size)) {
-    CollectiveLauncher::enqueue_single_wg<rocshmem_alltoallmem_kernel>(
-        team, dest, source, size, stream);
+
+  if (!CollectiveLauncher::use_single_wg(team, size) &&
+      CollectiveLauncher::enqueue_multi_wg(
+          team, size, stream,
+          [dest, source, size](rocshmem_team_t *dev_wg_teams,
+                                hipStream_t launch_stream, size_t num_wgs) {
+            int nelems = static_cast<int>(size);
+            int threads = std::max(1, envvar::num_threads_on_stream.get_value());
+            rocshmem_alltoall_multi_wg_kernel<char>
+                <<<static_cast<int>(num_wgs), threads, 0, launch_stream>>>(
+                    dev_wg_teams, static_cast<char *>(dest),
+                    static_cast<const char *>(source), nelems);
+          })) {
     return;
   }
-  bool ok = CollectiveLauncher::enqueue_multi_wg(
-      team, size, stream,
-      [dest, source, size](rocshmem_team_t *dev_wg_teams,
-                            hipStream_t launch_stream, size_t num_wgs) {
-        int nelems = static_cast<int>(size);
-        int threads = CollectiveLauncher::kMaxThreads;
-        rocshmem_alltoall_multi_wg_kernel<char>
-            <<<static_cast<int>(num_wgs), threads, 0, launch_stream>>>(
-                dev_wg_teams, static_cast<char *>(dest),
-                static_cast<const char *>(source), nelems);
-      });
-  if (!ok) {
-    CollectiveLauncher::enqueue_single_wg<rocshmem_alltoallmem_kernel>(
-        team, dest, source, size, stream);
-  }
+
+  CollectiveLauncher::enqueue_single_wg<rocshmem_alltoallmem_kernel>(
+      size, stream, 1, team, dest, source, size);
 }
 
 __host__ void HostInterface::broadcastmem_on_stream(rocshmem_team_t team,
@@ -482,6 +485,7 @@ __host__ void HostInterface::broadcastmem_on_stream(rocshmem_team_t team,
                                                     size_t nelems,
                                                     int pe_root,
                                                     hipStream_t stream) {
+  CollectiveLauncher::TeamStreamOrder ordered(team, stream);
 #if defined(USE_RCCL)
   Team* team_obj{get_internal_team(team)};
   if (rccl_broadcast(team_obj, host_bootstrap_, source, dest, nelems, pe_root,
@@ -489,27 +493,24 @@ __host__ void HostInterface::broadcastmem_on_stream(rocshmem_team_t team,
     return;
   }
 #endif
-  if (CollectiveLauncher::use_single_wg(team, nelems)) {
-    CollectiveLauncher::enqueue_single_wg<rocshmem_broadcastmem_kernel>(
-        team, dest, source, nelems, stream, pe_root);
+
+  if (!CollectiveLauncher::use_single_wg(team, nelems) &&
+      CollectiveLauncher::enqueue_multi_wg(
+          team, nelems, stream,
+          [dest, source, pe_root, nelems](rocshmem_team_t *dev_wg_teams,
+                                           hipStream_t launch_stream,
+                                           size_t num_wgs) {
+            const int kThreads = std::max(1, envvar::num_threads_on_stream.get_value());
+            int blocks = static_cast<int>(num_wgs);
+            rocshmem_broadcastmem_multi_wg_kernel
+                <<<blocks, kThreads, 0, launch_stream>>>(
+                    dev_wg_teams, dest, source, nelems, pe_root);
+          })) {
     return;
   }
-
-  bool ok = CollectiveLauncher::enqueue_multi_wg(
-      team, nelems, stream,
-      [dest, source, pe_root, nelems](rocshmem_team_t *dev_wg_teams,
-                                       hipStream_t launch_stream,
-                                       size_t num_wgs) {
-        constexpr int kThreads = CollectiveLauncher::kMaxThreads;
-        int blocks = static_cast<int>(num_wgs);
-        rocshmem_broadcastmem_multi_wg_kernel
-            <<<blocks, kThreads, 0, launch_stream>>>(
-                dev_wg_teams, dest, source, nelems, pe_root);
-      });
-  if (!ok) {
-    CollectiveLauncher::enqueue_single_wg<rocshmem_broadcastmem_kernel>(
-        team, dest, source, nelems, stream, pe_root);
-  }
+  
+  CollectiveLauncher::enqueue_single_wg<rocshmem_broadcastmem_kernel>(
+      nelems, stream, 1, team, dest, source, nelems, pe_root);
 }
 
 __host__ void HostInterface::getmem_on_stream(void *dest, const void *source,

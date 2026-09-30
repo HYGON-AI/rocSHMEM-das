@@ -28,6 +28,8 @@
 #include <hip/hip_runtime.h>
 #include <cstring>
 #include <cassert>
+#include <limits>
+#include <stdexcept>
 #include <vector>
 
 /******************************************************************************
@@ -44,6 +46,12 @@ TeamAlltoallmemOnStreamTester::TeamAlltoallmemOnStreamTester(TesterArguments arg
   } else {
     // Default to number of work groups
     num_teams = args.num_wgs;
+  }
+
+  if (num_teams <= 0 || n_pes <= 0 || args.skip < 0 ||
+      max_msg_size > std::numeric_limits<size_t>::max() /
+                         static_cast<size_t>(n_pes) / static_cast<size_t>(num_teams)) {
+    throw std::runtime_error("invalid test counts or alltoall buffer size overflow");
   }
 
   size_t num_bytes_wg = max_msg_size * static_cast<size_t>(n_pes);
@@ -76,6 +84,9 @@ TeamAlltoallmemOnStreamTester::~TeamAlltoallmemOnStreamTester() {
 }
 
 void TeamAlltoallmemOnStreamTester::preLaunchKernel() {
+  if (n_pes > std::numeric_limits<int>::max() / n_pes) {
+    throw std::runtime_error("alltoall bandwidth factor exceeds the base tester's int limit");
+  }
   bw_factor = n_pes * n_pes;
 
   for (int team_i = 0; team_i < num_teams; team_i++) {
@@ -122,6 +133,9 @@ void TeamAlltoallmemOnStreamTester::postLaunchKernel() {
 }
 
 void TeamAlltoallmemOnStreamTester::resetBuffers(size_t size) {
+  if (size > max_msg_size) {
+    throw std::runtime_error("message size exceeds the allocated test capacity");
+  }
   // Initialize source buffer: each PE fills its portion with its PE number
   // For alltoall, PE i sends block j to PE j
   // Support multiple work groups (teams)
@@ -131,8 +145,8 @@ void TeamAlltoallmemOnStreamTester::resetBuffers(size_t size) {
     for (int pe = 0; pe < n_pes; pe++) {
       // Each block in source buffer is filled with (my_pe * n_pes + pe)
       // This makes it easy to verify correctness
-      int value = my_pe * n_pes + pe;
-      idx = (wg_id * n_pes + pe) * size;
+      const unsigned char value = static_cast<unsigned char>(static_cast<size_t>(my_pe) * n_pes + pe);
+      idx = (static_cast<size_t>(wg_id) * n_pes + pe) * size;
       std::memset(source_buf + idx, value, size);
     }
   }
@@ -152,8 +166,8 @@ void TeamAlltoallmemOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize,
   // Execute warmup iterations (skip)
   for (int i = 0; i < args.skip; i++) {
     for (int wg_id = 0; wg_id < num_teams; wg_id++) {
-      char *wg_source = source_buf + wg_id * n_pes * size;
-      char *wg_dest = dest_buf + wg_id * n_pes * size;
+      char *wg_source = source_buf + static_cast<size_t>(wg_id) * n_pes * size;
+      char *wg_dest = dest_buf + static_cast<size_t>(wg_id) * n_pes * size;
       rocshmem_alltoallmem_on_stream(team_world_dup[wg_id], wg_dest,
                                      wg_source, size, streams[wg_id]);
     }
@@ -170,8 +184,8 @@ void TeamAlltoallmemOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize,
         CHECK_HIP(hipEventRecord(start_events_timed[wg_id], streams[wg_id]));
       }
 
-      char *wg_source = source_buf + wg_id * n_pes * size;
-      char *wg_dest = dest_buf + wg_id * n_pes * size;
+      char *wg_source = source_buf + static_cast<size_t>(wg_id) * n_pes * size;
+      char *wg_dest = dest_buf + static_cast<size_t>(wg_id) * n_pes * size;
       rocshmem_alltoallmem_on_stream(team_world_dup[wg_id], wg_dest,
                                      wg_source, size, streams[wg_id]);
 
@@ -182,8 +196,8 @@ void TeamAlltoallmemOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize,
     }
   }
 
-  num_msgs = (loop + args.skip) * num_teams;
-  num_timed_msgs = loop * num_teams;
+  num_msgs = (static_cast<size_t>(loop) + static_cast<size_t>(args.skip)) * num_teams;
+  num_timed_msgs = static_cast<size_t>(loop) * num_teams;
 }
 
 void TeamAlltoallmemOnStreamTester::verifyResults(size_t size) {
@@ -195,8 +209,8 @@ void TeamAlltoallmemOnStreamTester::verifyResults(size_t size) {
 
   for (int wg_id = 0; wg_id < num_teams; wg_id++) {
     for (int j = 0; j < n_pes; j++) {
-      int expected_value = j * n_pes + my_pe;
-      idx = (wg_id * n_pes + j) * size;
+      const unsigned char expected_value = static_cast<unsigned char>(static_cast<size_t>(j) * n_pes + my_pe);
+      idx = (static_cast<size_t>(wg_id) * n_pes + j) * size;
 
       for (size_t k = 0; k < size; k++) {
         if (static_cast<unsigned char>(dest_buf[idx + k]) !=
@@ -204,8 +218,8 @@ void TeamAlltoallmemOnStreamTester::verifyResults(size_t size) {
           std::cerr << "PE " << my_pe << ": Verification failed for WG "
                     << wg_id << ", block from PE " << j << " at byte " << k
                     << std::endl;
-          std::cerr << "Expected value: " << expected_value
-                    << ", Got: " << static_cast<int>(dest_buf[idx + k])
+          std::cerr << "Expected value: " << static_cast<unsigned int>(expected_value)
+                    << ", Got: " << static_cast<unsigned int>(static_cast<unsigned char>(dest_buf[idx + k]))
                     << std::endl;
           rocshmem_global_exit(1);
         }

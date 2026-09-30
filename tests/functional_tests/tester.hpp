@@ -195,7 +195,10 @@
   X(DefaultCtx_WAVEPutNBI_DP,  200)  \
   X(DefaultCtx_AMO_Add_DP,     201)  \
   X(WAVEPutNBI_DP,             202)  \
-  X(AMO_Add_DP,                203) 
+  X(AMO_Add_DP,                203)  \
+  X(TeamAlltoallvOnStream,     204)  \
+  X(TeamReduceScatterOnStream, 205)  \
+  X(TeamFCollectOnStream,      206)
   
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {

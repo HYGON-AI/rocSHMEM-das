@@ -142,6 +142,23 @@ __host__ int IPCHostContext::reduce_on_stream(rocshmem_team_t team, T *dest,
 }
 
 template <typename T>
+__host__ int IPCHostContext::alltoallv_on_stream(rocshmem_team_t team, T *dest,
+    const size_t dn[], const size_t dd[], T *source, const size_t sn[],
+    const size_t sd[], hipStream_t stream) {
+  return host_interface->alltoallv_on_stream<T>(team, dest, dn, dd, source, sn, sd, stream);
+}
+template <typename T, ROCSHMEM_OP Op>
+__host__ int IPCHostContext::reduce_scatter_on_stream(rocshmem_team_t team,
+    T *dest, const T *source, int nreduce, hipStream_t stream) {
+  return host_interface->reduce_scatter_on_stream<T, Op>(team, dest, source, nreduce, stream);
+}
+template <typename T>
+__host__ int IPCHostContext::fcollect_on_stream(rocshmem_team_t team, T *dest,
+    const T *source, int nelems, hipStream_t stream) {
+  return host_interface->fcollect_on_stream<T>(team, dest, source, nelems, stream);
+}
+
+template <typename T>
 __host__ int IPCHostContext::test(T *ivars, int cmp, T val) {
   if (is_ipc_non_mpi()) {
     host_interface->hdp_flush();

@@ -216,7 +216,9 @@ class Context {
   __device__ int reduce(rocshmem_team_t team, T* dest, const T* source, int nreduce);
 
   template <typename T, ROCSHMEM_OP Op>
-  __device__ int reduce_scatter_wg(rocshmem_team_t team, T* dest, const T* source, int nreduce);
+  __device__ int reduce_scatter_wg(rocshmem_team_t team, T* dest,
+                                   const T* source, int nreduce,
+                                   int elem_offset = 0, int elem_count = -1);
 
   template <typename T>
   __device__ void put(T* dest, const T* source, size_t nelems, int pe);
@@ -240,11 +242,13 @@ class Context {
                             T *dest, const size_t dest_nelems[],
                             const size_t dest_displs[],
                             T *source, const size_t source_nelems[],
-                            const size_t source_displs[]);
+                            const size_t source_displs[], int wg_id = 0,
+                            int wg_count = 1);
 
   template <typename T>
   __device__ void fcollect(rocshmem_team_t team, T* dest, const T* source,
-                           int nelems);
+                           int nelems, int elem_offset = 0,
+                           int elem_count = -1);
 
   template <typename T>
   __device__ void broadcast(rocshmem_team_t team, T* dest, const T* source,
@@ -547,6 +551,23 @@ class Context {
   __host__ void broadcastmem_on_stream(rocshmem_team_t team, void *dest,
                                        const void *source, size_t nelems,
                                        int pe_root, hipStream_t stream);
+
+  template <typename T>
+  __host__ int alltoallv_on_stream(rocshmem_team_t team, T *dest,
+                                   const size_t dest_nelems[],
+                                   const size_t dest_displs[], T *source,
+                                   const size_t source_nelems[],
+                                   const size_t source_displs[], hipStream_t stream);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __host__ int reduce_scatter_on_stream(rocshmem_team_t team, T *dest,
+                                        const T *source, int nreduce,
+                                        hipStream_t stream);
+
+  template <typename T>
+  __host__ int fcollect_on_stream(rocshmem_team_t team, T *dest,
+                                  const T *source, int nelems,
+                                  hipStream_t stream);
 
   __host__ void getmem_on_stream(void *dest, const void *source, size_t nelems,
                                  int pe, hipStream_t stream);

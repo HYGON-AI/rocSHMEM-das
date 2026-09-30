@@ -876,6 +876,13 @@ __host__ int rocshmem_team_split_strided(
                              team_info_wrt_world, size, my_pe_in_new_team,
                              team_comm, new_team);
 
+    if (*new_team == ROCSHMEM_TEAM_INVALID) {
+      if (team_comm != MPI_COMM_NULL && team_comm != static_cast<MPI_Comm>(0)) {
+        mpilib_ftable_.Comm_free(&team_comm);
+      }
+      return ROCSHMEM_ERROR;
+    }
+
     /* Track the newly created team to destroy it in finalize if the user does
      * not */
     backend->team_tracker.track(*new_team);
@@ -1999,6 +2006,63 @@ __host__ int rocshmem_test(T *ivars, int cmp, T val) {
 
 #define FLOAT_REDUCTION_ON_STREAM_GEN_IMP(T, TNAME) REDUCTION_ON_STREAM_IMP_GEN_ARITH(T, TNAME)
 
+int rocshmem_ctx_char_alltoallv_on_stream(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, char *dest, const size_t dn[],
+    const size_t dd[], char *source, const size_t sn[], const size_t sd[],
+    hipStream_t stream) {
+  return get_internal_ctx(ctx)->alltoallv_on_stream<char>(
+      team, dest, dn, dd, source, sn, sd, stream);
+}
+
+int rocshmem_ctx_char_fcollect_on_stream(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, char *dest, const char *source,
+    int nelems, hipStream_t stream) {
+  return get_internal_ctx(ctx)->fcollect_on_stream<char>(
+      team, dest, source, nelems, stream);
+}
+
+#define RS_ON_STREAM_IMP(T, TNAME, OPNAME, OP)                               \
+  int rocshmem_ctx_##TNAME##_##OPNAME##_reduce_scatter_on_stream(            \
+      rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,   \
+      int nreduce, hipStream_t stream) {                                      \
+    return get_internal_ctx(ctx)->reduce_scatter_on_stream<T, OP>(           \
+        team, dest, source, nreduce, stream);                                \
+  }
+
+__host__ int rocshmem_alltoallvmem_on_stream(
+    rocshmem_team_t team, void *dest, const size_t dest_sizes[],
+    const size_t dest_displs[], void *source, const size_t source_sizes[],
+    const size_t source_displs[], hipStream_t stream) {
+  return RocshmemGetFunctionTable()->alltoallvmem_on_stream_fn(
+      team, dest, dest_sizes, dest_displs, source, source_sizes,
+      source_displs, stream);
+}
+
+__host__ int rocshmem_fcollectmem_on_stream(rocshmem_team_t team, void *dest,
+                                           const void *source, size_t size,
+                                           hipStream_t stream) {
+  return RocshmemGetFunctionTable()->fcollectmem_on_stream_fn(
+      team, dest, source, size, stream);
+}
+
+__host__ int rocshmem_reduce_scatter_on_stream(
+    rocshmem_team_t team, void *dest, const void *source, int nreduce,
+    hipStream_t stream, rocshmem_datatype_t datatype,
+    rocshmem_reduce_op_t op) {
+  return RocshmemGetFunctionTable()->reduce_scatter_on_stream_fn(
+      team, dest, source, nreduce, stream, datatype, op);
+}
+#define RS_ON_STREAM_ARITH(T, TNAME)                                          \
+  RS_ON_STREAM_IMP(T, TNAME, sum, ROCSHMEM_SUM)                              \
+  RS_ON_STREAM_IMP(T, TNAME, min, ROCSHMEM_MIN)                              \
+  RS_ON_STREAM_IMP(T, TNAME, max, ROCSHMEM_MAX)                              \
+  RS_ON_STREAM_IMP(T, TNAME, prod, ROCSHMEM_PROD)
+#define RS_ON_STREAM_INT(T, TNAME)                                            \
+  RS_ON_STREAM_ARITH(T, TNAME)                                               \
+  RS_ON_STREAM_IMP(T, TNAME, or, ROCSHMEM_OR)                                \
+  RS_ON_STREAM_IMP(T, TNAME, and, ROCSHMEM_AND)                              \
+  RS_ON_STREAM_IMP(T, TNAME, xor, ROCSHMEM_XOR)
+
 /******************************************************************************
  ************************* Macro Invocation Per Type **************************
  *****************************************************************************/
@@ -2161,6 +2225,12 @@ INT_REDUCTION_ON_STREAM_GEN_IMP(short, short)
 
 FLOAT_REDUCTION_ON_STREAM_GEN_IMP(float, float)
 FLOAT_REDUCTION_ON_STREAM_GEN_IMP(double, double)
+RS_ON_STREAM_INT(short, short)
+RS_ON_STREAM_INT(int, int)
+RS_ON_STREAM_INT(long, long)
+RS_ON_STREAM_INT(long long, longlong)
+RS_ON_STREAM_ARITH(float, float)
+RS_ON_STREAM_ARITH(double, double)
 // clang-format on
 
 }  // namespace rocshmem

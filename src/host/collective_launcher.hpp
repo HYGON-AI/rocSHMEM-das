@@ -9,12 +9,14 @@
 #include <algorithm>
 #include <cstdlib>
 #include <mutex>
+#include <limits>
 #include <unordered_map>
 #include <vector>
 
 #include "rocshmem/rocshmem_COLL.hpp"
 #include "rocshmem/rocshmem.hpp"
 #include "../team.hpp"
+#include "../envvar.hpp"
 #include "../util.hpp"
 
 namespace rocshmem {
@@ -23,10 +25,8 @@ namespace rocshmem {
  * Launches collective kernels on user-supplied streams and manages the
  * duplicate-team resources used by the multi-workgroup path.
  *
- * Single-block collective kernels are launched directly on the user stream so
- * that kernels targeting *different* teams (or different user streams) run
- * concurrently — they synchronize internally via per-team pSync and do not
- * need a shared progress stream.
+ * Calls on the same team are ordered through a completion event. Different
+ * teams retain independent execution on user streams.
  */
 class CollectiveLauncher {
  public:
@@ -64,7 +64,7 @@ class CollectiveLauncher {
 
   /**
    * Enqueue a multi-workgroup collective using one duplicate team per
-   * workgroup. The workgroup count is derived from `message_bytes`.
+   * workgroup. Message size determines the count within configured limits.
    *
    * The caller-supplied `launch` callback receives the device team handles,
    * the stream, and the computed `num_wgs`:
@@ -97,32 +97,19 @@ class CollectiveLauncher {
   }
 
   /**
-   * Compute the workgroup count from the collective message size. Each
-   * workgroup targets roughly kChunkSize bytes, subject to configured limits.
+   * Select one workgroup per chunk, subject to configured WG/team/context limits.
    */
   static size_t compute_num_wgs(size_t message_bytes) {
-    size_t chunk_count = (message_bytes + kChunkSize - 1) / kChunkSize;
-    size_t num_wgs = chunk_count;
-
-    // Optional override: ROCSHMEM_NUM_WGS_ON_STREAM forces a specific workgroup count.
-    // It takes precedence but remains subject to the limits below.
-    if (const char* env_wgs = std::getenv("ROCSHMEM_NUM_WGS_ON_STREAM")) {
-      size_t user_num_wgs = static_cast<size_t>(atoi(env_wgs));
-      if (user_num_wgs > 0) {
-        num_wgs = user_num_wgs;
-      }
-    }
-
-    // Cap by available teams (ROCSHMEM_MAX_NUM_TEAMS env var, default 40).
-    // Leave one configured slot for TEAM_WORLD. The team pool is shared by
-    // all parent teams, so creation can still fail and trigger fallback.
-    const char* env = std::getenv("ROCSHMEM_MAX_NUM_TEAMS");
-    size_t max_teams = env ? static_cast<size_t>(atoi(env)) : 40;
-    if (max_teams > 1) max_teams -= 1;
-    num_wgs = std::min(num_wgs, max_teams);
-    num_wgs = std::min(num_wgs, kMaxParallelWgs);
-    if (num_wgs < 1) num_wgs = 1;
-    return num_wgs;
+    const size_t bytes_per_wg = kBytesPerWg;
+    const size_t chunk_count = message_bytes / bytes_per_wg +
+                              (message_bytes % bytes_per_wg != 0);
+    const size_t configured_wgs = static_cast<size_t>(std::max(1, envvar::max_num_wgs_on_stream.get_value()));
+    // Reserve TEAM_WORLD's slot. The shared team pool can still exhaust,
+    // in which case team creation triggers the single-WG fallback.
+    const size_t max_teams = envvar::max_num_teams.get_value();
+    return std::max(size_t{1}, std::min({chunk_count, configured_wgs,
+                                         max_teams > 1 ? max_teams - 1 : size_t{1},
+                                         envvar::max_num_contexts.get_value()}));
   }
 
   static bool use_single_wg(rocshmem_team_t team, size_t size) {
@@ -132,9 +119,11 @@ class CollectiveLauncher {
     if (size < kMultiBlockThreshold) {
       return true;
     }
-    const char* env_wgs = std::getenv("ROCSHMEM_NUM_WGS_ON_STREAM");
-    return env_wgs != nullptr && atoi(env_wgs) == 1;
+    return compute_num_wgs(size) <= 1;
   }
+
+  // Device counts are deliberately not copied to the host for alltoallv.
+  static constexpr size_t kUnknownWorkBytes = std::numeric_limits<size_t>::max();
 
   /**
    * Common one-block collective path.
@@ -146,39 +135,94 @@ class CollectiveLauncher {
    * preserves the multi-team concurrency that tests like
    * team_alltoallmem_on_stream_tester rely on.
    */
-  template <auto Kernel, typename DestPtr, typename SrcPtr, typename... Args>
-  static void enqueue_single_wg(rocshmem_team_t team, DestPtr dest,
-                                SrcPtr source, size_t size,
-                                hipStream_t stream, Args... args) {
-    int optimal_block_size = 0;
-    int unused_grid_size = 0;
-    CHECK_HIP(hipOccupancyMaxPotentialBlockSize(&unused_grid_size, &optimal_block_size, Kernel, 0, 0));
-
-    int threads = std::min(optimal_block_size, kMaxThreads);
-    if (size < static_cast<size_t>(threads)) {
-      threads = static_cast<int>(size);
+  template <auto Kernel, typename... Args>
+  static void enqueue_single_wg(size_t launch_threads_size,
+                                hipStream_t stream, int min_threads,
+                                Args... args) {
+    const int limit = std::max(1, envvar::num_threads_on_stream.get_value());
+    const int wavefront = wavefront_threads();
+    int threads = limit;
+    if (launch_threads_size < static_cast<size_t>(threads)) {
+      threads = static_cast<int>(launch_threads_size);
     }
-    threads = std::max(threads, 1);
-    Kernel<<<dim3(1), dim3(threads), 0, stream>>>(team, dest, source, size, args...);
+    min_threads = std::clamp(min_threads, 1, limit);
+    threads = std::max(threads, min_threads);
+    threads = std::min(limit, std::max(wavefront,
+                       ((threads + wavefront - 1) / wavefront) * wavefront));
+    Kernel<<<dim3(1), dim3(threads), 0, stream>>>(args...);
     CHECK_HIP(hipGetLastError());
   }
 
-  static constexpr int kMaxThreads = 256;
-  static constexpr size_t kMaxParallelWgs = 32;
-  static constexpr size_t kMultiBlockThreshold = 1024 * 1024;  // 1MB
+  static constexpr size_t kMultiBlockThreshold = 256 * 1024;
+  static constexpr size_t kBytesPerWg = 32 * 1024;
+
+  // Algorithm chunking is independent of launch selection granularity.
   static constexpr size_t kChunkSize = 256 * 1024;
+
+  static int wavefront_threads() {
+    int device_id = 0;
+    CHECK_HIP(hipGetDevice(&device_id));
+    return get_wf_size(device_id);
+  }
 
   struct ParallelResources {
     ~ParallelResources() {
+      if (completion != nullptr) {
+        CHECK_HIP(hipEventDestroy(completion));
+      }
       if (dev_wg_teams != nullptr) {
         hipFree(dev_wg_teams);
       }
     }
 
+    hipEvent_t completion{};
+    bool completion_recorded{};
+
     // Pre-split sub-teams, one per workgroup, for multi-wg kernels.
     std::vector<rocshmem_team_t> wg_teams;
     rocshmem_team_t* dev_wg_teams{};
     size_t uploaded_wg_teams{};
+    // Team capacity is shared globally. Once creation fails for this parent,
+    // use the single-WG fallback until the parent team is destroyed instead
+    // of repeating the same expensive split attempts on every API call.
+    bool wg_team_creation_failed{};
+  };
+
+  // Order on-stream collectives, including barriers and synchronization.
+  // Keep wait, enqueue (including fallback/RCCL), and record atomic on the host.
+  // All PEs must submit collectives on a team in the same logical order.
+  class TeamStreamOrder {
+   public:
+    TeamStreamOrder(rocshmem_team_t team, hipStream_t stream)
+        : lock_(resources_mutex()), stream_(stream),
+          resources_(parallel_resources_for(team)) {
+      hipStreamCaptureStatus capture;
+      CHECK_HIP(hipStreamIsCapturing(stream, &capture));
+      if (capture != hipStreamCaptureStatusNone) {
+        CHECK_HIP(hipErrorStreamCaptureUnsupported);
+      }
+      if (resources_.completion == nullptr) {
+        CHECK_HIP(hipEventCreateWithFlags(&resources_.completion,
+                                          hipEventDisableTiming));
+      }
+      if (resources_.completion_recorded) {
+        // Also safe when a destroyed stream's handle is reused by HIP.
+        CHECK_HIP(hipStreamWaitEvent(stream_, resources_.completion, 0));
+      }
+    }
+
+    ~TeamStreamOrder() {
+      CHECK_HIP(hipEventRecord(resources_.completion, stream_));
+      resources_.completion_recorded = true;
+    }
+
+    TeamStreamOrder(const TeamStreamOrder&) = delete;
+    TeamStreamOrder& operator=(const TeamStreamOrder&) = delete;
+
+   private:
+    std::unique_lock<std::recursive_mutex> lock_;
+    hipStream_t stream_;
+    ParallelResources& resources_;
   };
 
  private:
@@ -209,14 +253,22 @@ class CollectiveLauncher {
 
   /**
    * Ensure sub-teams are created (one per workgroup) and their device
-   * handles are uploaded. Safe to call repeatedly: existing teams are reused,
-   * and device storage is allocated once at the fixed maximum capacity.
+   * handles are uploaded. Existing teams are reused, and device storage is
+   * allocated once at the configured maximum capacity.
    */
   static void ensure_wg_teams(rocshmem_team_t parent_team,
                               size_t team_size, size_t required_num_wgs,
                               ParallelResources& resources) {
-    // Create host-side sub-teams if needed.
+    if (resources.wg_team_creation_failed) {
+      return;
+    }
+
+    // Expansion may fail and destroy existing children. Drain the previous
+    // launch before changing their lifetime, including across user streams.
     if (resources.wg_teams.size() < required_num_wgs) {
+      if (!resources.wg_teams.empty() && resources.completion_recorded) {
+        CHECK_HIP(hipEventSynchronize(resources.completion));
+      }
       resources.wg_teams.resize(required_num_wgs, ROCSHMEM_TEAM_INVALID);
       for (size_t i = 0; i < required_num_wgs; ++i) {
         if (resources.wg_teams[i] == ROCSHMEM_TEAM_INVALID) {
@@ -235,16 +287,18 @@ class CollectiveLauncher {
             }
             resources.wg_teams.resize(0);
             resources.uploaded_wg_teams = 0;
+            resources.wg_team_creation_failed = true;
             return;  // Caller will see an empty team list and may fall back.
           }
         }
       }
     }
-    // Allocate the fixed maximum once. The pointer is never replaced while
-    // asynchronous kernels may reference it, so no device-wide synchronize is
-    // required on the on-stream path.
+    // Environment values are cached, so the capacity stays fixed for the
+    // lifetime of these resources. Outstanding kernels retain a stable pointer.
     if (resources.dev_wg_teams == nullptr) {
-      CHECK_HIP(hipMalloc(&resources.dev_wg_teams, sizeof(rocshmem_team_t) * kMaxParallelWgs));
+      CHECK_HIP(hipMalloc(&resources.dev_wg_teams,
+                         sizeof(rocshmem_team_t) * static_cast<size_t>(
+                             std::max(1, envvar::max_num_wgs_on_stream.get_value()))));
     }
     if (resources.uploaded_wg_teams < required_num_wgs) {
       size_t first = resources.uploaded_wg_teams;

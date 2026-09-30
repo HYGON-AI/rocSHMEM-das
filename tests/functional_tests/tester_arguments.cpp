@@ -214,6 +214,9 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     case RandomAccessTestType:
     case TeamAlltoallmemOnStreamTestType:
     case TeamBroadcastmemOnStreamTestType:
+    case TeamAlltoallvOnStreamTestType:
+    case TeamReduceScatterOnStreamTestType:
+    case TeamFCollectOnStreamTestType:
       min_msg_size = 4;
       break;
     case TeamFCollectTestType:
@@ -311,6 +314,9 @@ void TesterArguments::get_arguments() {
     case TeamCtxSubsetParentInfraTestType:
     // On-stream tests - support any number of PEs
     case TeamAlltoallmemOnStreamTestType:
+    case TeamAlltoallvOnStreamTestType:
+    case TeamReduceScatterOnStreamTestType:
+    case TeamFCollectOnStreamTestType:
     case BarrierAllOnStreamTestType:
     case QuietOnStreamTestType:
     case SyncAllOnStreamTestType:

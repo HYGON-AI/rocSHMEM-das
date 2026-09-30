@@ -310,7 +310,9 @@ __device__ void ROContext::amo_xor(void *dst, T value, int pe) {
 
 template <typename T, ROCSHMEM_OP Op>
 __device__ int ROContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
-                                            const T *source, int nreduce) {
+                                            const T *source, int nreduce,
+                                            [[maybe_unused]] int elem_offset,
+                                            [[maybe_unused]] int elem_count) {
   if (!is_thread_zero_in_block()) {
     __syncthreads();
     return ROCSHMEM_SUCCESS;
@@ -378,13 +380,17 @@ __device__ void ROContext::alltoallv([[maybe_unused]] rocshmem_team_t team,
                                      [[maybe_unused]] T *dest, [[maybe_unused]] const size_t dest_nelems[],
                                      [[maybe_unused]] const size_t dest_displs[],
                                      [[maybe_unused]] T *source, [[maybe_unused]] const size_t source_nelems[],
-                                     [[maybe_unused]] const size_t source_displs[]) {
+                                     [[maybe_unused]] const size_t source_displs[],
+                                     [[maybe_unused]] int wg_id,
+                                     [[maybe_unused]] int wg_count) {
   LOGD_ERROR_ABORT("rocshmem::ipc:alltoallv not implemented");
 }
 
 template <typename T>
 __device__ void ROContext::fcollect(rocshmem_team_t team, T *dest,
-                                    const T *source, int nelems) {
+                                    const T *source, int nelems,
+                                    [[maybe_unused]] int elem_offset,
+                                    [[maybe_unused]] int elem_count) {
   if (!is_thread_zero_in_block()) {
     __syncthreads();
     return;

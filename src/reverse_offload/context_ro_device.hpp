@@ -99,7 +99,8 @@ class ROContext : public Context {
 
   template <typename T, ROCSHMEM_OP Op>
   __device__ int reduce_scatter_wg(rocshmem_team_t team, T *dest, const T *source,
-                                   int nreduce);
+                                   int nreduce, int elem_offset = 0,
+                                   int elem_count = -1);
 
   template <typename T>
   __device__ void put(T *dest, const T *source, size_t nelems, int pe);
@@ -168,11 +169,13 @@ class ROContext : public Context {
                             T *dest, const size_t dest_nelems[],
                             const size_t dest_displs[],
                             T *source, const size_t source_nelems[],
-                            const size_t source_displs[]);
+                            const size_t source_displs[], int wg_id = 0,
+                            int wg_count = 1);
 
   template <typename T>
   __device__ void fcollect(rocshmem_team_t team, T *dest, const T *source,
-                           int nelems);
+                           int nelems, int elem_offset = 0,
+                           int elem_count = -1);
 
   __device__ void putmem_wg(void *dest, const void *source, size_t nelems,
                             int pe);

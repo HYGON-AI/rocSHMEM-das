@@ -484,6 +484,7 @@ __host__ int HostInterface::reduce_on_stream(rocshmem_team_t team,
                                               int nreduce,
                                               hipStream_t stream)
 {
+  CollectiveLauncher::TeamStreamOrder ordered(team, stream);
 #if defined(USE_RCCL)
   Team* team_obj{get_internal_team(team)};
   if (rccl_all_reduce<T, Op>(team_obj, host_bootstrap_, source, dest, nreduce,
@@ -492,35 +493,135 @@ __host__ int HostInterface::reduce_on_stream(rocshmem_team_t team,
   }
 #endif
   size_t byte_count = static_cast<size_t>(nreduce) * sizeof(T);
-  if (CollectiveLauncher::use_single_wg(team, byte_count)) {
-    // Small-message path: one-block reduce kernel.
-    CollectiveLauncher::enqueue_single_wg<rocshmem_reduce_on_stream_kernel<T, Op>>(
-        team, dest, source, static_cast<size_t>(nreduce), stream);
+  if (!CollectiveLauncher::use_single_wg(team, byte_count) &&
+      CollectiveLauncher::enqueue_multi_wg(
+          team, byte_count, stream,
+          [dest, source, nreduce](rocshmem_team_t *dev_wg_teams,
+                                   hipStream_t launch_stream, size_t num_wgs) {
+            size_t chunk_bytes = CollectiveLauncher::kChunkSize;
+            size_t elems_per_chunk = chunk_bytes / sizeof(T);
+            if (elems_per_chunk == 0) elems_per_chunk = 1;
+            const int kThreads = std::max(1, envvar::num_threads_on_stream.get_value());
+            int blocks = static_cast<int>(num_wgs);
+            rocshmem_reduce_on_stream_multi_wg_kernel<T, Op>
+                <<<blocks, kThreads, 0, launch_stream>>>(
+                    dev_wg_teams, dest, source, nreduce, elems_per_chunk);
+          })) {
     return hipGetLastError();
   }
 
-  // Large-message path: split contiguous elements across workgroups.
-  bool ok = CollectiveLauncher::enqueue_multi_wg(
-      team, byte_count, stream,
-      [dest, source, nreduce](rocshmem_team_t *dev_wg_teams,
-                               hipStream_t launch_stream, size_t num_wgs) {
-        size_t chunk_bytes = CollectiveLauncher::kChunkSize;
-        size_t elems_per_chunk = chunk_bytes / sizeof(T);
-        if (elems_per_chunk == 0) elems_per_chunk = 1;
-        size_t actual_chunk_count =
-            (static_cast<size_t>(nreduce) + elems_per_chunk - 1) /
-            elems_per_chunk;
-        constexpr int kThreads = CollectiveLauncher::kMaxThreads;
-        int blocks = static_cast<int>(num_wgs);
-        rocshmem_reduce_on_stream_multi_wg_kernel<T, Op>
-            <<<blocks, kThreads, 0, launch_stream>>>(
-                dev_wg_teams, dest, source, nreduce, elems_per_chunk,
-                actual_chunk_count);
-      });
-  if (!ok) {
-    CollectiveLauncher::enqueue_single_wg<rocshmem_reduce_on_stream_kernel<T, Op>>(
-        team, dest, source, static_cast<size_t>(nreduce), stream);
+  CollectiveLauncher::enqueue_single_wg<rocshmem_reduce_on_stream_kernel<T, Op>>(
+      static_cast<size_t>(nreduce), stream, 1, team, dest, source,
+      static_cast<size_t>(nreduce));
+  return hipGetLastError();
+}
+
+template <typename T>
+__host__ int HostInterface::alltoallv_on_stream(
+    rocshmem_team_t team, T *dest, const size_t dest_nelems[],
+    const size_t dest_displs[], T *source, const size_t source_nelems[],
+    const size_t source_displs[], hipStream_t stream) {
+  CollectiveLauncher::TeamStreamOrder ordered(team, stream);
+#if defined(USE_RCCL)
+  Team* team_obj{get_internal_team(team)};
+  if (rccl_alltoallv(team_obj, host_bootstrap_, source, source_nelems,
+                     source_displs, dest, dest_nelems, dest_displs, stream)) {
+    return ROCSHMEM_SUCCESS;
   }
+#endif
+
+  // Counts reside in device memory, so the host cannot derive the actual
+  // message size without synchronizing. Default to the maximum parallel
+  // launch allowed by ROCSHMEM_MAX_NUM_WGS_ON_STREAM and resource limits.
+  const size_t launch_bytes = CollectiveLauncher::kUnknownWorkBytes;
+  if (!CollectiveLauncher::use_single_wg(team, launch_bytes) &&
+      CollectiveLauncher::enqueue_multi_wg(
+          team, launch_bytes, stream,
+          [dest, dest_nelems, dest_displs, source, source_nelems,
+           source_displs](rocshmem_team_t *dev_wg_teams,
+                           hipStream_t launch_stream, size_t num_wgs) {
+            const int threads = std::max(1, envvar::num_threads_on_stream.get_value());
+            rocshmem_alltoallv_on_stream_multi_wg_kernel<T>
+                <<<static_cast<int>(num_wgs), threads, 0, launch_stream>>>(
+                    dev_wg_teams, dest, dest_nelems, dest_displs, source,
+                    source_nelems, source_displs);
+          })) {
+    return hipGetLastError();
+  }
+
+  CollectiveLauncher::enqueue_single_wg<
+      rocshmem_alltoallv_on_stream_kernel<T>>(
+      std::max(1, envvar::num_threads_on_stream.get_value()), stream,
+      CollectiveLauncher::wavefront_threads(), team, dest, dest_nelems,
+      dest_displs, source, source_nelems, source_displs);
+  return hipGetLastError();
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__host__ int HostInterface::reduce_scatter_on_stream(
+    rocshmem_team_t team, T *dest, const T *source, int nreduce,
+    hipStream_t stream) {
+  CollectiveLauncher::TeamStreamOrder ordered(team, stream);
+#if defined(USE_RCCL)
+  Team* team_obj{get_internal_team(team)};
+  if (rccl_reduce_scatter<T, Op>(team_obj, host_bootstrap_, source, dest,
+                                 nreduce, stream)) {
+    return ROCSHMEM_SUCCESS;
+  }
+#endif
+
+  size_t byte_count = static_cast<size_t>(nreduce) * sizeof(T);
+  if (!CollectiveLauncher::use_single_wg(team, byte_count) &&
+      CollectiveLauncher::enqueue_multi_wg(
+          team, byte_count, stream,
+          [dest, source, nreduce](rocshmem_team_t *dev_wg_teams,
+                                  hipStream_t launch_stream, size_t num_wgs) {
+            const int threads = std::max(1, envvar::num_threads_on_stream.get_value());
+            rocshmem_reduce_scatter_on_stream_multi_wg_kernel<T, Op>
+                <<<static_cast<int>(num_wgs), threads, 0, launch_stream>>>(
+                    dev_wg_teams, dest, source, nreduce);
+          })) {
+    return hipGetLastError();
+  }
+
+  CollectiveLauncher::enqueue_single_wg<
+      rocshmem_reduce_scatter_on_stream_kernel<T, Op>>(
+      static_cast<size_t>(nreduce), stream,
+      CollectiveLauncher::wavefront_threads(), team, dest, source, nreduce);
+  return hipGetLastError();
+}
+
+template <typename T>
+__host__ int HostInterface::fcollect_on_stream(rocshmem_team_t team, T *dest,
+                                               const T *source, int nelems,
+                                               hipStream_t stream) {
+  CollectiveLauncher::TeamStreamOrder ordered(team, stream);
+#if defined(USE_RCCL)
+  Team* team_obj{get_internal_team(team)};
+  if (rccl_all_gather(team_obj, host_bootstrap_, source, dest, nelems,
+                      stream)) {
+    return ROCSHMEM_SUCCESS;
+  }
+#endif
+
+  size_t byte_count = static_cast<size_t>(nelems) * sizeof(T);
+  if (!CollectiveLauncher::use_single_wg(team, byte_count) &&
+      CollectiveLauncher::enqueue_multi_wg(
+          team, byte_count, stream,
+          [dest, source, nelems](rocshmem_team_t *dev_wg_teams,
+                                 hipStream_t launch_stream, size_t num_wgs) {
+            const int threads = std::max(1, envvar::num_threads_on_stream.get_value());
+            rocshmem_fcollect_on_stream_multi_wg_kernel<T>
+                <<<static_cast<int>(num_wgs), threads, 0, launch_stream>>>(
+                    dev_wg_teams, dest, source, nelems);
+          })) {
+    return hipGetLastError();
+  }
+  
+  CollectiveLauncher::enqueue_single_wg<
+      rocshmem_fcollect_on_stream_kernel<T>>(
+      static_cast<size_t>(nelems), stream,
+      CollectiveLauncher::wavefront_threads(), team, dest, source, nelems);
   return hipGetLastError();
 }
 

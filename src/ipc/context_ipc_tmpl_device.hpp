@@ -460,13 +460,15 @@ __device__ int IPCContext::reduce(rocshmem_team_t team, T *dest,
 /* Reduce-scatter through wave-parallel peer PUTs into team scratch. */
 template <typename T, ROCSHMEM_OP Op>
 __device__ int IPCContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
-                                             const T *source, int nreduce) {
+                                             const T *source, int nreduce,
+                                             int elem_offset, int elem_count) {
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
 
   const int pe_size = team_obj->tinfo_wrt_world->size;
   const int pe_start = team_obj->tinfo_wrt_world->pe_start;
   const int stride = team_obj->tinfo_wrt_world->stride;
   const int team_rank = (constmem.my_pe - pe_start) / stride;
+
   T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
   long *pSync = team_obj->reduce_pSync;
   const int thread_id = get_flat_block_id();
@@ -481,21 +483,23 @@ __device__ int IPCContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
   // and its own dest/source buffers, so all WGs run the collective in
   // parallel without any cross-WG serialisation.
 
-  const int n_chunks = (nreduce + chunk_size - 1) / chunk_size;
+  if (elem_count < 0) elem_count = nreduce;
+  const int num_chunks = (elem_count + chunk_size - 1) / chunk_size;
 
   // Reserve one generation per chunk. Reusing a generation within a call lets
   // a previous chunk's data/ack flag satisfy the next chunk's wait early.
   if (is_thread_zero_in_block()) {
-    pSync[2 * pe_size] += n_chunks;
+    pSync[2 * pe_size] += num_chunks;
   }
   __syncthreads();
-  const int64_t first_flag = pSync[2 * pe_size] - n_chunks + 1;
+  const int64_t first_flag = pSync[2 * pe_size] - num_chunks + 1;
 
+  const int range_end = elem_offset + elem_count;
   int chunk_index = 0;
-  for (int offset = 0; offset < nreduce;
+  for (int offset = elem_offset; offset < range_end;
        offset += chunk_size, ++chunk_index) {
     const int64_t flag_val = first_flag + chunk_index;
-    const int count = min(chunk_size, nreduce - offset);
+    const int count = min(chunk_size, range_end - offset);
 
     // ------------------------------------------------------------------
     // Phase 1: send block-[remote_rank] to every peer.  Wave-level
@@ -830,7 +834,8 @@ __device__ void IPCContext::alltoallv([[maybe_unused]] rocshmem_team_t team,
                                       [[maybe_unused]] T *dest, [[maybe_unused]] const size_t dest_nelems[],
                                       [[maybe_unused]] const size_t dest_displs[],
                                       [[maybe_unused]] T *source, [[maybe_unused]] const size_t source_nelems[],
-                                      [[maybe_unused]] const size_t source_displs[]) {
+                                      [[maybe_unused]] const size_t source_displs[],
+                                      int wg_id, int wg_count) {
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
   const int pe_size = team_obj->num_pes;
   const int my_rank = team_obj->my_pe;
@@ -849,16 +854,31 @@ __device__ void IPCContext::alltoallv([[maybe_unused]] rocshmem_team_t team,
               dest_displs[rank] == static_cast<size_t>(rank) * uniform_count;
   }
   if (uniform) {
-    alltoall(team, dest, source, static_cast<int>(uniform_count));
+    // Uniform alltoallv is exactly alltoall. Split its per-peer element range
+    // across duplicate teams so single- and multi-WG launches share the same
+    // optimized alltoall implementation.
+    const int total = static_cast<int>(uniform_count);
+    size_t elem_offset = 0;
+    size_t elem_count = 0;
+    split_wg_range(uniform_count, wg_id, wg_count, &elem_offset, &elem_count);
+    alltoall(team, dest, source, total, elem_offset, elem_count);
     return;
   }
 
-  // source_nelems/displs describe the block sent to each destination.  The
-  // matching destination displacement is indexed by the sender rank.
-  for (int remote_rank = wave_id; remote_rank < pe_size; remote_rank += num_waves) {
+  // Every WG runs the same alltoallv algorithm over all peers, restricted to
+  // its own slice of each peer's element range.  wg_id=0,wg_count=1 naturally
+  // covers the complete single-WG operation.
+  for (int remote_rank = wave_id; remote_rank < pe_size;
+       remote_rank += num_waves) {
+    const size_t total = source_nelems[remote_rank];
+    size_t elem_offset = 0;
+    size_t elem_count = 0;
+    split_wg_range(total, wg_id, wg_count, &elem_offset, &elem_count);
+    if (elem_count == 0) continue;
     const int pe = team_obj->get_pe_in_world(remote_rank);
-    const size_t count = source_nelems[remote_rank];
-    put_nbi_wave(dest + dest_displs[my_rank], source + source_displs[remote_rank], count, pe);
+    put_nbi_wave(dest + dest_displs[my_rank] + elem_offset,
+                 source + source_displs[remote_rank] + elem_offset,
+                 elem_count, pe);
   }
 
   internal_sync_wg(constmem.my_pe,
@@ -970,13 +990,15 @@ __device__ void IPCContext::alltoall_linear_thread_puts(rocshmem_team_t team,
 
 template <typename T>
 __device__ void IPCContext::fcollect(rocshmem_team_t team, T *dst,
-                                     const T *src, int nelems) {
-  fcollect_linear(team, dst, src, nelems);
+                                     const T *src, int nelems,
+                                     int elem_offset, int elem_count) {
+  fcollect_linear(team, dst, src, nelems, elem_offset, elem_count);
 }
 
 template <typename T>
 __device__ void IPCContext::fcollect_linear(rocshmem_team_t team, T *dst,
-                                            const T *src, int nelems) {
+                                            const T *src, int nelems,
+                                            int elem_offset, int elem_count) {
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
 
   int pe_start = team_obj->tinfo_wrt_world->pe_start;
@@ -985,9 +1007,10 @@ __device__ void IPCContext::fcollect_linear(rocshmem_team_t team, T *dst,
   long *pSync = team_obj->alltoall_pSync;
   int my_pe_in_team = team_obj->my_pe;
 
+  if (elem_count < 0) elem_count = nelems;
   // pipeline chunking for large messages
   constexpr int CHUNK_NELEMS = ROCSHMEM_CHUNK_BYTES / sizeof(T);
-  const bool use_pipeline = (nelems > CHUNK_NELEMS);
+  const bool use_pipeline = (elem_count > CHUNK_NELEMS);
 
   int wf_id = get_flat_block_id() / WF_SIZE;
   int wf_count = (get_flat_block_size() + WF_SIZE - 1) / WF_SIZE;
@@ -995,17 +1018,18 @@ __device__ void IPCContext::fcollect_linear(rocshmem_team_t team, T *dst,
   if (!use_pipeline) {
     for (int j = wf_id; j < pe_size; j += wf_count) {
       int dest_pe = team_obj->get_pe_in_world(j);
-      put_nbi_wave(&dst[my_pe_in_team * nelems], src, nelems, dest_pe);
+      put_nbi_wave(&dst[my_pe_in_team * nelems + elem_offset],
+                   src + elem_offset, elem_count, dest_pe);
     }
   } else {
-    for (int c_start = 0; c_start < nelems; c_start += CHUNK_NELEMS) {
-      int c_end = min(c_start + CHUNK_NELEMS, nelems);
+    for (int c_start = 0; c_start < elem_count; c_start += CHUNK_NELEMS) {
+      int c_end = min(c_start + CHUNK_NELEMS, elem_count);
       int c_nelems = c_end - c_start;
 
       for (int j = wf_id; j < pe_size; j += wf_count) {
         int dest_pe = team_obj->get_pe_in_world(j);
-        put_nbi_wave(&dst[my_pe_in_team * nelems + c_start],
-                     &src[c_start],
+        put_nbi_wave(&dst[my_pe_in_team * nelems + elem_offset + c_start],
+                     &src[elem_offset + c_start],
                      c_nelems, dest_pe);
       }
     }

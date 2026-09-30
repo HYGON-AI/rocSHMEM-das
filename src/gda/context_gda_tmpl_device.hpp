@@ -811,7 +811,8 @@ __device__ int GDAContext::reduce(rocshmem_team_t team, T *dest,
  */
 template <typename T, ROCSHMEM_OP Op>
 __device__ int GDAContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
-                                             const T *source, int nreduce) {
+                                             const T *source, int nreduce,
+                                             int elem_offset, int elem_count) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
   int PE_size = team_obj->tinfo_wrt_world->size;
   int PE_start = team_obj->tinfo_wrt_world->pe_start;
@@ -822,12 +823,14 @@ __device__ int GDAContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
   const int local_size = constmem.ipc_shm_size;
   int local_target_pe{-1};
   const bool has_ipc = ipcImpl_.isIpcAvailable(my_pe, my_pe, &local_target_pe);
+  if (elem_count < 0) elem_count = nreduce;
   const bool use_hybrid = has_ipc && local_size > 1 && stride == 1 &&
       constmem.ipc_stride == 1 && PE_start % local_size == 0 &&
       PE_size > local_size && PE_size % local_size == 0 && nreduce > 1024;
 
   if (use_hybrid) {
     return hybrid_reduce_scatter_wg<T, Op>(team_obj, dest, source, nreduce,
+                                           elem_offset, elem_count,
                                            PE_start, stride, PE_size, team_rank);
   }
 
@@ -838,14 +841,14 @@ __device__ int GDAContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
   int wg_size = get_flat_block_size();
   int pWrk_elems = static_cast<int>(ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double) / sizeof(T));
   int chunk_size = max(1, pWrk_elems / PE_size);
-  int n_chunks = (nreduce + chunk_size - 1) / chunk_size;
+  int n_chunks = (elem_count + chunk_size - 1) / chunk_size;
   int64_t flag_val = 1;
   int finish = PE_start + stride * PE_size;
 
   // pWrk holds one incoming contribution per PE, so process large inputs in chunks.
   for (int c = 0; c < n_chunks; c++) {
-    int offset = c * chunk_size;
-    int count = min(chunk_size, nreduce - offset);
+    int offset = elem_offset + c * chunk_size;
+    int count = min(chunk_size, elem_offset + elem_count - offset);
 
     // Seed this PE's output block with its local contribution.
     for (int j = wg_id; j < count; j += wg_size) {
@@ -911,12 +914,15 @@ __device__ int GDAContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
  *
  * The caller must provide a contiguous team composed of equally sized IPC
  * islands. Concurrent workgroups must use distinct team-owned pWrk/pSync and
- * input/output buffers. All threads in the workgroup must participate.
+ * non-overlapping output ranges. Source blocks retain their full nreduce
+ * stride; each workgroup processes only its assigned element range.
+ * All threads in the workgroup must participate.
  */
 template <typename T, ROCSHMEM_OP Op>
 __device__ int GDAContext::hybrid_reduce_scatter_wg(
     GDATeam *team_obj, T *dest, const T *source, int nreduce,
-    int PE_start, int stride, int PE_size, int team_rank) {
+    int elem_offset, int elem_count, int PE_start, int stride, int PE_size,
+    int team_rank) {
 
   const int local_size = constmem.ipc_shm_size;
   const int local_slot = ipcImpl_.shm_rank;
@@ -929,15 +935,23 @@ __device__ int GDAContext::hybrid_reduce_scatter_wg(
   const int tid = get_flat_block_id();
   const int wg_size = get_flat_block_size();
   const int scratch_elems = static_cast<int>(ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double) / sizeof(T));
-  const int chunk_size = max(1, scratch_elems / num_nodes);
+  const int scratch_chunk_size = max(1, scratch_elems / num_nodes);
+  // Bound the aggregate burst when multiple WGs partition one collective.
+  // Full-range device collectives retain their existing chunk size.
+  constexpr int partition_chunk_bytes = 64 * 1024;
+  constexpr int partition_chunk_elems = partition_chunk_bytes / static_cast<int>(sizeof(T));
+  const int chunk_size =  min(scratch_chunk_size, max(1, partition_chunk_elems));
   rocshmem_team_t team = reinterpret_cast<rocshmem_team_t>(team_obj);
 
   const int left_node = (node_id - 1 + num_nodes) % num_nodes;
   const int right_node = (node_id + 1) % num_nodes;
   const int right_pe = PE_start + (right_node * local_size + local_slot) * stride;
 
-  for (int offset = 0; offset < nreduce; offset += chunk_size) {
-    const int count = min(chunk_size, nreduce - offset);
+  // Iterate relative to the assigned range, keeping source PE-block strides
+  // and destination offsets in the original collective's coordinates.
+  for (int processed = 0; processed < elem_count;) {
+    const int offset = elem_offset + processed;
+    const int count = min(chunk_size, elem_count - processed);
 
     // Stage 1: slot s reduces, through IPC, one output block per node.  The
     // num_nodes partial blocks form this slot's input to the node-level ring.
@@ -1011,6 +1025,7 @@ __device__ int GDAContext::hybrid_reduce_scatter_wg(
       __syncthreads();
       barrier_wg(team);
     }
+    processed += count;
   }
 
   return ROCSHMEM_SUCCESS;
@@ -1336,7 +1351,8 @@ __device__ void GDAContext::alltoallv(rocshmem_team_t team,
                                       T *dest, const size_t dest_nelems[],
                                       const size_t dest_displs[],
                                       T *source, const size_t source_nelems[],
-                                      const size_t source_displs[]) {
+                                      const size_t source_displs[],
+                                      int wg_id, int wg_count) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
   const int pe_size = team_obj->num_pes;
   const size_t nelems = source_nelems[0];
@@ -1350,26 +1366,32 @@ __device__ void GDAContext::alltoallv(rocshmem_team_t team,
   }
 
   if (regular_layout) {
-    alltoall(team, dest, source, static_cast<int>(nelems), 0,
-             static_cast<int>(nelems));
+    size_t elem_offset = 0;
+    size_t elem_count = 0;
+    split_wg_range(nelems, wg_id, wg_count, &elem_offset, &elem_count);
+    alltoall(team, dest, source, static_cast<int>(nelems),
+             static_cast<int>(elem_offset), static_cast<int>(elem_count));
     return;
   }
 
   if (constmem.alltoall_wg_algo == gda::ALLTOALLV_WG_ALGO_COPY) {
     alltoallv_copy(team,
                    dest, dest_nelems, dest_displs,
-                   source, source_nelems, source_displs);
+                   source, source_nelems, source_displs,
+                   wg_id, wg_count);
   } else {
     alltoallv_get(team,
                   dest, dest_nelems, dest_displs,
-                  source, source_nelems, source_displs);
+                  source, source_nelems, source_displs,
+                  wg_id, wg_count);
   }
 }
 
 template <typename T>
 __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
     const size_t dest_nelems[], const size_t dest_displs[], T *source,
-    const size_t source_nelems[], const size_t source_displs[]) {
+    const size_t source_nelems[], const size_t source_displs[],
+    int wg_id, int wg_count) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
   int pe_size = team_obj->num_pes;
   long *pSync = team_obj->alltoall_pSync;
@@ -1384,15 +1406,19 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
   int step_size = min(get_flat_block_size(), WF_SIZE);
 
   // Have each PE put their designated data to the other PEs
-  for (int j = tid; j < pe_size; j+= step_size) {
+  for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
     int qp_index = get_team_qp_index(team_obj, dest_pe);
     uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
-    size_t nelems = source_nelems[dest_pe] * sizeof(T);
+    const size_t total = source_nelems[j];
+    size_t elem_offset = 0;
+    size_t elem_count = 0;
+    split_wg_range(total, wg_id, wg_count, &elem_offset, &elem_count);
+    size_t nelems = elem_count * sizeof(T);
     char* amo_dst = ((char*)&pSync[alltoall_pSync_offset + my_pe_in_team] + base_heap_offset);
 
     if (nelems != 0) {
-      T* src = (T*)((char*)source + (source_displs[j] * sizeof(T)));
+      T* src = source + source_displs[j] + elem_offset;
       T* dst = (T*)((char*)&tmp_buf[constmem.my_pe * tmp_buf_off] + base_heap_offset);
       put_nbi_shared_qp(qp_index, dst, src, nelems, false);
     }
@@ -1401,7 +1427,7 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
   }
 
   // wait until everyone has obtained their designated data
-  for (int j = tid; j < pe_size; j+= step_size) {
+  for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
     int qp_index = get_team_qp_index(team_obj, dest_pe);
 
@@ -1416,13 +1442,17 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
   __syncthreads();
 
   for (int j = 0; j < pe_size; j++) {
-    size_t nelems = dest_nelems[j] * sizeof(T);
+      const size_t total = dest_nelems[j];
+      size_t elem_offset = 0;
+      size_t elem_count = 0;
+      split_wg_range(total, wg_id, wg_count, &elem_offset, &elem_count);
+      size_t nelems = elem_count * sizeof(T);
 
-    if (nelems != 0) {
-      T* dst = (T*)((char*) dest + dest_displs[j] * sizeof(T));
-      T* src = (T*)((char*) &tmp_buf[j * tmp_buf_off]);
-      memcpy_wg<MemcpyKind::Put>(dst, src, nelems);
-    }
+      if (nelems != 0) {
+        T* dst = dest + dest_displs[j] + elem_offset;
+        T* src = (T*)((char*) &tmp_buf[j * tmp_buf_off]);
+        memcpy_wg<MemcpyKind::Put>(dst, src, nelems);
+      }
   }
 
   __syncthreads();
@@ -1435,8 +1465,9 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
 
 template <typename T>
 __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
-    [[maybe_unused]] const size_t dest_nelems[], const size_t dest_displs[], T *source,
-    [[maybe_unused]] const size_t source_nelems[], const size_t source_displs[]) {
+    const size_t dest_nelems[], const size_t dest_displs[], T *source,
+    const size_t source_nelems[], const size_t source_displs[],
+    int wg_id, int wg_count) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
   int pe_size = team_obj->num_pes;
   long *pSync = team_obj->alltoall_pSync;
@@ -1454,7 +1485,7 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
   int step_size = min(get_flat_block_size(), WF_SIZE);
 
   /* Phase 1: publish displacement control messages to every peer. */
-  for (int j = tid; j < pe_size; j+= step_size) {
+  for (int j = tid; j < pe_size; j += step_size) {
     uint64_t *src;
     uint64_t *dst;
     uint64_t seq_bits;
@@ -1466,7 +1497,11 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
 
     /* Pack Ctrl Message * 16 bits seq | 48bit displ */
     seq_bits = (seq_mask & (a2a_sn + 1)) << seq_shift;
-    displ_bits = (displs_mask & source_displs[dest_pe]);
+    const size_t send_total = source_nelems[j];
+    size_t send_offset = 0;
+    [[maybe_unused]] size_t send_count = 0;
+    split_wg_range(send_total, wg_id, wg_count, &send_offset, &send_count);
+    displ_bits = (displs_mask & (source_displs[j] + send_offset));
     uint64_t ctrl_msg = seq_bits | displ_bits;
 
     /* Prepare Ctrl Message */
@@ -1496,13 +1531,20 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
     } while (seq_bits != ((a2a_sn + 1) & seq_mask));
 
     /* Get data */
-    size_t nelems = dest_nelems[dest_pe] * sizeof(T);
-    uint64_t *src = (uint64_t*)((char*)source +
-                               (displ_bits * sizeof(T)) + base_heap_offset);
-    uint64_t *dst = (uint64_t*)((char*)dest +
-                               (dest_displs[j] * sizeof(T)));
+    const size_t recv_total = dest_nelems[j];
+    size_t recv_offset = 0;
+    size_t recv_count = 0;
+    split_wg_range(recv_total, wg_id, wg_count, &recv_offset, &recv_count);
+    size_t nelems = recv_count * sizeof(T);
+    const void *src = reinterpret_cast<const char *>(source) +
+                      (displ_bits * sizeof(T)) + base_heap_offset;
+    void *dst = dest + dest_displs[j] + recv_offset;
 
-    get_nbi_shared_qp(qp_index, dst, src, nelems);
+    // Most workgroups have an empty slice for small variable-count messages.
+    // They still signal completion, but must not submit a zero-byte GET.
+    if (nelems != 0) {
+      get_nbi_shared_qp(qp_index, dst, src, nelems);
+    }
 
     /* Put Completion */
     char* amo_dst = ((char*)&pSync[alltoall_pSync_offset + my_pe_in_team] + base_heap_offset);
@@ -1547,17 +1589,22 @@ __device__ void GDAContext::alltoall_linear(rocshmem_team_t team, T *dst,
   int wf_count = (int) ceil((double)get_flat_block_size() / (double)WF_SIZE);
 
   ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
-  // Have each PE put their designated data to the other PEs
-  for (int j = wf_id; j < pe_size; j+= wf_count) {
-    int dest_pe = team_obj->get_pe_in_world(j);
-    internal_putmem_nbi_wave(&dst[my_pe_in_team * nelems + elem_offset],
-      &src[j * nelems + elem_offset],
-      elem_count * sizeof(T), dest_pe, dest_pe, wf_info);
-  }
+  // Empty slices still participate in the team synchronization below, but
+  // must not submit a zero-byte RDMA operation. alltoallv_on_stream may launch
+  // more workgroups than elements because its counts reside in device memory.
+  if (elem_count > 0) {
+    // Have each PE put their designated data to the other PEs.
+    for (int j = wf_id; j < pe_size; j+= wf_count) {
+      int dest_pe = team_obj->get_pe_in_world(j);
+      internal_putmem_nbi_wave(&dst[my_pe_in_team * nelems + elem_offset],
+        &src[j * nelems + elem_offset],
+        elem_count * sizeof(T), dest_pe, dest_pe, wf_info);
+    }
 
-  for (int j = wf_id; j < pe_size; j+= wf_count) {
-    int dest_pe = team_obj->get_pe_in_world(j);
-    internal_quiet(dest_pe, wf_info);
+    for (int j = wf_id; j < pe_size; j+= wf_count) {
+      int dest_pe = team_obj->get_pe_in_world(j);
+      internal_quiet(dest_pe, wf_info);
+    }
   }
 
   // wait until everyone has obtained their designated data
@@ -1626,13 +1673,15 @@ __device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team,
 
 template <typename T>
 __device__ void GDAContext::fcollect(rocshmem_team_t team, T *dst,
-                                     const T *src, int nelems) {
-  fcollect_linear(team, dst, src, nelems);
+                                     const T *src, int nelems,
+                                     int elem_offset, int elem_count) {
+  fcollect_linear(team, dst, src, nelems, elem_offset, elem_count);
 }
 
 template <typename T>
 __device__ void GDAContext::fcollect_linear(rocshmem_team_t team, T *dst,
-                                            const T *src, int nelems) {
+                                            const T *src, int nelems,
+                                            int elem_offset, int elem_count) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
 
   int pe_start = team_obj->tinfo_wrt_world->pe_start;
@@ -1640,17 +1689,20 @@ __device__ void GDAContext::fcollect_linear(rocshmem_team_t team, T *dst,
   int stride = team_obj->tinfo_wrt_world->stride;
   long *pSync = team_obj->alltoall_pSync;
   int my_pe_in_team = team_obj->my_pe;
+  if (elem_count < 0) elem_count = nelems;
 
   ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
 
-  if (pe_size >= 4 && static_cast<size_t>(nelems) * sizeof(T) >= kHierarchicalMinBytes) {
+  if (pe_size >= 4 &&
+      static_cast<size_t>(elem_count) * sizeof(T) >= kHierarchicalMinBytes) {
     // FCollect is a concatenation of one broadcast per source rank.  Reusing
     // the hierarchical broadcast path makes each source cross a node boundary
     // once, followed by IPC fan-out inside the destination node, instead of
     // sending the same source segment independently to every remote PE.
     for (int rank = 0; rank < pe_size; rank++) {
       const int root = team_obj->get_pe_in_world(rank);
-      internal_broadcast(dst + rank * nelems, src, nelems, root, pe_start, stride, pe_size, pSync);
+      internal_broadcast(dst + rank * nelems + elem_offset, src + elem_offset,
+                         elem_count, root, pe_start, stride, pe_size, pSync);
     }
     return;
   }
@@ -1658,8 +1710,9 @@ __device__ void GDAContext::fcollect_linear(rocshmem_team_t team, T *dst,
   // Small messages avoid the extra two synchronization phases per source.
   for (int rank = 0; rank < pe_size; rank++) {
     int dest_pe = team_obj->get_pe_in_world(rank);
-    internal_putmem_nbi_wg(&dst[my_pe_in_team * nelems], src,
-                           nelems * sizeof(T), dest_pe, dest_pe, wf_info);
+    internal_putmem_nbi_wg(&dst[my_pe_in_team * nelems + elem_offset],
+                           src + elem_offset, elem_count * sizeof(T),
+                           dest_pe, dest_pe, wf_info);
   }
 
   if (is_thread_zero_in_block()) {

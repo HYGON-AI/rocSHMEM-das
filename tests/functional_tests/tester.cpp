@@ -32,7 +32,6 @@
 #include <iostream>
 #include <rocshmem/rocshmem.hpp>
 #include <vector>
-#include "../src/envvar.hpp"
 
 #include "amo_bitwise_tester.hpp"
 #include "host_rma_tester.hpp"
@@ -59,6 +58,9 @@
 #include "team_alltoallv_tester.hpp"
 #include "team_alltoallmem_on_stream_tester.hpp"
 #include "team_broadcastmem_on_stream_tester.hpp"
+#include "team_alltoallv_on_stream_tester.hpp"
+#include "team_reduce_scatter_on_stream_tester.hpp"
+#include "team_fcollect_on_stream_tester.hpp"
 #include "team_barrier_tester.hpp"
 #include "team_broadcast_tester.hpp"
 #include "team_ctx_infra_tester.hpp"
@@ -166,14 +168,17 @@ Tester::Tester(TesterArguments args) : args(args) {
         max_msg_size = args.max_volume_size / args.num_wgs;
         break;
       case TeamReduceScatterTestType:
+      case TeamReduceScatterOnStreamTestType:
       case TeamFCollectTestType:
+      case TeamFCollectOnStreamTestType:
       case CollectTestType:
-        max_msg_size = (!rocshmem::envvar::align_bw_with_rccl.get_value())  ? (args.max_volume_size / args.num_wgs) 
+        max_msg_size = (!rocshmem::envvar::align_bw_with_rccl.get_value())  ? (args.max_volume_size / args.num_wgs)
                        : (args.max_volume_size / args.num_wgs / args.numprocs);
         break;
       case TeamAllToAllTestType:
       case TeamAllToAllvTestType:
       case TeamAlltoallmemOnStreamTestType:
+      case TeamAlltoallvOnStreamTestType:
         max_msg_size = args.max_volume_size / args.num_wgs / args.numprocs;
         break;
       default:
@@ -357,6 +362,18 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case TeamAlltoallmemOnStreamTestType:
       test_name = "Alltoallmem_On_Stream";
       testers.push_back(new TeamAlltoallmemOnStreamTester(args));
+      break;
+    case TeamAlltoallvOnStreamTestType:
+      test_name = "Alltoallv_On_Stream";
+      testers.push_back(new TeamAlltoallvOnStreamTester(args));
+      break;
+    case TeamReduceScatterOnStreamTestType:
+      test_name = "Reduce_Scatter_On_Stream";
+      testers.push_back(new TeamReduceScatterOnStreamTester(args));
+      break;
+    case TeamFCollectOnStreamTestType:
+      test_name = "FCollect_On_Stream";
+      testers.push_back(new TeamFcollectOnStreamTester(args));
       break;
     case BarrierAllOnStreamTestType:
       test_name = "Barrier_All_On_Stream";
@@ -1054,6 +1071,9 @@ bool Tester::peLaunchesKernel() {
     case TeamWAVEBarrierTestType:
     case TeamWGBarrierTestType:
     case TeamAlltoallmemOnStreamTestType:
+    case TeamAlltoallvOnStreamTestType:
+    case TeamReduceScatterOnStreamTestType:
+    case TeamFCollectOnStreamTestType:
     case BarrierAllOnStreamTestType:
     case QuietOnStreamTestType:
     case SyncAllOnStreamTestType:
@@ -1145,6 +1165,8 @@ bool Tester::AlignBwWithRccl(TesterArguments args, uint64_t size, double time_us
 
     case TeamFCollectTestType:      // AllGather
     case TeamReduceScatterTestType:
+    case TeamFCollectOnStreamTestType:
+    case TeamReduceScatterOnStreamTestType:
       params.size_factor = args.numprocs;
       params.volume_factor = args.numprocs;
       params.bus_factor = static_cast<double>(args.numprocs - 1) / args.numprocs;
@@ -1153,6 +1175,7 @@ bool Tester::AlignBwWithRccl(TesterArguments args, uint64_t size, double time_us
     case TeamAllToAllTestType:
     case TeamAllToAllvTestType:
     case TeamAlltoallmemOnStreamTestType:
+    case TeamAlltoallvOnStreamTestType:
       params.size_factor = args.numprocs;
       params.volume_factor = args.numprocs;
       params.bus_factor = static_cast<double>(args.numprocs - 1) / args.numprocs;
