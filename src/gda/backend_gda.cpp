@@ -1902,6 +1902,7 @@ void GDABackend::select_gid_index(NicDevice &nic) {
   const char* userGid = std::getenv("ROCSHMEM_IB_GID_INDEX");
   if (userGid) {
       nic.gid_index = atoi(userGid);
+      nic.gid_type = gid_entries[nic.gid_index].gid_type;
       ibv.query_gid(nic.context, nic.port, nic.gid_index, &nic.gid);
   }
 
