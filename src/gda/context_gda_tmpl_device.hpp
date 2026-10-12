@@ -47,7 +47,7 @@ template <typename T>
 __device__ void GDAContext::p(T *dest, T value, int pe) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
-    long L_offset{reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank]};
+    long L_offset{reinterpret_cast<char *>(dest) - reinterpret_cast<const char *>(constmem.heap_base)};
     ipcImpl_.ipcCopy<MemcpyKind::Put>(ipcImpl_.ipc_bases[local_pe] + L_offset, reinterpret_cast<void *>(&value), sizeof(T), local_pe);
     return;
   }
@@ -70,7 +70,7 @@ __device__ T GDAContext::g(const T *source, int pe) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
     const char *src_typed{reinterpret_cast<const char *>(source)};
-    long L_offset{const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank]};
+    long L_offset{const_cast<char *>(src_typed) - reinterpret_cast<const char *>(constmem.heap_base)};
     ipcImpl_.ipcCopy<MemcpyKind::Get>(&ret, ipcImpl_.ipc_bases[local_pe] + L_offset, sizeof(T), local_pe);
     return ret;
   }

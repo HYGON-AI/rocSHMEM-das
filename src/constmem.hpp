@@ -26,6 +26,7 @@
 #define LIBRARY_SRC_CONSTMEM_HPP_
 
 #include <array>
+#include <cstdint>
 
 #include "gda/gda_enums.hpp"
 #include "rocshmem/rocshmem_common.hpp"
@@ -42,6 +43,7 @@ struct constmem_t {
   int ipc_first_pe;
   int ipc_stride;    // 0 = pattern invalid (use fallback linear scan)
   int ipc_shm_size;
+  uintptr_t heap_base;  // Local symmetric heap base
 } __attribute__ ((aligned (16)));
 
 extern __constant__ constmem_t constmem;
