@@ -1901,7 +1901,12 @@ void GDABackend::select_gid_index(NicDevice &nic) {
   nic.gid       = selected_gid;
   const char* userGid = std::getenv("ROCSHMEM_IB_GID_INDEX");
   if (userGid) {
-      nic.gid_index = atoi(userGid);
+      int gid_index = atoi(userGid);
+      if (gid_index < 0 || gid_index >= gid_tbl_entries) {
+        LOG_ERROR_EXIT("ROCSHMEM_IB_GID_INDEX=%d is out of range [0, %zd)", gid_index, gid_tbl_entries);
+      }
+      nic.gid_index = gid_index;
+      nic.gid_type = gid_entries[nic.gid_index].gid_type;
       ibv.query_gid(nic.context, nic.port, nic.gid_index, &nic.gid);
   }
 
