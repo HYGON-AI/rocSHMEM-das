@@ -66,7 +66,7 @@ control the behavior of rocSHMEM.
       - | Minimum size for using RCCL. Accepts bytes or ``interface:size`` pairs
         | separated by commas; K/M/G use powers of 1024.
         | Unset uses the listed policy; omitted interfaces in a supplied policy
-        | use ``default`` (4 MiB if omitted). Alltoallv ignores thresholds.
+        | use ``default`` (1 MiB if omitted). Alltoallv ignores thresholds.
 
     * - | ``ROCSHMEM_RCCL_MIN_SIZE_INTER``
         | RCCL thresholds for collectives spanning nodes.

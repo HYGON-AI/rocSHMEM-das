@@ -18,7 +18,7 @@
 namespace rocshmem {
 namespace {
 
-constexpr uint64_t kDefaultRcclMinSize = 4ULL * 1024 * 1024;
+constexpr uint64_t kDefaultRcclMinSize = 1ULL * 1024 * 1024;
 
 std::string trim(std::string value) {
   const auto first = value.find_first_not_of(" \t\r\n");
@@ -143,7 +143,7 @@ ParsedRcclMinSizePolicy parse_min_size_policy(const std::string& value, const ch
   if (policy.find(':') == std::string::npos &&
       policy.find(',') == std::string::npos) {
     if (!parse_size(policy, &result.default_size)) {
-      LOG_WARN("Invalid %s value '%s'; using 4M",
+      LOG_WARN("Invalid %s value '%s'; using 1M",
                name, policy.c_str());
     }
     return result;
