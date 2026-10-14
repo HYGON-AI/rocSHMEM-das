@@ -47,6 +47,7 @@
 namespace rocshmem {
 
 class RcclCommContext;
+enum class RcclCollective : size_t;
 
 class HostContextWindowInfo {
  public:
@@ -345,7 +346,9 @@ class HostInterface {
   __host__ MPI_Comm get_mpi_comm(int pe_start, int log_pe_stride, int pe_size);
 
 #if defined(USE_RCCL)
-  __host__ RcclCommContext* get_rccl_comm(MPI_Comm mpi_comm, size_t bytes);
+  __host__ RcclCommContext* get_rccl_comm(MPI_Comm mpi_comm,
+                                          RcclCollective collective,
+                                          size_t bytes);
 #endif
 
   __host__ MPI_Op get_mpi_op(ROCSHMEM_OP Op);

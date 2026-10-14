@@ -30,4 +30,5 @@ target_sources(
   PRIVATE
     host.cpp
     rccl.cpp
+    rccl_config.cpp
 )

@@ -221,8 +221,11 @@ __host__ HostInterface::~HostInterface() {
 
 #if defined(USE_RCCL)
 __host__ RcclCommContext* HostInterface::get_rccl_comm(MPI_Comm mpi_comm,
+                                                       RcclCollective collective,
                                                        size_t bytes) {
-  if (mpi_comm == MPI_COMM_NULL || !should_use_rccl(bytes)) return nullptr;
+  if (mpi_comm == MPI_COMM_NULL || !rccl_size_precheck(collective, bytes)) {
+    return nullptr;
+  }
   RcclCommContext* context = nullptr;
   {
     std::lock_guard<std::mutex> lock(rccl_comm_map_mutex_);
@@ -232,11 +235,7 @@ __host__ RcclCommContext* HostInterface::get_rccl_comm(MPI_Comm mpi_comm,
     }
     context = entry->second;
   }
-  int rank = 0;
-  int size = 0;
-  mpilib_ftable_.Comm_rank(mpi_comm, &rank);
-  mpilib_ftable_.Comm_size(mpi_comm, &size);
-  if (!rccl_mpi_comm_init(mpi_comm, rank, size, context)) return nullptr;
+  if (!rccl_mpi_comm_init(mpi_comm, context, collective, bytes)) return nullptr;
   return context;
 }
 #endif

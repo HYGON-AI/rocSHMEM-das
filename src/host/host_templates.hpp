@@ -204,7 +204,7 @@ __host__ void HostInterface::broadcast(T* dest, const T* source, int nelems,
 
 #if defined(USE_RCCL)
   const size_t bytes = static_cast<size_t>(nelems) * sizeof(T);
-  RcclCommContext* rccl_comm = get_rccl_comm(mpi_comm, bytes);
+  RcclCommContext* rccl_comm = get_rccl_comm(mpi_comm, RcclCollective::BROADCAST, bytes);
   if (rccl_broadcast(rccl_comm, source, dest, bytes, pe_root, nullptr, true)) {
     return;
   }
@@ -409,7 +409,7 @@ __host__ void HostInterface::to_all(T* dest, const T* source, int nreduce,
   const size_t bytes = static_cast<size_t>(nreduce) * sizeof(T);
   RcclCommContext* rccl_comm =
       rccl_type != ncclNumTypes && rccl_op != ncclNumOps
-          ? get_rccl_comm(mpi_comm, bytes)
+          ? get_rccl_comm(mpi_comm, RcclCollective::ALL_REDUCE, bytes)
           : nullptr;
   if (rccl_all_reduce(rccl_comm, source, dest, nreduce, rccl_type, rccl_op, nullptr, true)) {
     return;

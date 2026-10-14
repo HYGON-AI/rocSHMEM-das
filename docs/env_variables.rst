@@ -60,6 +60,19 @@ control the behavior of rocSHMEM.
       - ``40``
       - Maximum number of teams.
 
+    * - | ``ROCSHMEM_RCCL_MIN_SIZE_INTRA``
+        | RCCL thresholds for collectives within one node.
+      - ``default:64K,alltoall:4K,broadcast:16K,fcollect:16K,allreduce:2K,reduce_scatter:8K``
+      - | Minimum size for using RCCL. Accepts bytes or ``interface:size`` pairs
+        | separated by commas; K/M/G use powers of 1024.
+        | Unset uses the listed policy; omitted interfaces in a supplied policy
+        | use ``default`` (1 MiB if omitted). Alltoallv ignores thresholds.
+
+    * - | ``ROCSHMEM_RCCL_MIN_SIZE_INTER``
+        | RCCL thresholds for collectives spanning nodes.
+      - ``default:1M,alltoall:32K,broadcast:4M,fcollect:64K,allreduce:8K,reduce_scatter:32K``
+      - | Same syntax as INTRA. Selected automatically when the team spans nodes.
+
     * - | ``ROCSHMEM_BACKEND``
         | When rocSHMEM is compiled for all backends, this environment variable
         | selects which backend to execute. The default value is an empty string and rocSHMEM auto-selects the most appropriate backend.
