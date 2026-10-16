@@ -192,13 +192,13 @@
   X(HostWaitUntilAnyStatus,    147)  \
   X(HostWaitUntilSomeStatus,   148)  \
   X(TeamReduceScatter,         149)  \
-  X(DefaultCtx_WAVEPutNBI_DP,  200)  \
-  X(DefaultCtx_AMO_Add_DP,     201)  \
-  X(WAVEPutNBI_DP,             202)  \
-  X(AMO_Add_DP,                203)  \
-  X(TeamAlltoallvOnStream,     204)  \
-  X(TeamReduceScatterOnStream, 205)  \
-  X(TeamFCollectOnStream,      206)
+  X(DefaultCtx_WAVEPutNBI_DP,  500)  \
+  X(DefaultCtx_AMO_Add_DP,     501)  \
+  X(WAVEPutNBI_DP,             502)  \
+  X(AMO_Add_DP,                503)  \
+  X(TeamAlltoallvOnStream,     504)  \
+  X(TeamReduceScatterOnStream, 505)  \
+  X(TeamFCollectOnStream,      506)
   
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {

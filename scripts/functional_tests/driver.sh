@@ -13,7 +13,7 @@ else
 fi
 
 # This names/values should match the TestType enum in rocSHMEM/tests/functional_tests/tester.hpp
-# Self-developed test cases start from 200 to avoid community conflicts.
+# Self-developed test cases start from 500 to avoid community conflicts.
 declare -A TEST_NUMBERS=(
   ["get"]="0"
   ["getnbi"]="1"
@@ -166,10 +166,13 @@ declare -A TEST_NUMBERS=(
   ["host_wait_until_some_status"]="148"
   ["teamreducescatter"]="149"
 
-  ["defaultctx_waveputnbi_dp"]="200"
-  ["defaultctx_amo_add_dp"]="201"
-  ["waveputnbi_dp"]="202"
-  ["amo_add_dp"]="203"
+  ["defaultctx_waveputnbi_dp"]="500"
+  ["defaultctx_amo_add_dp"]="501"
+  ["waveputnbi_dp"]="502"
+  ["amo_add_dp"]="503"
+  ["alltoallv_on_stream"]="504"
+  ["reduce_scatter_on_stream"]="505"
+  ["fcollect_on_stream"]="506"
 )
 
 # Detect which runtime to use
@@ -1060,9 +1063,12 @@ TestPerfColl() {
   ExecPerfTest  "teambroadcast"           $RANKS       $MAX_MESSAGE_SIZE
   ExecPerfTest  "fcollect"                $RANKS       $MAX_MESSAGE_SIZE
   ExecPerfTest  "teamreduction"           $RANKS       $MAX_MESSAGE_SIZE
+  ExecPerfTest  "teamreducescatter"       $RANKS       $MAX_MESSAGE_SIZE
   ExecPerfTest  "alltoallmem_on_stream"   $RANKS       $MAX_MESSAGE_SIZE
   ExecPerfTest  "broadcastmem_on_stream"  $RANKS       $MAX_MESSAGE_SIZE
-  ExecPerfTest  "teamreducescatter"       $RANKS       $MAX_MESSAGE_SIZE
+  ExecPerfTest  "alltoallv_on_stream"     $RANKS       $MAX_MESSAGE_SIZE
+  ExecPerfTest  "reduce_scatter_on_stream"  $RANKS     $MAX_MESSAGE_SIZE
+  ExecPerfTest  "fcollect_on_stream"      $RANKS       $MAX_MESSAGE_SIZE
   ExecPerfTest  "reduce_on_stream"        $RANKS       $MAX_MESSAGE_SIZE
 }
 
