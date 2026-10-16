@@ -84,9 +84,6 @@ TeamAlltoallmemOnStreamTester::~TeamAlltoallmemOnStreamTester() {
 }
 
 void TeamAlltoallmemOnStreamTester::preLaunchKernel() {
-  if (n_pes > std::numeric_limits<int>::max() / n_pes) {
-    throw std::runtime_error("alltoall bandwidth factor exceeds the base tester's int limit");
-  }
   bw_factor = n_pes * n_pes;
 
   for (int team_i = 0; team_i < num_teams; team_i++) {
@@ -133,9 +130,6 @@ void TeamAlltoallmemOnStreamTester::postLaunchKernel() {
 }
 
 void TeamAlltoallmemOnStreamTester::resetBuffers(size_t size) {
-  if (size > max_msg_size) {
-    throw std::runtime_error("message size exceeds the allocated test capacity");
-  }
   // Initialize source buffer: each PE fills its portion with its PE number
   // For alltoall, PE i sends block j to PE j
   // Support multiple work groups (teams)

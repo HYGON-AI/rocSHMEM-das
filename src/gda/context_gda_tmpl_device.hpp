@@ -910,7 +910,8 @@ __device__ int GDAContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
  * Hierarchical reduce-scatter for teams spanning multiple IPC islands.
  * Each local slot first reduces matching source blocks from its IPC peers
  * into pWrk, then matching slots exchange and reduce those partial blocks
- * through an inter-node ring. Large ring blocks are striped over two rails.
+ * through an inter-node ring. Each ring transfer uses one QP and at most
+ * 64 KiB of payload.
  *
  * The caller must provide a contiguous team composed of equally sized IPC
  * islands. Concurrent workgroups must use distinct team-owned pWrk/pSync and
@@ -936,11 +937,10 @@ __device__ int GDAContext::hybrid_reduce_scatter_wg(
   const int wg_size = get_flat_block_size();
   const int scratch_elems = static_cast<int>(ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double) / sizeof(T));
   const int scratch_chunk_size = max(1, scratch_elems / num_nodes);
-  // Bound the aggregate burst when multiple WGs partition one collective.
-  // Full-range device collectives retain their existing chunk size.
-  constexpr int partition_chunk_bytes = 64 * 1024;
-  constexpr int partition_chunk_elems = partition_chunk_bytes / static_cast<int>(sizeof(T));
-  const int chunk_size =  min(scratch_chunk_size, max(1, partition_chunk_elems));
+  // Limit each ring transfer to 64 KiB to avoid a large-message performance drop.
+  constexpr int max_chunk_bytes = 64 * 1024;
+  constexpr int max_chunk_elems = max_chunk_bytes / static_cast<int>(sizeof(T));
+  const int chunk_size = min(scratch_chunk_size, max(1, max_chunk_elems));
   rocshmem_team_t team = reinterpret_cast<rocshmem_team_t>(team_obj);
 
   const int left_node = (node_id - 1 + num_nodes) % num_nodes;
@@ -969,40 +969,12 @@ __device__ int GDAContext::hybrid_reduce_scatter_wg(
       const size_t send_bytes = static_cast<size_t>(count) * sizeof(T);
       const int signal_qp = get_qp_index(right_pe, wf_info);
 
-      // Stripe large blocks across at most two rails.
-      constexpr size_t min_bytes_per_rail = 128 * 1024;
-      constexpr uint32_t max_collective_rails = 2;
-      uint32_t rails = static_cast<uint32_t>((send_bytes + min_bytes_per_rail - 1) / min_bytes_per_rail);
-      rails = max(1U, min(rails, min(num_qps_per_pe, max_collective_rails)));
-
-      if (rails == 1) {
-        internal_putmem_nbi_wg(dest + offset,
-                               p_wrk + send_idx * chunk_size, send_bytes,
-                               right_pe, signal_qp, wf_info);
-      } else if (is_thread_zero_in_block()) {
-        const size_t rail_bytes = (send_bytes + rails - 1) / rails;
-        const uint64_t remote_offset = reinterpret_cast<char *>(dest + offset) - base_heap[constmem.my_pe];
-        const char *send_src = reinterpret_cast<const char *>(p_wrk + send_idx * chunk_size);
-        for (uint32_t rail = 0; rail < rails; ++rail) {
-          const size_t begin = static_cast<size_t>(rail) * rail_bytes;
-          if (begin >= send_bytes) break;
-          const size_t length = min(rail_bytes, send_bytes - begin);
-          const uint32_t qp_row = (static_cast<uint32_t>(blockIdx.x) + rail) % num_qps_per_pe;
-          const uint32_t qp_index = qp_row * constmem.num_pes + right_pe;
-          qps[qp_index].put_nbi(base_heap[right_pe] + remote_offset + begin,
-                                send_src + begin, length, wf_info);
-        }
-        for (uint32_t rail = 0; rail < rails; ++rail) {
-          const size_t begin = static_cast<size_t>(rail) * rail_bytes;
-          if (begin >= send_bytes) break;
-          const uint32_t qp_row = (static_cast<uint32_t>(blockIdx.x) + rail) % num_qps_per_pe;
-          const uint32_t qp_index = qp_row * constmem.num_pes + right_pe;
-          qps[qp_index].quiet(wf_info);
-        }
-      }
+      internal_putmem_nbi_wg(dest + offset,
+                             p_wrk + send_idx * chunk_size, send_bytes,
+                             right_pe, signal_qp, wf_info);
       __syncthreads();
       if (is_thread_zero_in_block()) {
-        // Publish ready only after every payload rail completes.
+        // The payload and ready signal use the same QP.
         const int64_t ready = 1;
         internal_putmem(p_sync + node_id, &ready, sizeof(*p_sync), right_pe, signal_qp, wf_info);
         wait_until(p_sync + left_node, ROCSHMEM_CMP_EQ, 1L);
@@ -1375,10 +1347,8 @@ __device__ void GDAContext::alltoallv(rocshmem_team_t team,
   }
 
   if (constmem.alltoall_wg_algo == gda::ALLTOALLV_WG_ALGO_COPY) {
-    alltoallv_copy(team,
-                   dest, dest_nelems, dest_displs,
-                   source, source_nelems, source_displs,
-                   wg_id, wg_count);
+    alltoallv_copy(team, dest, dest_nelems, dest_displs, source, source_nelems,
+                   source_displs, wg_id, wg_count);
   } else {
     alltoallv_get(team,
                   dest, dest_nelems, dest_displs,
@@ -1405,6 +1375,22 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
   int tid = get_flat_block_id();
   int step_size = min(get_flat_block_size(), WF_SIZE);
 
+  if (tid == 0) {
+    for (int j = 0; j < pe_size; j++) {
+      size_t offset = 0;
+      size_t count = 0;
+      split_wg_range(source_nelems[j], wg_id, wg_count, &offset, &count);
+      if (count > static_cast<size_t>(tmp_buf_off)) {
+        LOGD_ERROR_ABORT("GDA alltoallv COPY source exceeds pWrk slot");
+      }
+      split_wg_range(dest_nelems[j], wg_id, wg_count, &offset, &count);
+      if (count > static_cast<size_t>(tmp_buf_off)) {
+        LOGD_ERROR_ABORT("GDA alltoallv COPY destination exceeds pWrk slot");
+      }
+    }
+  }
+  __syncthreads();
+
   // Have each PE put their designated data to the other PEs
   for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
@@ -1419,7 +1405,7 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
 
     if (nelems != 0) {
       T* src = source + source_displs[j] + elem_offset;
-      T* dst = (T*)((char*)&tmp_buf[constmem.my_pe * tmp_buf_off] + base_heap_offset);
+      T* dst = (T*)((char*)&tmp_buf[my_pe_in_team * tmp_buf_off] + base_heap_offset);
       put_nbi_shared_qp(qp_index, dst, src, nelems, false);
     }
 
@@ -1431,7 +1417,7 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
     int dest_pe = team_obj->get_pe_in_world(j);
     int qp_index = get_team_qp_index(team_obj, dest_pe);
 
-    long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
+    long *sync_flags = &pSync[alltoall_pSync_offset + j];
     while (uncached_load(sync_flags) < completion_count) { }
 
     qps[qp_index].quiet_single();
@@ -1557,7 +1543,7 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
   for (int j = tid; j < pe_size; j+= step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
     int qp_index = get_team_qp_index(team_obj, dest_pe);
-    long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
+    long *sync_flags = &pSync[alltoall_pSync_offset + j];
     while (uncached_load(sync_flags) < completion_count) { }
 
     qps[qp_index].quiet_single();
