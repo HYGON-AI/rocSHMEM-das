@@ -48,12 +48,6 @@ TeamAlltoallmemOnStreamTester::TeamAlltoallmemOnStreamTester(TesterArguments arg
     num_teams = args.num_wgs;
   }
 
-  if (num_teams <= 0 || n_pes <= 0 || args.skip < 0 ||
-      max_msg_size > std::numeric_limits<size_t>::max() /
-                         static_cast<size_t>(n_pes) / static_cast<size_t>(num_teams)) {
-    throw std::runtime_error("invalid test counts or alltoall buffer size overflow");
-  }
-
   size_t num_bytes_wg = max_msg_size * static_cast<size_t>(n_pes);
   size_t total_bytes = num_bytes_wg * static_cast<size_t>(num_teams);
   buf_size = total_bytes;
