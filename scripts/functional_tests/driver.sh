@@ -1138,11 +1138,7 @@ ExecPerfTest() {
      && [[ $test_name != "getmem_on_stream" ]]; then
     wg_options=(1)
     thread_options=(64)
-    max_msg_size=1073741824
-
-    if [[ $test_name == "alltoallmem_on_stream" ]]; then
-      max_msg_size=$((1073741824 / num_ranks))
-    fi
+    max_msg_size="v1073741824"
   fi
   
   declare -A best_latency
