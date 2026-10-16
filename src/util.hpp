@@ -45,6 +45,17 @@ namespace rocshmem {
 #define LIKELY(X)   __builtin_expect(X, 1)
 #define UNLIKELY(X) __builtin_expect(X, 0)
 
+/** Split [0, total) into contiguous, balanced ranges across workgroups. */
+__device__ inline void split_wg_range(size_t total, int wg_id, int wg_count,
+                                      size_t *offset, size_t *count) {
+  const size_t workers = static_cast<size_t>(wg_count);
+  const size_t worker = static_cast<size_t>(wg_id);
+  const size_t base = total / workers;
+  const size_t remainder = total % workers;
+  *count = base + (worker < remainder ? 1 : 0);
+  *offset = worker * base + (worker < remainder ? worker : remainder);
+}
+
 /**
  * @name CHECK_NNULL
  * @brief Checks if value is NOT null. If it is null print errno and exit the program.

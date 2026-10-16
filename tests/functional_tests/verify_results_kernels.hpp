@@ -25,6 +25,9 @@
 #ifndef _VERIFY_RESULTS_KERNELS_HPP_
 #define _VERIFY_RESULTS_KERNELS_HPP_
 
+#include <hip/hip_runtime.h>
+#include <stdexcept>
+
 namespace rocshmem {
 
 [[maybe_unused]] static __global__ void verify_results_kernel_char(
@@ -54,6 +57,113 @@ namespace rocshmem {
   }
 }
 
+namespace collective_verifier {
+
+template <typename T>
+struct VerificationResult {
+  unsigned int failed{};
+  size_t index{};
+  T expected{};
+  T actual{};
+};
+
+using Result = VerificationResult<unsigned int>;
+using IntResult = VerificationResult<int>;
+
+[[maybe_unused]] static __global__ void verifyIntKernel(
+    const int *buffer, size_t count, int expected, IntResult *result) {
+  const size_t step = static_cast<size_t>(gridDim.x) * blockDim.x;
+  for (size_t i = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+       i < count;) {
+    const int actual = buffer[i];
+    if (actual != expected) {
+      if (atomicCAS(&result->failed, 0U, 1U) == 0U) {
+        result->index = i;
+        result->expected = expected;
+        result->actual = actual;
+      }
+      return;
+    }
+    if (count - i <= step) break;
+    i += step;
+  }
 }
+
+// Each grid row checks one sender's segment, including nonuniform layouts.
+[[maybe_unused]] static __global__ void verifyCharKernel(const char *buffer, size_t uniform_bytes,
+                                    const size_t *counts, const size_t *displs,
+                                    size_t sender_base, size_t pattern_stride, size_t pattern_bias,
+                                    Result *result) {
+  const size_t sender = sender_base + blockIdx.y;
+  const size_t count = counts ? counts[sender] : uniform_bytes;
+  const size_t offset = displs ? displs[sender] : sender * uniform_bytes;
+  const unsigned char expected = static_cast<unsigned char>(sender * pattern_stride + pattern_bias);
+  const size_t step = static_cast<size_t>(gridDim.x) * blockDim.x;
+  for (size_t i = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+       i < count;) {
+    const unsigned char actual = static_cast<unsigned char>(buffer[offset + i]);
+    if (actual != expected) {
+      if (atomicCAS(&result->failed, 0U, 1U) == 0U) {
+        result->index = offset + i;
+        result->expected = expected;
+        result->actual = actual;
+      }
+      return;
+    }
+    if (count - i <= step) break;
+    i += step;
+  }
+}
+
+// The caller synchronizes the collective before verification. Only the small
+// error record is copied back; all payload reads stay on the GPU.
+[[maybe_unused]] static Result verifyChar(const char *buffer, size_t uniform_bytes, int n_pes,
+                     const size_t *counts, const size_t *displs,
+                     size_t pattern_stride, size_t pattern_bias,
+                     hipStream_t stream) {
+  const auto check = [](hipError_t status) {
+    if (status != hipSuccess) throw std::runtime_error(hipGetErrorString(status));
+  };
+  Result *device_result = nullptr;
+  check(hipMalloc(&device_result, sizeof(Result)));
+  check(hipMemsetAsync(device_result, 0, sizeof(Result), stream));
+  // Batch teams larger than grid.y's limit.
+  for (size_t sender = 0; sender < static_cast<size_t>(n_pes); sender += 65535) {
+    const unsigned int rows = static_cast<unsigned int>(
+        static_cast<size_t>(n_pes) - sender < 65535 ?
+        static_cast<size_t>(n_pes) - sender : 65535);
+    verifyCharKernel<<<dim3(256, rows), 256, 0, stream>>>(
+        buffer, uniform_bytes, counts, displs, sender,
+        pattern_stride, pattern_bias,
+        device_result);
+    check(hipGetLastError());
+  }
+  check(hipStreamSynchronize(stream));
+  Result result{};
+  check(hipMemcpy(&result, device_result, sizeof(Result), hipMemcpyDeviceToHost));
+  check(hipFree(device_result));
+  return result;
+}
+
+[[maybe_unused]] static IntResult verifyInt(const int *buffer, size_t count,
+                                         int expected, hipStream_t stream) {
+  const auto check = [](hipError_t status) {
+    if (status != hipSuccess) throw std::runtime_error(hipGetErrorString(status));
+  };
+  IntResult *device_result = nullptr;
+  check(hipMalloc(&device_result, sizeof(IntResult)));
+  check(hipMemsetAsync(device_result, 0, sizeof(IntResult), stream));
+  verifyIntKernel<<<256, 256, 0, stream>>>(buffer, count, expected, device_result);
+  check(hipGetLastError());
+  check(hipStreamSynchronize(stream));
+  IntResult result{};
+  check(hipMemcpy(&result, device_result, sizeof(IntResult), hipMemcpyDeviceToHost));
+  check(hipFree(device_result));
+  return result;
+}
+
+}  // namespace collective_verifier
+
+}  // namespace rocshmem
 
 #endif /* _VERIFY_RESULTS_KERNELS_HPP_ */

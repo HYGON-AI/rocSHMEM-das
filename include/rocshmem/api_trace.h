@@ -30,6 +30,8 @@
 
 #include <hip/hip_runtime_api.h>
 
+#include "rocshmem_api_types.h"
+
 // rocshmem_team_t mirrors the definition in rocshmem_common.hpp's namespace.
 typedef uint64_t *rocshmem_team_t;
 
@@ -41,7 +43,7 @@ extern "C" {
 #define ROCSHMEM_API_TRACE_VERSION_MAJOR 0
 
 // should be increased every time new members are added to existing dispatch tables
-#define ROCSHMEM_API_TRACE_VERSION_PATCH 7
+#define ROCSHMEM_API_TRACE_VERSION_PATCH 8
 
 // =============================================================================
 // HOST STREAM OPERATIONS (HOST_DISPATCH)
@@ -75,6 +77,20 @@ typedef void (*signal_wait_until_on_stream_fn_t)(uint64_t *sig_addr, int cmp,
                                                  uint64_t cmp_value,
                                                  hipStream_t stream);
 
+typedef int (*alltoallvmem_on_stream_fn_t)(
+    rocshmem_team_t team, void *dest, const size_t dest_sizes[],
+    const size_t dest_displs[], void *source, const size_t source_sizes[],
+    const size_t source_displs[], hipStream_t stream);
+
+typedef int (*reduce_scatter_on_stream_fn_t)(
+    rocshmem_team_t team, void *dest, const void *source, int nreduce,
+    hipStream_t stream, rocshmem_datatype_t datatype,
+    rocshmem_reduce_op_t op);
+
+typedef int (*fcollectmem_on_stream_fn_t)(
+    rocshmem_team_t team, void *dest, const void *source, size_t size,
+    hipStream_t stream);
+
 typedef struct rocshmemApiFuncTable
 {
     // DO NOT REORDER - ADD NEW FUNCTIONS AT BOTTOM ONLY
@@ -90,6 +106,11 @@ typedef struct rocshmemApiFuncTable
     putmem_on_stream_fn_t                     putmem_on_stream_fn;
     putmem_signal_on_stream_fn_t              putmem_signal_on_stream_fn;
     signal_wait_until_on_stream_fn_t          signal_wait_until_on_stream_fn;
+
+    // Typed collective host stream operations (3 functions)
+    alltoallvmem_on_stream_fn_t               alltoallvmem_on_stream_fn;
+    reduce_scatter_on_stream_fn_t             reduce_scatter_on_stream_fn;
+    fcollectmem_on_stream_fn_t                fcollectmem_on_stream_fn;
 
 } rocshmemApiFuncTable;
 
