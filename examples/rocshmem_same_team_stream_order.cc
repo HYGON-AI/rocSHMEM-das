@@ -75,9 +75,55 @@ int main(int argc, char** argv) {
     rocshmem_team_destroy(team);
     rocshmem_barrier_all();
   }
+  // Cover cold capture, cached resources, and capture needing more child teams.
+  const bool cold_graph=std::getenv("ORDER_COLD_GRAPH")!=nullptr;
+  for(int graph_n : {256,65536,262144}) {
+    rocshmem_team_t graph_team;
+    SHMEM_OK(rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD,0,1,pes,nullptr,0,&graph_team));
+    HIP_OK(hipMemset(dst,0,size_t(graph_n)*sizeof(int)));
+    if(!cold_graph) {
+      const int warm_n=graph_n==capacity ? graph_n/4 : graph_n;
+      rocshmem_broadcastmem_on_stream(graph_team,dst,src,size_t(warm_n)*sizeof(int),0,streams[0]);
+      HIP_OK(hipStreamSynchronize(streams[0]));
+    }
+    hipGraph_t graph;
+    hipGraphExec_t graph_exec;
+    HIP_OK(hipStreamBeginCapture(streams[0],hipStreamCaptureModeGlobal));
+    // Every PE must finish clearing dst before a peer can write to it.
+    rocshmem_team_sync_on_stream(graph_team,streams[0]);
+    rocshmem_broadcastmem_on_stream(graph_team,dst,src,size_t(graph_n)*sizeof(int),0,streams[0]);
+    SHMEM_OK(rocshmem_reduce_scatter_on_stream(graph_team,dst+capacity,src,graph_n,
+      streams[0],ROCSHMEM_DATATYPE_INT,ROCSHMEM_REDUCE_SUM));
+    rocshmem_team_sync_on_stream(graph_team,streams[0]);
+    HIP_OK(hipStreamEndCapture(streams[0],&graph));
+    HIP_OK(hipGraphInstantiate(&graph_exec,graph,nullptr,nullptr,0));
+    std::vector<int> graph_output(graph_n);
+    for(int replay=0;replay<2;replay++) {
+      HIP_OK(hipMemsetAsync(dst,0,size_t(capacity+graph_n)*sizeof(int),streams[0]));
+      HIP_OK(hipGraphLaunch(graph_exec,streams[0]));
+      HIP_OK(hipStreamSynchronize(streams[0]));
+      HIP_OK(hipMemcpy(graph_output.data(),dst,size_t(graph_n)*sizeof(int),hipMemcpyDeviceToHost));
+      for(int j=0;j<graph_n;j++) if(graph_output[j]!=1) {
+        fprintf(stderr,"graph broadcast rank=%d n=%d replay=%d element=%d got=%d expected=1\n",
+          rank,graph_n,replay,j,graph_output[j]); abort();
+      }
+      HIP_OK(hipMemcpy(graph_output.data(),dst+capacity,size_t(graph_n)*sizeof(int),hipMemcpyDeviceToHost));
+      for(int j=0;j<graph_n;j++) if(graph_output[j]!=pes*(pes+1)/2) {
+        fprintf(stderr,"graph reduce-scatter rank=%d n=%d replay=%d element=%d got=%d expected=%d\n",
+          rank,graph_n,replay,j,graph_output[j],pes*(pes+1)/2); abort();
+      }
+      rocshmem_barrier_all();
+    }
+    rocshmem_team_sync_on_stream(graph_team,streams[1]);
+    HIP_OK(hipStreamSynchronize(streams[1]));
+    HIP_OK(hipGraphExecDestroy(graph_exec));
+    HIP_OK(hipGraphDestroy(graph));
+    rocshmem_team_destroy(graph_team);
+    if(rank==0) printf("GRAPH_CAPTURE PASS n=%d cold=%d\n",graph_n,cold_graph);
+  }
   for(auto s:streams) HIP_OK(hipStreamDestroy(s));
   rocshmem_free(dst);rocshmem_free(src);
-  if(rank==0) puts("SAME_TEAM_STREAM_ORDER_PASS");
+  if(rank==0) puts("SAME_TEAM_STREAM_ORDER PASS");
   rocshmem_finalize();
   MPI_Finalize();
 }

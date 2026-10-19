@@ -71,7 +71,8 @@ class CollectiveLauncher {
    *
    *   launch(dev_wg_teams, stream, num_wgs)
    *
-   * Returns false if sub-team creation failed; caller should fall back.
+   * Returns false if sub-team creation failed or capture cannot reuse enough
+   * cached resources; caller should use the single-workgroup fallback.
    *
    * Resource initialization and launch are serialized so the resource map,
    * team vector, and device handle array cannot be modified while an
@@ -85,6 +86,17 @@ class CollectiveLauncher {
 
     std::lock_guard<std::recursive_mutex> lock(resources_mutex());
     ParallelResources& resources = parallel_resources_for(team);
+    if (resources.wg_teams.size() < num_wgs ||
+        resources.dev_wg_teams == nullptr ||
+        resources.uploaded_wg_teams < num_wgs) {
+      hipStreamCaptureStatus capture;
+      CHECK_HIP(hipStreamIsCapturing(stream, &capture));
+      if (capture != hipStreamCaptureStatusNone) {
+        // Team creation and handle upload can allocate or synchronize on the
+        // host. Use the caller's single-WG fallback during capture instead.
+        return false;
+      }
+    }
     ensure_wg_teams(team, team_size, num_wgs, resources);
 
     if (resources.wg_teams.empty() ||
@@ -178,9 +190,13 @@ class CollectiveLauncher {
     hipEvent_t completion{};
     bool completion_recorded{};
 
-    // Pre-split sub-teams, one per workgroup, for multi-wg kernels.
+    // Host-side sub-team handles (one per workgroup).
     std::vector<rocshmem_team_t> wg_teams;
+
+    // Device-side copy of wg_teams for GPU kernel access.
     rocshmem_team_t* dev_wg_teams{};
+
+    // Number of teams already uploaded to device (for incremental sync).
     size_t uploaded_wg_teams{};
     // Team capacity is shared globally. Once creation fails for this parent,
     // use the single-WG fallback until the parent team is destroyed instead
@@ -196,11 +212,6 @@ class CollectiveLauncher {
     TeamStreamOrder(rocshmem_team_t team, hipStream_t stream)
         : lock_(resources_mutex()), stream_(stream),
           resources_(parallel_resources_for(team)) {
-      hipStreamCaptureStatus capture;
-      CHECK_HIP(hipStreamIsCapturing(stream, &capture));
-      if (capture != hipStreamCaptureStatusNone) {
-        CHECK_HIP(hipErrorStreamCaptureUnsupported);
-      }
       if (resources_.completion == nullptr) {
         CHECK_HIP(hipEventCreateWithFlags(&resources_.completion,
                                           hipEventDisableTiming));

@@ -21,8 +21,10 @@ blocking host collectives running concurrently on the same team.
 Completion dependencies are enqueued on the supplied stream. A completion
 event is recorded for each call, including same-stream calls. Extending an
 existing set of child teams may wait on the host before changing their lifetime.
-HIP Graph capture is not supported by these ordered interfaces; a captured
-call reports a fatal HIP stream-capture-unsupported error.
+During HIP Graph capture, a multi-workgroup collective uses cached child
+teams when enough are available. Otherwise it uses the single-workgroup path,
+so callers do not need to warm up the team before capture.
+The graph retains the execution path selected during capture on every replay.
 
 ROCSHMEM_BARRIER_ALL
 --------------------
