@@ -1171,8 +1171,15 @@ ExecPerfTest() {
       
       local results
       results=$(awk -v max="$max_msg_size" '
+        BEGIN {
+          if (max ~ /^v/) {
+            max_num = substr(max, 2) + 0
+          } else {
+            max_num = max + 0
+          }
+        }
         /Msg Size.*Latency.*Bandwidth/ { in_table=1; next }
-        in_table && /^[0-9]/ && $2 <= max {
+        in_table && /^[0-9]/ && $2 <= max_num {
           if (NF >= 7) {
             print $1 ":" $4 ":" $5 ":" $6 ":" $7
           } else {
@@ -1299,8 +1306,8 @@ ValidateInput() {
     echo
     echo "Environment Vars:"
     echo "     ROCSHMEM_TEST_MPI_PARAMS: MPI parameters(excluding -np/-n) to override default, e.g. '-x LD_LIBRARY_PATH -x ROCSHMEM_BACKEND=gda'"
-    echo "     ROCSHMEM_TEST_WGS: workgroup options per PE in performance test, default '8 16 32'"
-    echo "     ROCSHMEM_TEST_THDS: thread options per workgroup in performance test, default '64 128 256'" 
+    echo "     ROCSHMEM_TEST_WGS: workgroup options per PE in performance test, default '16'"
+    echo "     ROCSHMEM_TEST_THDS: thread options per workgroup in performance test, default '128 256'"
     exit 1
   fi
 }

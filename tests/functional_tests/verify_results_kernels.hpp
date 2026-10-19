@@ -26,6 +26,7 @@
 #define _VERIFY_RESULTS_KERNELS_HPP_
 
 #include <hip/hip_runtime.h>
+#include <memory>
 #include <stdexcept>
 
 namespace rocshmem {
@@ -69,6 +70,13 @@ struct VerificationResult {
 
 using Result = VerificationResult<unsigned int>;
 using IntResult = VerificationResult<int>;
+
+struct DeviceResultDeleter {
+  void operator()(void *ptr) const noexcept {
+    // Preserve the original exception if cleanup also fails.
+    (void)hipFree(ptr);
+  }
+};
 
 [[maybe_unused]] static __global__ void verifyIntKernel(
     const int *buffer, size_t count, int expected, IntResult *result) {
@@ -126,6 +134,7 @@ using IntResult = VerificationResult<int>;
   };
   Result *device_result = nullptr;
   check(hipMalloc(&device_result, sizeof(Result)));
+  std::unique_ptr<Result, DeviceResultDeleter> result_owner(device_result);
   check(hipMemsetAsync(device_result, 0, sizeof(Result), stream));
   // Batch teams larger than grid.y's limit.
   for (size_t sender = 0; sender < static_cast<size_t>(n_pes); sender += 65535) {
@@ -141,7 +150,7 @@ using IntResult = VerificationResult<int>;
   check(hipStreamSynchronize(stream));
   Result result{};
   check(hipMemcpy(&result, device_result, sizeof(Result), hipMemcpyDeviceToHost));
-  check(hipFree(device_result));
+  check(hipFree(result_owner.release()));
   return result;
 }
 
@@ -152,13 +161,14 @@ using IntResult = VerificationResult<int>;
   };
   IntResult *device_result = nullptr;
   check(hipMalloc(&device_result, sizeof(IntResult)));
+  std::unique_ptr<IntResult, DeviceResultDeleter> result_owner(device_result);
   check(hipMemsetAsync(device_result, 0, sizeof(IntResult), stream));
   verifyIntKernel<<<256, 256, 0, stream>>>(buffer, count, expected, device_result);
   check(hipGetLastError());
   check(hipStreamSynchronize(stream));
   IntResult result{};
   check(hipMemcpy(&result, device_result, sizeof(IntResult), hipMemcpyDeviceToHost));
-  check(hipFree(device_result));
+  check(hipFree(result_owner.release()));
   return result;
 }
 
