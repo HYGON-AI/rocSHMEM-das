@@ -261,6 +261,35 @@ __host__ int Context::reduce_on_stream(rocshmem_team_t team, T* dest, const T* s
 }
 
 template <typename T>
+__host__ int Context::alltoallv_on_stream(
+    rocshmem_team_t team, T *dest, const size_t dest_nelems[],
+    const size_t dest_displs[], T *source, const size_t source_nelems[],
+    const size_t source_displs[], hipStream_t stream) {
+  ctxHostStats.incStat(NUM_HOST_ALLTOALL);
+  HOST_DISPATCH_RET(alltoallv_on_stream<T>(team, dest, dest_nelems,
+      dest_displs, source, source_nelems, source_displs, stream));
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__host__ int Context::reduce_scatter_on_stream(
+    rocshmem_team_t team, T *dest, const T *source, int nreduce,
+    hipStream_t stream) {
+  if (nreduce == 0) return ROCSHMEM_SUCCESS;
+  ctxHostStats.incStat(NUM_HOST_TO_ALL);
+  HOST_DISPATCH_RET(reduce_scatter_on_stream<PAIR(T, Op)>(
+      team, dest, source, nreduce, stream));
+}
+
+template <typename T>
+__host__ int Context::fcollect_on_stream(rocshmem_team_t team, T *dest,
+                                         const T *source, int nelems,
+                                         hipStream_t stream) {
+  if (nelems == 0) return ROCSHMEM_SUCCESS;
+  ctxHostStats.incStat(NUM_FCOLLECT);
+  HOST_DISPATCH_RET(fcollect_on_stream<T>(team, dest, source, nelems, stream));
+}
+
+template <typename T>
 __host__ void Context::wait_until(T *ivars, int cmp, T val) {
   ctxHostStats.incStat(NUM_HOST_WAIT_UNTIL);
 

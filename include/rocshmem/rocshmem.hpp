@@ -619,6 +619,63 @@ __host__ void rocshmem_broadcastmem_on_stream(rocshmem_team_t team, void *dest,
                                               int pe_root, hipStream_t stream);
 
 /**
+ * @brief Enqueues a variable-size alltoall collective on the given stream.
+ *
+ * Counts and displacements are in bytes and must reside in device memory.
+ *
+ * @param[in] team          The team participating in the collective.
+ * @param[in] dest          Destination address on the symmetric heap.
+ * @param[in] dest_sizes    Bytes received from each PE.
+ * @param[in] dest_displs   Destination byte offsets for each PE.
+ * @param[in] source        Source address on the symmetric heap.
+ * @param[in] source_sizes  Bytes sent to each PE.
+ * @param[in] source_displs Source byte offsets for each PE.
+ * @param[in] stream        HIP stream on which to enqueue the operation.
+ *
+ * @return Zero on successful enqueue; nonzero on failure.
+ */
+__host__ int rocshmem_alltoallvmem_on_stream(
+    rocshmem_team_t team, void *dest, const size_t dest_sizes[],
+    const size_t dest_displs[], void *source, const size_t source_sizes[],
+    const size_t source_displs[], hipStream_t stream);
+
+/**
+ * @brief Enqueues a fixed-size fcollect collective on the given stream.
+ *
+ * @param[in] team    The team participating in the collective.
+ * @param[in] dest    Destination address on the symmetric heap.
+ * @param[in] source  Source address on the symmetric heap.
+ * @param[in] size    Number of bytes contributed by each PE.
+ * @param[in] stream  HIP stream on which to enqueue the operation.
+ *
+ * @return Zero on successful enqueue; nonzero on failure.
+ */
+__host__ int rocshmem_fcollectmem_on_stream(rocshmem_team_t team, void *dest,
+                                             const void *source, size_t size,
+                                             hipStream_t stream);
+
+/**
+ * @brief Enqueues a reduce-scatter collective on the given stream.
+ *
+ * The datatype and operation determine how source elements are reduced.
+ *
+ * @param[in] team      The team participating in the collective.
+ * @param[in] dest      Destination address on the symmetric heap.
+ * @param[in] source    Source address on the symmetric heap.
+ * @param[in] nreduce   Number of elements contributed to each PE's result.
+ * @param[in] stream    HIP stream on which to enqueue the operation.
+ * @param[in] datatype  Element datatype.
+ * @param[in] op        Reduction operation.
+ *
+ * @return Zero on successful enqueue; nonzero for an invalid type, operation,
+ *         or enqueue failure.
+ */
+__host__ int rocshmem_reduce_scatter_on_stream(
+    rocshmem_team_t team, void *dest, const void *source, int nreduce,
+    hipStream_t stream, rocshmem_datatype_t datatype,
+    rocshmem_reduce_op_t op);
+
+/**
  * @brief enqueues a getmem RMA operation on given stream.
  *
  * @param[in] dest    Destination address. Must be an address on the symmetric

@@ -73,6 +73,21 @@ control the behavior of rocSHMEM.
       - ``default:1M,alltoall:32K,broadcast:4M,fcollect:64K,allreduce:8K,reduce_scatter:32K``
       - | Same syntax as INTRA. Selected automatically when the team spans nodes.
 
+    * - | ``ROCSHMEM_MAX_NUM_WGS_ON_STREAM``
+        | Workgroup limit for on-stream collectives.
+      - ``32``
+      - | Automatically select one workgroup per 32 KiB, capped by this value
+        | and available team/context resources.
+
+    * - | ``ROCSHMEM_NUM_THREADS_ON_STREAM``
+        | Thread limit for on-stream collective kernels.
+      - ``256``
+      - | Multi-workgroup kernels directly use this thread count.
+        | The value must be positive, wavefront-aligned and within the
+        | compiled kernel and device limits.
+        | Single-workgroup kernels limit it by message size and align the
+        | resulting thread count to the wavefront size.
+
     * - | ``ROCSHMEM_BACKEND``
         | When rocSHMEM is compiled for all backends, this environment variable
         | selects which backend to execute. The default value is an empty string and rocSHMEM auto-selects the most appropriate backend.

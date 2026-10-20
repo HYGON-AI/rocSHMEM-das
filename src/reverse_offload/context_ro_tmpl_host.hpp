@@ -101,6 +101,23 @@ __host__ int ROHostContext::reduce_on_stream(rocshmem_team_t team, T *dest,
 }
 
 template <typename T>
+__host__ int ROHostContext::alltoallv_on_stream(rocshmem_team_t team, T *dest,
+    const size_t dn[], const size_t dd[], T *source, const size_t sn[],
+    const size_t sd[], hipStream_t stream) {
+  return host_interface->alltoallv_on_stream<T>(team, dest, dn, dd, source, sn, sd, stream);
+}
+template <typename T, ROCSHMEM_OP Op>
+__host__ int ROHostContext::reduce_scatter_on_stream(rocshmem_team_t team,
+    T *dest, const T *source, int nreduce, hipStream_t stream) {
+  return host_interface->reduce_scatter_on_stream<T, Op>(team, dest, source, nreduce, stream);
+}
+template <typename T>
+__host__ int ROHostContext::fcollect_on_stream(rocshmem_team_t team, T *dest,
+    const T *source, int nelems, hipStream_t stream) {
+  return host_interface->fcollect_on_stream<T>(team, dest, source, nelems, stream);
+}
+
+template <typename T>
 __host__ void ROHostContext::broadcast(T *dest, const T *source, int nelems,
                                        int pe_root, int pe_start,
                                        int log_pe_stride, int pe_size,

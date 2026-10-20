@@ -13,7 +13,7 @@ else
 fi
 
 # This names/values should match the TestType enum in rocSHMEM/tests/functional_tests/tester.hpp
-# Self-developed test cases start from 200 to avoid community conflicts.
+# Self-developed test cases start from 500 to avoid community conflicts.
 declare -A TEST_NUMBERS=(
   ["get"]="0"
   ["getnbi"]="1"
@@ -166,10 +166,13 @@ declare -A TEST_NUMBERS=(
   ["host_wait_until_some_status"]="148"
   ["teamreducescatter"]="149"
 
-  ["defaultctx_waveputnbi_dp"]="200"
-  ["defaultctx_amo_add_dp"]="201"
-  ["waveputnbi_dp"]="202"
-  ["amo_add_dp"]="203"
+  ["defaultctx_waveputnbi_dp"]="500"
+  ["defaultctx_amo_add_dp"]="501"
+  ["waveputnbi_dp"]="502"
+  ["amo_add_dp"]="503"
+  ["alltoallv_on_stream"]="504"
+  ["reduce_scatter_on_stream"]="505"
+  ["fcollect_on_stream"]="506"
 )
 
 # Detect which runtime to use
@@ -1031,20 +1034,20 @@ TestPerfAMO() {
   ##############################################################################
   #       | Name                     | Ranks               |  Max Message Size #
   ##############################################################################
-  ExecPerfTest  "amo_add"              2               $MAX_MESSAGE_SIZE
-  ExecPerfTest  "amo_fadd"             2               $MAX_MESSAGE_SIZE
-  ExecPerfTest  "amo_inc"              2               $MAX_MESSAGE_SIZE
-  ExecPerfTest  "amo_finc"             2               $MAX_MESSAGE_SIZE
-  ExecPerfTest  "amo_set"              2               $MAX_MESSAGE_SIZE
-  ExecPerfTest  "amo_fetch"            2               $MAX_MESSAGE_SIZE
-  ExecPerfTest  "amo_fcswap"           2               $MAX_MESSAGE_SIZE
-  ExecPerfTest  "amo_and"              2               $MAX_MESSAGE_SIZE
-  ExecPerfTest  "amo_fetchand"         2               $MAX_MESSAGE_SIZE
-  ExecPerfTest  "amo_xor"              2               $MAX_MESSAGE_SIZE
-  ExecPerfTest  "amo_swap"             2               $MAX_MESSAGE_SIZE
-  ExecPerfTest  "amo_fetchor"          2               $MAX_MESSAGE_SIZE
-  ExecPerfTest  "amo_fetchxor"         2               $MAX_MESSAGE_SIZE
-  ExecPerfTest  "amo_or"               2               $MAX_MESSAGE_SIZE
+  ExecPerfTest  "amo_add"              2               "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "amo_fadd"             2               "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "amo_inc"              2               "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "amo_finc"             2               "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "amo_set"              2               "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "amo_fetch"            2               "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "amo_fcswap"           2               "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "amo_and"              2               "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "amo_fetchand"         2               "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "amo_xor"              2               "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "amo_swap"             2               "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "amo_fetchor"          2               "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "amo_fetchxor"         2               "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "amo_or"               2               "$MAX_MESSAGE_SIZE"
 }
 
 TestPerfColl() {
@@ -1055,15 +1058,18 @@ TestPerfColl() {
   ##############################################################################
   #       | Name                     | Ranks               |  Max Message Size #
   ##############################################################################
-  ExecPerfTest  "alltoall"                $RANKS       $MAX_MESSAGE_SIZE
-  ExecPerfTest  "alltoallv"               $RANKS       $MAX_MESSAGE_SIZE
-  ExecPerfTest  "teambroadcast"           $RANKS       $MAX_MESSAGE_SIZE
-  ExecPerfTest  "fcollect"                $RANKS       $MAX_MESSAGE_SIZE
-  ExecPerfTest  "teamreduction"           $RANKS       $MAX_MESSAGE_SIZE
-  ExecPerfTest  "alltoallmem_on_stream"   $RANKS       $MAX_MESSAGE_SIZE
-  ExecPerfTest  "broadcastmem_on_stream"  $RANKS       $MAX_MESSAGE_SIZE
-  ExecPerfTest  "teamreducescatter"       $RANKS       $MAX_MESSAGE_SIZE
-  ExecPerfTest  "reduce_on_stream"        $RANKS       $MAX_MESSAGE_SIZE
+  ExecPerfTest  "alltoall"                  "$RANKS"  "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "alltoallv"                 "$RANKS"  "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "teambroadcast"             "$RANKS"  "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "fcollect"                  "$RANKS"  "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "teamreduction"             "$RANKS"  "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "teamreducescatter"         "$RANKS"  "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "alltoallmem_on_stream"     "$RANKS"  "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "broadcastmem_on_stream"    "$RANKS"  "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "alltoallv_on_stream"       "$RANKS"  "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "reduce_scatter_on_stream"  "$RANKS"  "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "fcollect_on_stream"        "$RANKS"  "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "reduce_on_stream"          "$RANKS"  "$MAX_MESSAGE_SIZE"
 }
 
 TestPerfRMA() {
@@ -1074,37 +1080,37 @@ TestPerfRMA() {
   ##############################################################################
   #       | Name                    | Ranks                 | Max Message Size #
   ##############################################################################
-  ExecPerfTest  "put"                     2         $MAX_MESSAGE_SIZE
-  ExecPerfTest  "wgput"                   2         $MAX_MESSAGE_SIZE
-  ExecPerfTest  "waveput"                 2         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "put"                     2         "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "wgput"                   2         "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "waveput"                 2         "$MAX_MESSAGE_SIZE"
   
-  ExecPerfTest  "putnbi"                  2         $MAX_MESSAGE_SIZE
-  ExecPerfTest  "wgputnbi"                2         $MAX_MESSAGE_SIZE
-  ExecPerfTest  "waveputnbi"              2         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "putnbi"                  2         "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "wgputnbi"                2         "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "waveputnbi"              2         "$MAX_MESSAGE_SIZE"
   
-  ExecPerfTest  "get"                     2         $MAX_MESSAGE_SIZE
-  ExecPerfTest  "wgget"                   2         $MAX_MESSAGE_SIZE
-  ExecPerfTest  "waveget"                 2         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "get"                     2         "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "wgget"                   2         "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "waveget"                 2         "$MAX_MESSAGE_SIZE"
   
-  ExecPerfTest  "getnbi"                  2         $MAX_MESSAGE_SIZE
-  ExecPerfTest  "wggetnbi"                2         $MAX_MESSAGE_SIZE
-  ExecPerfTest  "wavegetnbi"              2         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "getnbi"                  2         "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "wggetnbi"                2         "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "wavegetnbi"              2         "$MAX_MESSAGE_SIZE"
 
-  ExecPerfTest  "defaultctxput"           2         $MAX_MESSAGE_SIZE
-  ExecPerfTest  "teamctxput"              2         $MAX_MESSAGE_SIZE
-  ExecPerfTest  "defaultctxputnbi"        2         $MAX_MESSAGE_SIZE
-  ExecPerfTest  "teamctxputnbi"           2         $MAX_MESSAGE_SIZE
-  ExecPerfTest  "defaultctxget"           2         $MAX_MESSAGE_SIZE
-  ExecPerfTest  "teamctxget"              2         $MAX_MESSAGE_SIZE
-  ExecPerfTest  "defaultctxgetnbi"        2         $MAX_MESSAGE_SIZE
-  ExecPerfTest  "teamctxgetnbi"           2         $MAX_MESSAGE_SIZE 
+  ExecPerfTest  "defaultctxput"           2         "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "teamctxput"              2         "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "defaultctxputnbi"        2         "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "teamctxputnbi"           2         "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "defaultctxget"           2         "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "teamctxget"              2         "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "defaultctxgetnbi"        2         "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "teamctxgetnbi"           2         "$MAX_MESSAGE_SIZE"
   
-  ExecPerfTest  "putmem_on_stream"        2         $MAX_MESSAGE_SIZE
-  ExecPerfTest  "getmem_on_stream"        2         $MAX_MESSAGE_SIZE
+  ExecPerfTest  "putmem_on_stream"        2         "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "getmem_on_stream"        2         "$MAX_MESSAGE_SIZE"
   
   if [[ $TEST == perf-mlx5* ]]; then  
-  ExecPerfTest  "defaultctx_waveputnbi_dp"  2       $MAX_MESSAGE_SIZE
-  ExecPerfTest  "waveputnbi_dp"             2       $MAX_MESSAGE_SIZE
+  ExecPerfTest  "defaultctx_waveputnbi_dp"  2       "$MAX_MESSAGE_SIZE"
+  ExecPerfTest  "waveputnbi_dp"             2       "$MAX_MESSAGE_SIZE"
   else echo "Skip:   *_dp (AIROCSHMEM: GDA *_dp not implemented)"; fi
 }
 
@@ -1132,11 +1138,7 @@ ExecPerfTest() {
      && [[ $test_name != "getmem_on_stream" ]]; then
     wg_options=(1)
     thread_options=(64)
-    max_msg_size=1073741824
-
-    if [[ $test_name == "alltoallmem_on_stream" ]]; then
-      max_msg_size=$((1073741824 / num_ranks))
-    fi
+    max_msg_size="v1073741824"
   fi
   
   declare -A best_latency
@@ -1169,8 +1171,15 @@ ExecPerfTest() {
       
       local results
       results=$(awk -v max="$max_msg_size" '
+        BEGIN {
+          if (max ~ /^v/) {
+            max_num = substr(max, 2) + 0
+          } else {
+            max_num = max + 0
+          }
+        }
         /Msg Size.*Latency.*Bandwidth/ { in_table=1; next }
-        in_table && /^[0-9]/ && $2 <= max {
+        in_table && /^[0-9]/ && $2 <= max_num {
           if (NF >= 7) {
             print $1 ":" $4 ":" $5 ":" $6 ":" $7
           } else {
@@ -1297,8 +1306,8 @@ ValidateInput() {
     echo
     echo "Environment Vars:"
     echo "     ROCSHMEM_TEST_MPI_PARAMS: MPI parameters(excluding -np/-n) to override default, e.g. '-x LD_LIBRARY_PATH -x ROCSHMEM_BACKEND=gda'"
-    echo "     ROCSHMEM_TEST_WGS: workgroup options per PE in performance test, default '8 16 32'"
-    echo "     ROCSHMEM_TEST_THDS: thread options per workgroup in performance test, default '64 128 256'" 
+    echo "     ROCSHMEM_TEST_WGS: workgroup options per PE in performance test, default '16'"
+    echo "     ROCSHMEM_TEST_THDS: thread options per workgroup in performance test, default '128 256'"
     exit 1
   fi
 }

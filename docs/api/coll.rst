@@ -8,6 +8,24 @@
 Collective routines
 ---------------------------
 
+On-stream ordering
+------------------
+
+Host on-stream collective, barrier, and sync calls on the same team are
+ordered by host submission order, including calls using different HIP streams.
+Different teams remain independent. All PEs must submit matching collective
+calls in the same order; the library does not reconcile different host-thread
+submission orders across PEs. This ordering does not cover device-side or
+blocking host collectives running concurrently on the same team.
+
+Completion dependencies are enqueued on the supplied stream. A completion
+event is recorded for each call, including same-stream calls. Extending an
+existing set of child teams may wait on the host before changing their lifetime.
+During HIP Graph capture, a multi-workgroup collective uses cached child
+teams when enough are available. Otherwise it uses the single-workgroup path,
+so callers do not need to warm up the team before capture.
+The graph retains the execution path selected during capture on every replay.
+
 ROCSHMEM_BARRIER_ALL
 --------------------
 

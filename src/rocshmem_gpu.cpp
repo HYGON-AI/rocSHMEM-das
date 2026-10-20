@@ -664,11 +664,14 @@ __device__ int rocshmem_reduce_wg(rocshmem_ctx_t ctx, rocshmem_team_t team,
 template <typename T, ROCSHMEM_OP Op>
 __device__ int rocshmem_reduce_scatter_wg(rocshmem_ctx_t ctx,
                                           rocshmem_team_t team, T *dest,
-                                          const T *source, int nreduce) {
+                                          const T *source, int nreduce,
+                                          int elem_offset = 0,
+                                          int elem_count = -1) {
   LOGD_API("device::reduce_scatter_wg (ctx=%zd, team=%zd, dest=%p, source=%p, nreduce=%d",
     ctx.ctx_opaque, team, dest, source, nreduce);
 
-  return get_internal_ctx(ctx)->reduce_scatter_wg<T, Op>(team, dest, source, nreduce);
+  return get_internal_ctx(ctx)->reduce_scatter_wg<T, Op>(
+      team, dest, source, nreduce, elem_offset, elem_count);
 }
 
 template <typename T>
@@ -714,27 +717,35 @@ __device__ void rocshmem_alltoall_wg(rocshmem_team_t team, T *dest,
 }
 
 template <typename T>
-__device__ void rocshmem_alltoallv_wg(rocshmem_team_t team,
+__device__ void rocshmem_alltoallv_wg(rocshmem_ctx_t ctx,
+                                      rocshmem_team_t team,
                                       T *dest, const size_t dest_nelems[],
                                       const size_t dest_displs[],
                                       T *source, const size_t source_nelems[],
-                                      const size_t source_displs[]) {
+                                      const size_t source_displs[],
+                                      // Partition each peer's element range across the participating workgroups.
+                                      int wg_id = 0,
+                                      int wg_count = 1) {
   LOGD_API("device::alltoallv_wg(team=%zd, dest=%p, source=%p)",
               team, dest, source);
 
-  get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->alltoallv<T>(team,
-                                                       dest, dest_nelems, dest_displs,
-                                                       source, source_nelems, source_displs);
+  get_internal_ctx(ctx)->alltoallv<T>(team,
+                                      dest, dest_nelems, dest_displs,
+                                      source, source_nelems, source_displs,
+                                      wg_id, wg_count);
 }
 
 template <typename T>
 __device__ void rocshmem_fcollect_wg(rocshmem_ctx_t ctx,
                                       rocshmem_team_t team, T *dest,
-                                      const T *source, int nelem) {
+                                      const T *source, int nelem,
+                                      int elem_offset = 0,
+                                      int elem_count = -1) {
   LOGD_API("device::fcollect_wg (ctx=%zd, team=%zd, dest=%p, source=%p, nelem=%d",
     ctx.ctx_opaque, team, dest, source, nelem);
 
-  get_internal_ctx(ctx)->fcollect<T>(team, dest, source, nelem);
+  get_internal_ctx(ctx)->fcollect<T>(team, dest, source, nelem,
+                                     elem_offset, elem_count);
 }
 
 template <typename T>
@@ -857,6 +868,19 @@ __global__ ATTR_NO_INLINE void rocshmem_alltoallmem_kernel(rocshmem_team_t team,
                                  0, -1);
 }
 
+// All threads participate in context creation; only thread 0 receives its status.
+__device__ inline void create_wg_team_ctx_or_abort(rocshmem_team_t team,
+                                                    long options,
+                                                    rocshmem_ctx_t* ctx) {
+  const int status = rocshmem_wg_team_create_ctx(team, options, ctx);
+  if (get_flat_block_id() == 0 &&
+      (status != 0 || ctx->ctx_opaque == nullptr)) {
+    LOGD_ERROR_ABORT("WG context creation failed; increase "
+                     "ROCSHMEM_MAX_NUM_CONTEXTS or reduce concurrent WGs");
+  }
+  __syncthreads();
+}
+
 /**
  * Multi-workgroup alltoall kernel.
  *
@@ -868,21 +892,21 @@ template <typename T>
 __global__ ATTR_NO_INLINE void rocshmem_alltoall_multi_wg_kernel(
     rocshmem_team_t *teams, T *dest, const T *source, int nelems) {
   __shared__ rocshmem_ctx_t ctx;
-  int wg_id = get_flat_grid_id();
-  int num_wgs = static_cast<int>(gridDim.x);
-  int base_count = nelems / num_wgs;
-  int remainder = nelems % num_wgs;
-  int elem_count = base_count + (wg_id < remainder ? 1 : 0);
-  int elem_offset = wg_id * base_count +
-                    (wg_id < remainder ? wg_id : remainder);
+  const int wg_id = get_flat_grid_id();
+  const int wg_count = get_grid_num_blocks();
+  size_t elem_offset = 0;
+  size_t elem_count = 0;
+  split_wg_range(static_cast<size_t>(nelems), wg_id, wg_count,
+                 &elem_offset, &elem_count);
 
-  rocshmem_wg_team_create_ctx(teams[wg_id], 0, &ctx);
+  create_wg_team_ctx_or_abort(teams[wg_id], 0, &ctx);
 
   // Reuse the single-block alltoall algorithm, restricted to this wg's elem
   // slice.  nelems is the full per-peer element count (peer stride), while
   // elem_offset/elem_count select the slice this wg is responsible for.
   rocshmem_ctx_alltoall_wg<T>(ctx, teams[wg_id], dest, source,
-                              nelems, elem_offset, elem_count);
+                              nelems, static_cast<int>(elem_offset),
+                              static_cast<int>(elem_count));
 
   rocshmem_wg_ctx_destroy(&ctx);
 }
@@ -895,15 +919,13 @@ __global__ ATTR_NO_INLINE void rocshmem_broadcastmem_multi_wg_kernel(
     rocshmem_team_t *teams, void *dest, const void *source, size_t nelems,
     int pe_root) {
   __shared__ rocshmem_ctx_t ctx;
-  int wg_id = get_flat_grid_id();
-  int num_wgs = static_cast<int>(gridDim.x);
-  size_t base_count = nelems / static_cast<size_t>(num_wgs);
-  size_t remainder = nelems % static_cast<size_t>(num_wgs);
-  size_t elem_count = base_count + (static_cast<size_t>(wg_id) < remainder ? 1 : 0);
-  size_t elem_offset = static_cast<size_t>(wg_id) * base_count +
-                       (static_cast<size_t>(wg_id) < remainder ? wg_id : remainder);
+  const int wg_id = get_flat_grid_id();
+  const int wg_count = get_grid_num_blocks();
+  size_t elem_offset = 0;
+  size_t elem_count = 0;
+  split_wg_range(nelems, wg_id, wg_count, &elem_offset, &elem_count);
 
-  rocshmem_wg_team_create_ctx(teams[wg_id], 0, &ctx);
+  create_wg_team_ctx_or_abort(teams[wg_id], 0, &ctx);
 
   char *dest_bytes = static_cast<char *>(dest);
   const char *source_bytes = static_cast<const char *>(source);
@@ -925,6 +947,83 @@ __global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_kernel(rocshmem_team_t 
                             source, nreduce);
 }
 
+template <typename T>
+__global__ ATTR_NO_INLINE void rocshmem_alltoallv_on_stream_kernel(
+    rocshmem_team_t team, T *dest, const size_t dest_nelems[],
+    const size_t dest_displs[], T *source, const size_t source_nelems[],
+    const size_t source_displs[]) {
+  rocshmem_alltoallv_wg<T>(ROCSHMEM_CTX_DEFAULT, team, dest, dest_nelems,
+                           dest_displs, source,
+                           source_nelems, source_displs);
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__global__ ATTR_NO_INLINE void rocshmem_reduce_scatter_on_stream_kernel(
+    rocshmem_team_t team, T *dest, const T *source, int nreduce) {
+  rocshmem_reduce_scatter_wg<T, Op>(ROCSHMEM_CTX_DEFAULT, team, dest, source,
+                                    nreduce);
+}
+
+template <typename T>
+__global__ ATTR_NO_INLINE void rocshmem_fcollect_on_stream_kernel(
+    rocshmem_team_t team, T *dest, const T *source, int nelems) {
+  rocshmem_fcollect_wg<T>(ROCSHMEM_CTX_DEFAULT, team, dest, source, nelems);
+}
+
+template <typename T>
+__global__ ATTR_NO_INLINE void rocshmem_alltoallv_on_stream_multi_wg_kernel(
+    rocshmem_team_t *teams, T *dest,
+    [[maybe_unused]] const size_t dest_nelems[],
+    const size_t dest_displs[], T *source, const size_t source_nelems[],
+    const size_t source_displs[]) {
+  __shared__ rocshmem_ctx_t ctx;
+  const int wg_id = get_flat_grid_id();
+  const int wg_count = get_grid_num_blocks();
+  rocshmem_team_t team = teams[wg_id];
+  create_wg_team_ctx_or_abort(team, 0, &ctx);
+  rocshmem_alltoallv_wg<T>(ctx, team, dest, dest_nelems, dest_displs, source,
+                           source_nelems, source_displs, wg_id, wg_count);
+  rocshmem_wg_ctx_destroy(&ctx);
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__global__ ATTR_NO_INLINE void rocshmem_reduce_scatter_on_stream_multi_wg_kernel(
+    rocshmem_team_t *teams, T *dest, const T *source, int nreduce) {
+  __shared__ rocshmem_ctx_t ctx;
+  const int wg_id = get_flat_grid_id();
+  const int wg_count = get_grid_num_blocks();
+  rocshmem_team_t team = teams[wg_id];
+  size_t elem_offset = 0;
+  size_t elem_count = 0;
+  split_wg_range(static_cast<size_t>(nreduce), wg_id, wg_count,
+                 &elem_offset, &elem_count);
+
+  create_wg_team_ctx_or_abort(team, 0, &ctx);
+  rocshmem_reduce_scatter_wg<T, Op>(ctx, team, dest, source, nreduce,
+                                    static_cast<int>(elem_offset),
+                                    static_cast<int>(elem_count));
+  rocshmem_wg_ctx_destroy(&ctx);
+}
+
+template <typename T>
+__global__ ATTR_NO_INLINE void rocshmem_fcollect_on_stream_multi_wg_kernel(
+    rocshmem_team_t *teams, T *dest, const T *source, int nelems) {
+  __shared__ rocshmem_ctx_t ctx;
+  const int wg_id = get_flat_grid_id();
+  const int wg_count = get_grid_num_blocks();
+  rocshmem_team_t team = teams[wg_id];
+  size_t elem_offset = 0;
+  size_t elem_count = 0;
+  split_wg_range(static_cast<size_t>(nelems), wg_id, wg_count,
+                 &elem_offset, &elem_count);
+
+  create_wg_team_ctx_or_abort(team, 0, &ctx);
+  rocshmem_fcollect_wg<T>(ctx, team, dest, source, nelems,
+                          static_cast<int>(elem_offset),
+                          static_cast<int>(elem_count));
+  rocshmem_wg_ctx_destroy(&ctx);
+}
+
 /**
  * Multi-workgroup reduce kernel. Each workgroup uses a duplicate team and
  * reduces one or more contiguous element ranges.
@@ -932,24 +1031,29 @@ __global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_kernel(rocshmem_team_t 
 template <typename T, ROCSHMEM_OP Op>
 __global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_multi_wg_kernel(
     rocshmem_team_t *teams, T *dest, const T *source, int nreduce,
-    size_t elems_per_chunk, size_t chunk_count) {
+    size_t elems_per_chunk) {
   __shared__ rocshmem_ctx_t ctx;
-  int wg_id = get_flat_grid_id();
-  size_t stride = static_cast<size_t>(gridDim.x);
+  const int wg_id = get_flat_grid_id();
+  const int wg_count = get_grid_num_blocks();
 
-  rocshmem_wg_team_create_ctx(teams[wg_id], 0, &ctx);
+  create_wg_team_ctx_or_abort(teams[wg_id], 0, &ctx);
 
-  for (size_t chunk = static_cast<size_t>(wg_id); chunk < chunk_count;
-       chunk += stride) {
-    size_t chunk_start = chunk * elems_per_chunk;
-    int actual_chunk =
-        (chunk_start + elems_per_chunk > static_cast<size_t>(nreduce))
-            ? static_cast<int>(static_cast<size_t>(nreduce) - chunk_start)
-            : static_cast<int>(elems_per_chunk);
+  size_t elem_offset = 0;
+  size_t elem_count = 0;
+  split_wg_range(static_cast<size_t>(nreduce), wg_id, wg_count,
+                 &elem_offset, &elem_count);
+  // Partition first, then bound each communication operation independently.
+  for (size_t offset = 0; offset < elem_count;) {
+    const size_t remaining = elem_count - offset;
+    const size_t chunk_elems = remaining < elems_per_chunk
+                                  ? remaining : elems_per_chunk;
+    const size_t chunk_start = elem_offset + offset;
+    const int actual_chunk = static_cast<int>(chunk_elems);
     rocshmem_reduce_wg<T, Op>(ctx, teams[wg_id],
                                dest + chunk_start,
                                source + chunk_start,
                                actual_chunk);
+    offset += chunk_elems;
   }
 
   rocshmem_wg_ctx_destroy(&ctx);
@@ -964,7 +1068,7 @@ __global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_multi_wg_kernel(
     template \
     __global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_multi_wg_kernel<T, Op_API>( \
         rocshmem_team_t *teams, T *dest, const T *source, int nreduce, \
-        size_t elems_per_chunk, size_t chunk_count); \
+        size_t elems_per_chunk); \
 
 #define REDUCTION_ON_STREAM_KERNEL_DEF_GEN_ARITH(T, TNAME) \
     REDUCTION_ON_STREAM_KERNEL_DEF_GEN(T, TNAME, sum, ROCSHMEM_SUM) \
@@ -1545,12 +1649,22 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team,
       int nreduce);                                                             \
   template __device__ int rocshmem_reduce_scatter_wg<T, Op>(                   \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, const T *source,     \
-      int nreduce);
+      int nreduce, int elem_offset, int elem_count);
 
 /**
  * Declare templates for the required datatypes (for the compiler)
  */
 #define RMA_GEN(T)                                                             \
+  template __global__ void rocshmem_alltoallv_on_stream_kernel<T>(            \
+      rocshmem_team_t, T *, const size_t[], const size_t[], T *,              \
+      const size_t[], const size_t[]);                                         \
+  template __global__ void rocshmem_fcollect_on_stream_kernel<T>(             \
+      rocshmem_team_t, T *, const T *, int);                                   \
+  template __global__ void rocshmem_alltoallv_on_stream_multi_wg_kernel<T>(   \
+      rocshmem_team_t *, T *, const size_t[], const size_t[], T *,            \
+      const size_t[], const size_t[]);                                         \
+  template __global__ void rocshmem_fcollect_on_stream_multi_wg_kernel<T>(    \
+      rocshmem_team_t *, T *, const T *, int);                                 \
   template __device__ void rocshmem_put<T>(                                    \
       rocshmem_ctx_t ctx, T * dest, const T *source, size_t nelems, int pe);   \
   template __device__ void rocshmem_put_nbi<T>(                                \
@@ -1585,14 +1699,16 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team,
       rocshmem_team_t team, T * dest, const T *source,                         \
       int nelem);                                                              \
   template __device__ void rocshmem_alltoallv_wg<T>(                           \
+                                      rocshmem_ctx_t ctx,                     \
                                       rocshmem_team_t team,                    \
                                       T *dest, const size_t dest_nelems[],     \
                                       const size_t dest_displs[],              \
                                       T *source, const size_t source_nelems[], \
-                                      const size_t source_displs[]);           \
+                                      const size_t source_displs[],            \
+                                      int wg_id, int wg_count);                \
   template __device__ void rocshmem_fcollect_wg<T>(                            \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, const T *source,     \
-      int nelem);                                                              \
+      int nelem, int elem_offset, int elem_count);                             \
   template __device__ void rocshmem_put_wave<T>(                               \
       rocshmem_ctx_t ctx, T * dest, const T *source, size_t nelems, int pe);   \
   template __device__ void rocshmem_put_wg<T>(                                 \
@@ -1952,7 +2068,7 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team,
                                       const size_t dest_displs[],             \
                                       T *source, const size_t source_nelems[],\
                                       const size_t source_displs[]) {         \
-    rocshmem_alltoallv_wg<T>(team,                                            \
+    rocshmem_alltoallv_wg<T>(ROCSHMEM_CTX_DEFAULT, team,                     \
                              dest, dest_nelems, dest_displs,                  \
                              source, source_nelems, source_displs);           \
   }                                                                           \
@@ -2355,6 +2471,32 @@ INT_REDUCTION_ON_STREAM_KERNEL_GEN(short, short)
 
 FLOAT_REDUCTION_ON_STREAM_KERNEL_GEN(float, float)
 FLOAT_REDUCTION_ON_STREAM_KERNEL_GEN(double, double)
+
+#define REDUCE_SCATTER_STREAM_KERNEL(T, OP)                                   \
+  template __global__ void rocshmem_reduce_scatter_on_stream_kernel<T, OP>(  \
+      rocshmem_team_t, T *, const T *, int);                                  \
+  template __global__ void                                                    \
+  rocshmem_reduce_scatter_on_stream_multi_wg_kernel<T, OP>(                  \
+      rocshmem_team_t *, T *, const T *, int);
+#define RS_STREAM_ARITH(T)                                                     \
+  REDUCE_SCATTER_STREAM_KERNEL(T, ROCSHMEM_SUM)                               \
+  REDUCE_SCATTER_STREAM_KERNEL(T, ROCSHMEM_MIN)                               \
+  REDUCE_SCATTER_STREAM_KERNEL(T, ROCSHMEM_MAX)                               \
+  REDUCE_SCATTER_STREAM_KERNEL(T, ROCSHMEM_PROD)
+#define RS_STREAM_INT(T)                                                       \
+  RS_STREAM_ARITH(T)                                                          \
+  REDUCE_SCATTER_STREAM_KERNEL(T, ROCSHMEM_OR)                                \
+  REDUCE_SCATTER_STREAM_KERNEL(T, ROCSHMEM_AND)                               \
+  REDUCE_SCATTER_STREAM_KERNEL(T, ROCSHMEM_XOR)
+RS_STREAM_INT(short)
+RS_STREAM_INT(int)
+RS_STREAM_INT(long)
+RS_STREAM_INT(long long)
+RS_STREAM_ARITH(float)
+RS_STREAM_ARITH(double)
+#undef RS_STREAM_INT
+#undef RS_STREAM_ARITH
+#undef REDUCE_SCATTER_STREAM_KERNEL
 // clang-format on
 
 __device__ ATTR_NO_INLINE uint64_t rocshmem_get_p2p_ptr(void *dest, int rank, int dst_rank){

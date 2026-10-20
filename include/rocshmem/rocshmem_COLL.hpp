@@ -25,6 +25,8 @@
 #ifndef LIBRARY_INCLUDE_ROCSHMEM_COLL_HPP
 #define LIBRARY_INCLUDE_ROCSHMEM_COLL_HPP
 
+#include "rocshmem_api_types.h"
+
 namespace rocshmem {
 
 /**
@@ -1067,11 +1069,40 @@ __global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_kernel(rocshmem_team_t 
                                                                 const T *source,
                                                                 int nreduce);
 
+template <typename T>
+__global__ ATTR_NO_INLINE void rocshmem_alltoallv_on_stream_kernel(
+    rocshmem_team_t team, T *dest, const size_t dest_nelems[],
+    const size_t dest_displs[], T *source, const size_t source_nelems[],
+    const size_t source_displs[]);
+
+template <typename T, ROCSHMEM_OP Op>
+__global__ ATTR_NO_INLINE void rocshmem_reduce_scatter_on_stream_kernel(
+    rocshmem_team_t team, T *dest, const T *source, int nreduce);
+
+template <typename T>
+__global__ ATTR_NO_INLINE void rocshmem_fcollect_on_stream_kernel(
+    rocshmem_team_t team, T *dest, const T *source, int nelems);
+
+template <typename T>
+__global__ ATTR_NO_INLINE void rocshmem_alltoallv_on_stream_multi_wg_kernel(
+    rocshmem_team_t *teams, T *dest, const size_t dest_nelems[],
+    const size_t dest_displs[], T *source, const size_t source_nelems[],
+    const size_t source_displs[]);
+
+template <typename T, ROCSHMEM_OP Op>
+__global__ ATTR_NO_INLINE void
+rocshmem_reduce_scatter_on_stream_multi_wg_kernel(
+    rocshmem_team_t *teams, T *dest, const T *source, int nreduce);
+
+template <typename T>
+__global__ ATTR_NO_INLINE void rocshmem_fcollect_on_stream_multi_wg_kernel(
+    rocshmem_team_t *teams, T *dest, const T *source, int nelems);
+
 /** @brief Multi-workgroup reduce kernel using chunked element ranges. */
 template <typename T, ROCSHMEM_OP Op>
 __global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_multi_wg_kernel(
     rocshmem_team_t *teams, T *dest, const T *source, int nreduce,
-    size_t elems_per_chunk, size_t chunk_count);
+    size_t elems_per_chunk);
 
 /**
  * @brief kernel for performing a broadcast collective operation.
@@ -1452,6 +1483,40 @@ ATTR_NO_INLINE int rocshmem_ctx_double_max_reduce_on_stream(
 ATTR_NO_INLINE int rocshmem_ctx_double_prod_reduce_on_stream(
   rocshmem_ctx_t ctx, rocshmem_team_t team,
   double *dest, const double *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_char_alltoallv_on_stream(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, char *dest,
+    const size_t dest_nelems[], const size_t dest_displs[], char *source,
+    const size_t source_nelems[], const size_t source_displs[],
+    hipStream_t stream);
+ATTR_NO_INLINE int rocshmem_ctx_char_fcollect_on_stream(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, char *dest, const char *source,
+    int nelems, hipStream_t stream);
+
+#define ROCSHMEM_DECLARE_REDUCE_SCATTER_ON_STREAM(T, TNAME, OPNAME)          \
+  ATTR_NO_INLINE int rocshmem_ctx_##TNAME##_##OPNAME##_reduce_scatter_on_stream(\
+      rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,   \
+      int nreduce, hipStream_t stream);
+#define ROCSHMEM_DECLARE_RS_ARITH(T, TNAME)                                  \
+  ROCSHMEM_DECLARE_REDUCE_SCATTER_ON_STREAM(T, TNAME, sum)                  \
+  ROCSHMEM_DECLARE_REDUCE_SCATTER_ON_STREAM(T, TNAME, min)                  \
+  ROCSHMEM_DECLARE_REDUCE_SCATTER_ON_STREAM(T, TNAME, max)                  \
+  ROCSHMEM_DECLARE_REDUCE_SCATTER_ON_STREAM(T, TNAME, prod)
+#define ROCSHMEM_DECLARE_RS_INT(T, TNAME)                                    \
+  ROCSHMEM_DECLARE_RS_ARITH(T, TNAME)                                       \
+  ROCSHMEM_DECLARE_REDUCE_SCATTER_ON_STREAM(T, TNAME, or)                   \
+  ROCSHMEM_DECLARE_REDUCE_SCATTER_ON_STREAM(T, TNAME, and)                  \
+  ROCSHMEM_DECLARE_REDUCE_SCATTER_ON_STREAM(T, TNAME, xor)
+ROCSHMEM_DECLARE_RS_INT(short, short)
+ROCSHMEM_DECLARE_RS_INT(int, int)
+ROCSHMEM_DECLARE_RS_INT(long, long)
+ROCSHMEM_DECLARE_RS_INT(long long, longlong)
+ROCSHMEM_DECLARE_RS_ARITH(float, float)
+ROCSHMEM_DECLARE_RS_ARITH(double, double)
+#undef ROCSHMEM_DECLARE_RS_INT
+#undef ROCSHMEM_DECLARE_RS_ARITH
+#undef ROCSHMEM_DECLARE_REDUCE_SCATTER_ON_STREAM
+
 }  // namespace rocshmem
 
 #endif  // LIBRARY_INCLUDE_ROCSHMEM_COLL_HPP

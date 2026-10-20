@@ -218,6 +218,24 @@ class HostInterface {
                                        const void *source, size_t nelems,
                                        int pe_root, hipStream_t stream);
 
+  template <typename T>
+  __host__ int alltoallv_on_stream(rocshmem_team_t team, T *dest,
+                                   const size_t dest_nelems[],
+                                   const size_t dest_displs[], T *source,
+                                   const size_t source_nelems[],
+                                   const size_t source_displs[],
+                                   hipStream_t stream);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __host__ int reduce_scatter_on_stream(rocshmem_team_t team, T *dest,
+                                        const T *source, int nreduce,
+                                        hipStream_t stream);
+
+  template <typename T>
+  __host__ int fcollect_on_stream(rocshmem_team_t team, T *dest,
+                                  const T *source, int nelems,
+                                  hipStream_t stream);
+
   __host__ void getmem_on_stream(void *dest, const void *source, size_t nelems,
                                  int pe, hipStream_t stream);
 

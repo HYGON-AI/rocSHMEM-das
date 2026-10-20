@@ -99,7 +99,8 @@ __device__ int Context::reduce(rocshmem_team_t team, T *dest, const T *source,
 
 template <typename T, ROCSHMEM_OP Op>
 __device__ int Context::reduce_scatter_wg(rocshmem_team_t team, T *dest,
-                                          const T *source, int nreduce) {
+                                          const T *source, int nreduce,
+                                          int elem_offset, int elem_count) {
   if (nreduce == 0) {
     return ROCSHMEM_SUCCESS;
   }
@@ -108,7 +109,8 @@ __device__ int Context::reduce_scatter_wg(rocshmem_team_t team, T *dest,
     ctxStats.incStat(NUM_REDUCE_SCATTER);
   }
 
-  DISPATCH_RET(reduce_scatter_wg<PAIR(T, Op)>(team, dest, source, nreduce));
+  DISPATCH_RET(reduce_scatter_wg<PAIR(T, Op)>(team, dest, source, nreduce,
+                                              elem_offset, elem_count));
 }
 
 template <typename T>
@@ -177,7 +179,8 @@ __device__ void Context::alltoallv(rocshmem_team_t team,
                                    T *dest, const size_t dest_nelems[],
                                    const size_t dest_displs[],
                                    T *source, const size_t source_nelems[],
-                                   const size_t source_displs[]) {
+                                   const size_t source_displs[],
+                                   int wg_id, int wg_count) {
 
   if (is_thread_zero_in_block()) {
     ctxStats.incStat(NUM_ALLTOALLV);
@@ -185,12 +188,14 @@ __device__ void Context::alltoallv(rocshmem_team_t team,
 
   DISPATCH(alltoallv<T>(team,
                         dest, dest_nelems, dest_displs,
-                        source, source_nelems, source_displs));
+                        source, source_nelems, source_displs,
+                        wg_id, wg_count));
 }
 
 template <typename T>
 __device__ void Context::fcollect(rocshmem_team_t team, T *dest,
-                                  const T *source, int nelems) {
+                                  const T *source, int nelems,
+                                  int elem_offset, int elem_count) {
   if (nelems == 0) {
     return;
   }
@@ -199,7 +204,7 @@ __device__ void Context::fcollect(rocshmem_team_t team, T *dest,
     ctxStats.incStat(NUM_FCOLLECT);
   }
 
-  DISPATCH(fcollect<T>(team, dest, source, nelems));
+  DISPATCH(fcollect<T>(team, dest, source, nelems, elem_offset, elem_count));
 }
 
 template <typename T>

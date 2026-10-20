@@ -162,6 +162,15 @@ namespace envvar {
     const var<bool> align_bw_with_rccl("ALIGN_BW_WITH_RCCL",
       "Enable bandwidth alignment with RCCL for performance comparison. 0: Disabled; 1: Enabled (default)",
       true);
+    const var<int> max_num_wgs_on_stream("MAX_NUM_WGS_ON_STREAM",
+      "Workgroup limit for on-stream collectives. Select one workgroup per chunk, "
+      "up to this value and team/context limits, subject to "
+      "the single-workgroup small-message/backend policy",
+      32);
+    const var<int> num_threads_on_stream("NUM_THREADS_ON_STREAM",
+      "Thread limit for single-workgroup on-stream collectives and block size "
+      "for multi-workgroup collectives. Must be positive, wavefront-aligned and within kernel/device limits",
+      256);
   }  // inline namespace _base
 
   namespace bootstrap {

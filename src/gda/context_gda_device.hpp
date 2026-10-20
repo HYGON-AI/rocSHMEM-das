@@ -151,10 +151,12 @@ class GDAContext : public Context {
 
   template <typename T, ROCSHMEM_OP Op>
   __device__ int reduce_scatter_wg(rocshmem_team_t team, T *dest, const T *source,
-                                   int nreduce);
+                                   int nreduce, int elem_offset = 0,
+                                   int elem_count = -1);
   template <typename T, ROCSHMEM_OP Op>
   __device__ int hybrid_reduce_scatter_wg(GDATeam *team_obj, T *dest, const T *source,
-                                          int nreduce, int PE_start, int stride,
+                                          int nreduce, int elem_offset,
+                                          int elem_count, int PE_start, int stride,
                                           int PE_size, int team_rank);
 
   template <typename T>
@@ -171,25 +173,29 @@ class GDAContext : public Context {
                             T *dest, const size_t dest_nelems[],
                             const size_t dest_displs[],
                             T *source, const size_t source_nelems[],
-                            const size_t source_displs[]);
+                            const size_t source_displs[], int wg_id = 0,
+                            int wg_count = 1);
 
   template <typename T>
   __device__ void alltoallv_copy(rocshmem_team_t team,
                                  T *dest, const size_t dest_nelems[],
                                  const size_t dest_displs[],
                                  T *source, const size_t source_nelems[],
-                                 const size_t source_displs[]);
+                                 const size_t source_displs[], int wg_id,
+                                 int wg_count);
 
   template <typename T>
   __device__ void alltoallv_get(rocshmem_team_t team,
                                 T *dest, const size_t dest_nelems[],
                                 const size_t dest_displs[],
                                 T *source, const size_t source_nelems[],
-                                const size_t source_displs[]);
+                                const size_t source_displs[], int wg_id,
+                                int wg_count);
 
   template <typename T>
   __device__ void fcollect(rocshmem_team_t team, T *dest, const T *source,
-                           int nelems);
+                           int nelems, int elem_offset = 0,
+                           int elem_count = -1);
 
 
   // Block/wave functions
@@ -300,7 +306,7 @@ class GDAContext : public Context {
 
   template <typename T>
   __device__ void fcollect_linear(rocshmem_team_t team, T *dest,
-      const T *source, int nelems);
+      const T *source, int nelems, int elem_offset, int elem_count);
 
   template <typename T>
   __device__ void alltoall_linear(rocshmem_team_t team, T *dest,
