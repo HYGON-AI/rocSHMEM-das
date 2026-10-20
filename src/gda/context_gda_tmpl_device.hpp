@@ -40,6 +40,20 @@
 
 namespace rocshmem {
 
+// Convert a byte policy to an element count, bounded by the caller's range or
+// scratch capacity. Budgeted policies preserve single-WG and intra-node paths.
+template <typename T>
+__device__ __forceinline__ int GDAContext::collective_chunk_elems(
+    int capacity, CollectiveChunkPolicy policy, bool inter_node) {
+  size_t chunk_bytes = policy.max_bytes;
+  if (policy.concurrent_bytes != 0) {
+    const size_t wg_count = static_cast<size_t>(gridDim.x) * gridDim.y * gridDim.z;
+    if (wg_count <= 1 || !inter_node) return capacity;
+    chunk_bytes = min(chunk_bytes, policy.concurrent_bytes / wg_count);
+  }
+  return min(capacity, static_cast<int>(max(size_t{1}, chunk_bytes / sizeof(T))));
+}
+
 /******************************************************************************
  ************************** TEMPLATE SPECIALIZATIONS **************************
  *****************************************************************************/
@@ -937,10 +951,8 @@ __device__ int GDAContext::hybrid_reduce_scatter_wg(
   const int wg_size = get_flat_block_size();
   const int scratch_elems = static_cast<int>(ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double) / sizeof(T));
   const int scratch_chunk_size = max(1, scratch_elems / num_nodes);
-  // Limit each ring transfer to 64 KiB to avoid a large-message performance drop.
-  constexpr int max_chunk_bytes = 64 * 1024;
-  constexpr int max_chunk_elems = max_chunk_bytes / static_cast<int>(sizeof(T));
-  const int chunk_size = min(scratch_chunk_size, max(1, max_chunk_elems));
+  const int chunk_size = collective_chunk_elems<T>(scratch_chunk_size,
+                                                  kReduceScatterChunks);
   rocshmem_team_t team = reinterpret_cast<rocshmem_team_t>(team_obj);
 
   const int left_node = (node_id - 1 + num_nodes) % num_nodes;
@@ -1579,17 +1591,24 @@ __device__ void GDAContext::alltoall_linear(rocshmem_team_t team, T *dst,
   // must not submit a zero-byte RDMA operation. alltoallv_on_stream may launch
   // more workgroups than elements because its counts reside in device memory.
   if (elem_count > 0) {
-    // Have each PE put their designated data to the other PEs.
-    for (int j = wf_id; j < pe_size; j+= wf_count) {
-      int dest_pe = team_obj->get_pe_in_world(j);
-      internal_putmem_nbi_wave(&dst[my_pe_in_team * nelems + elem_offset],
-        &src[j * nelems + elem_offset],
-        elem_count * sizeof(T), dest_pe, dest_pe, wf_info);
-    }
-
-    for (int j = wf_id; j < pe_size; j+= wf_count) {
-      int dest_pe = team_obj->get_pe_in_world(j);
-      internal_quiet(dest_pe, wf_info);
+    const int chunk_elems = collective_chunk_elems<T>(
+        elem_count, kAlltoallChunks, pe_size > constmem.ipc_shm_size);
+    for (int processed = 0; processed < elem_count;) {
+      const int count = min(chunk_elems, elem_count - processed);
+      const int offset = elem_offset + processed;
+      // Have each PE put their designated data to the other PEs.
+      for (int j = wf_id; j < pe_size; j += wf_count) {
+        int dest_pe = team_obj->get_pe_in_world(j);
+        internal_putmem_nbi_wave(&dst[my_pe_in_team * nelems + offset],
+          &src[j * nelems + offset],
+          count * sizeof(T), dest_pe, dest_pe, wf_info);
+      }
+      // Drain each chunk before allowing the next burst of peer transfers.
+      for (int j = wf_id; j < pe_size; j += wf_count) {
+        int dest_pe = team_obj->get_pe_in_world(j);
+        internal_quiet(dest_pe, wf_info);
+      }
+      processed += count;
     }
   }
 
@@ -1679,6 +1698,8 @@ __device__ void GDAContext::fcollect_linear(rocshmem_team_t team, T *dst,
 
   ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
 
+  // Chunk the linear path below instead of selecting the synchronization-heavy
+  // hierarchical path solely because more workgroups are active.
   if (pe_size >= 4 &&
       static_cast<size_t>(elem_count) * sizeof(T) >= kHierarchicalMinBytes) {
     // FCollect is a concatenation of one broadcast per source rank.  Reusing
@@ -1693,22 +1714,30 @@ __device__ void GDAContext::fcollect_linear(rocshmem_team_t team, T *dst,
     return;
   }
 
-  // Small messages avoid the extra two synchronization phases per source.
-  for (int rank = 0; rank < pe_size; rank++) {
-    int dest_pe = team_obj->get_pe_in_world(rank);
-    internal_putmem_nbi_wg(&dst[my_pe_in_team * nelems + elem_offset],
-                           src + elem_offset, elem_count * sizeof(T),
-                           dest_pe, dest_pe, wf_info);
-  }
-
-  if (is_thread_zero_in_block()) {
+  // Bound the cross-node burst across WGs without introducing one team-wide
+  // broadcast per source. Single-WG and intra-node transfers retain their size.
+  const int chunk_elems = collective_chunk_elems<T>(
+      elem_count, kFcollectChunks, pe_size > constmem.ipc_shm_size);
+  for (int processed = 0; processed < elem_count;) {
+    const int count = min(chunk_elems, elem_count - processed);
+    const int offset = elem_offset + processed;
     for (int rank = 0; rank < pe_size; rank++) {
       int dest_pe = team_obj->get_pe_in_world(rank);
-      int local_pe{-1};
-      if (!ipcImpl_.isIpcAvailable(constmem.my_pe, dest_pe, &local_pe)) {
-        qps[dest_pe].quiet(wf_info);
+      internal_putmem_nbi_wg(&dst[my_pe_in_team * nelems + offset],
+                             src + offset, count * sizeof(T),
+                             dest_pe, dest_pe, wf_info);
+    }
+
+    if (is_thread_zero_in_block()) {
+      for (int rank = 0; rank < pe_size; rank++) {
+        int dest_pe = team_obj->get_pe_in_world(rank);
+        int local_pe{-1};
+        if (!ipcImpl_.isIpcAvailable(constmem.my_pe, dest_pe, &local_pe)) {
+          qps[dest_pe].quiet(wf_info);
+        }
       }
     }
+    processed += count;
   }
   internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, pSync, wf_info);
 }

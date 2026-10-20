@@ -56,7 +56,7 @@ TEAM_ALLTOALL_DEF_GEN(unsigned long long, ulonglong)
  * DEVICE TEST KERNEL
  *****************************************************************************/
 template <typename T1>
-__global__ void TeamAlltoallTest(int loop, int skip, long long int *start_time,
+__global__ __launch_bounds__(512) void TeamAlltoallTest(int loop, int skip, long long int *start_time,
                                  long long int *end_time, T1 *source_buf,
                                  T1 *dest_buf, int num_elems,
                                  ShmemContextType ctx_type,
