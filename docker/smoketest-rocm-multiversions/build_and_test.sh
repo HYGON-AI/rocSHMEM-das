@@ -124,6 +124,7 @@ for rocm_dir in "${ROCM_VERSIONS[@]}"; do
         env PATH="${rocm_dir}/bin:${rocm_dir}/llvm/bin:${PATH}" \
             LD_LIBRARY_PATH="${rocm_dir}/lib:${LD_LIBRARY_PATH:-}" \
         cmake -S "$SRC" -B "$builddir" \
+            -DROCM_PATH="$rocm_dir" \
             -DCMAKE_PREFIX_PATH="$rocm_dir" \
             -DCMAKE_INSTALL_PREFIX="$installdir" \
             -DCMAKE_BUILD_TYPE=Release \
