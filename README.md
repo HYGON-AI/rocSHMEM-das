@@ -32,6 +32,11 @@ The RO and GDA backend is provided as-is with limited support from AMD or AMD Re
 For information on how to install and use rocSHMEM,
 [please see our documentation](https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/).
 
+For deployment and testing on Hygon HCU, see the
+[rocSHMEM deployment and testing guide](docs/rocshmem_deployment_and_testing_guide.md).
+For functional test driver usage, see the
+[functional test driver guide](scripts/functional_tests/README-driver.md).
+
 ## License
 
 This repository is based on the following fixed upstream baseline:

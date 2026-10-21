@@ -22,6 +22,7 @@ The rocSHMEM public repository is located within the ROCm Systems Super Repo at 
 
       * :doc:`Compile and run applications <./compile_and_run>`
       * :doc:`Using the Docker container <./docker>`
+      * :doc:`Deployment and testing <./rocshmem_deployment_and_testing_guide>`
 
   .. grid-item-card:: Library constants
 

@@ -1,6 +1,6 @@
 # rocSHMEM 功能测试驱动脚本使用文档
 
-> 脚本路径：`scripts/functional_tests/driver.sh`
+> 源码路径：`scripts/functional_tests/driver.sh`；安装后路径：`<安装前缀>/share/rocshmem/rocshmem_functional_driver.sh`
 > 适用对象：rocSHMEM 功能测试套件 `rocshmem_functional_tests`
 
 ## 1. 概述
@@ -13,6 +13,8 @@
 - 自动收集构建信息、系统/GPU/网络环境信息到日志目录
 - 失败用例自动重试（阈值可配置）
 - 可选生成性能热力图等可视化产物
+
+安装测试组件后，驱动脚本与测试程序位于同一目录；直接运行示例见第 7 节。
 
 ## 2. 命令行用法
 
@@ -36,8 +38,8 @@
 | 参数 | 说明 |
 |------|------|
 | `--show-cases` | 打印所有可用测试用例名后退出 |
-| `--artifact-dir DIR` | 测试通过后生成性能产物到 DIR（heatmap 套件专用） |
-| `--artifact-dir DIR`（空格形式） | 等价写法：`--artifact-dir DIR` |
+| `--artifact-dir DIR` | `heatmap`、`heatmaprma`、`heatmapcoll` 测试通过后，将可视化产物生成到 DIR；其他套件虽接受该参数，但不会生成产物 |
+| `--artifact-dir=DIR` | 与上述空格形式等价 |
 
 ## 3. 测试套件
 
@@ -81,6 +83,7 @@
 - thread 选项由 `ROCSHMEM_TEST_THDS` 控制（默认 `128 256`）
 - 当 `wg * threads > 65536` 时自动跳过该组合
 - 结果输出到 `<log_dir>/<test>_n<ranks>_<maxsize>B_best.log`，记录各消息体积下的最佳带宽与延迟
+- `perf*` 模式会自动启用 `NOVERIF`，跳过结果正确性校验。
 
 ### 3.2 自定义测试配置
 
@@ -104,7 +107,7 @@
 - 使用 `mpirun` 启动多进程
 - 支持多节点（通过 hostfile）
 - 默认参数：`-mca pml ucx -mca osc ucx --map-by numa`
-- 可通过 `ROCSHMEM_TEST_MPI_PARAMS` 完全覆盖默认 launcher 参数
+- 可通过 `ROCSHMEM_TEST_MPI_PARAMS` 覆盖默认 launcher 参数；使用自定义参数测试时，需在该变量中包含 hostfile、所需 MPI 组件参数及远端环境变量
 
 ### 4.2 SLR 模式（单节点）
 
@@ -126,7 +129,7 @@ ROCSHMEM_TEST_SLR=1 ./driver.sh $APP all logs
 |------|--------|------|
 | `ROCSHMEM_TEST_SLR` | `0` | 设为 `1` 启用 SLR 模式 |
 | `ROCSHMEM_TEST_UUID` | — | 设为 `1` 强制使用 uniqueid bootstrap（host 测试自动设置） |
-| `ROCSHMEM_MAX_NUM_CONTEXTS` | 最大 context 数 |
+| `ROCSHMEM_MAX_NUM_CONTEXTS` | — | 最大 context 数 |
 | `ROCSHMEM_MAX_NUM_HOST_CONTEXTS` | — | 主机侧最大 context 数 |
 | `ROCSHMEM_HEAP_SIZE` | 6GB（heatmap=22GB） | 堆内存大小（字节） |
 | `NUM_GPUS` | 自动探测 | GPU 数量，手动设置可跳过探测 |
@@ -136,10 +139,10 @@ ROCSHMEM_TEST_SLR=1 ./driver.sh $APP all logs
 
 | 变量 | 说明 |
 |------|------|
-| `ROCSHMEM_TEST_MPI_PARAMS` | 覆盖默认 mpirun 参数（不含 `-n`），如 `-x LD_LIBRARY_PATH -x ROCSHMEM_BACKEND=gda` |
+| `ROCSHMEM_TEST_MPI_PARAMS` | 自定义参数，覆盖默认 mpirun 参数（不含 `-n`），如 `-x LD_LIBRARY_PATH -x ROCSHMEM_BACKEND=gda` |
 | `OMPI_MCA_pml` | 默认 `ucx` |
 | `OMPI_MCA_osc` | 默认 `ucx` |
-| `HOSTFILE` | 等价于位置参数 hostfile |
+| `HOSTFILE` | 由环境变量或第 4 个位置参数 `[hostfile]` 传入，仅默认 MPI 参数使用；自定义 MPI 参数时，需在 `ROCSHMEM_TEST_MPI_PARAMS` 中指定 `--hostfile` |
 
 ### 5.3 测试行为
 
@@ -183,66 +186,79 @@ ROCSHMEM_TEST_SLR=1 ./driver.sh $APP all logs
 
 ## 7. 典型用法示例
 
-### 7.1 基础功能测试
+**安装包直接运行**：将下例的安装前缀替换为构建时使用的 `INSTALL_PREFIX`（即 `CMAKE_INSTALL_PREFIX`）。驱动脚本与测试程序同在 `<安装前缀>/share/rocshmem`，日志写入可写的 `/tmp` 目录。
 
 ```bash
-cd $BUILD_DIR
-APP=tests/functional_tests/rocshmem_functional_tests
+ROCSHMEM_INSTALL_PREFIX=/path/to/install-prefix
+cd "${ROCSHMEM_INSTALL_PREFIX}/share/rocshmem"
+./rocshmem_functional_driver.sh ./rocshmem_functional_tests rma /tmp/rocshmem-test-logs
+```
 
+以下示例以源码构建目录为例。先将 `BUILD_DIR` 替换为实际构建目录，并设置共用的测试程序和驱动脚本路径；使用安装包时，改用上面的安装路径。
+
+```bash
+BUILD_DIR=/path/to/rocshmem/build
+cd "$BUILD_DIR"
+APP=tests/functional_tests/rocshmem_functional_tests
+DRIVER=../scripts/functional_tests/driver.sh
+```
+
+### 7.1 单节点 MPI 基础功能测试
+
+不设置 `ROCSHMEM_TEST_SLR` 时，脚本默认通过 MPI 启动，无需手动调用 `mpirun`。
+
+```bash
 # 跑全部功能测试
-./scripts/functional_tests/driver.sh $APP all logs
+$DRIVER $APP all logs
 
 # 仅跑 RMA
-./scripts/functional_tests/driver.sh $APP rma logs
+$DRIVER $APP rma logs
 
 # 跑单个用例
-./driver.sh $APP putnbi logs
+$DRIVER $APP putnbi logs
 
 # 带参数的单个用例
-./driver.sh $APP "putnbi 2 8 1024 65536" logs
+$DRIVER $APP "putnbi 2 8 1024 65536" logs
 ```
 
 ### 7.2 多节点 MPI
 
 ```bash
-# 节点内
-mpirun -n 4 ...
-
 # 通过 hostfile
-./driver.sh $APP all logs ./hostfile
+$DRIVER $APP all logs ./hostfile
 
-# 自定义 MPI 参数
-ROCSHMEM_TEST_MPI_PARAMS="-x LD_LIBRARY_PATH -x ROCSHMEM_BACKEND=gda" \
-  ./driver.sh $APP all logs
+# 自定义 MPI 参数时，在变量内传入 hostfile
+ROCSHMEM_TEST_MPI_PARAMS="--hostfile ./hostfile --mca pml ucx --mca osc ucx --map-by numa -x LD_LIBRARY_PATH -x PATH -x ROCSHMEM_BACKEND=gda" \
+  $DRIVER $APP all logs
 ```
 
 ### 7.3 单节点 SLR
 
 ```bash
-ROCSHMEM_TEST_SLR=1 ./driver.sh $APP all logs
+ROCSHMEM_TEST_SLR=1 $DRIVER $APP all logs
 ```
 
 ### 7.4 性能测试
 
 ```bash
 # 全部性能测试，8 ranks
-./driver.sh $APP "perf all 8" perf-logs
+$DRIVER $APP "perf all 8" perf-logs
 
 # 自定义 wg/thread 组合, 仅性能测试起作用
 ROCSHMEM_TEST_WGS="8 16 32" ROCSHMEM_TEST_THDS="64 128 256" \
-  ./driver.sh $APP "perf coll 8 1048576" perf-logs
+  $DRIVER $APP "perf coll 8 1048576" perf-logs
 ```
 
 ### 7.5 热力图采集（含产物）
 
 ```bash
 # 单次构建，仅 per-test 图
-./driver.sh $APP heatmap logs-heatmap --artifact-dir ./artifacts
+$DRIVER $APP heatmap logs-heatmap --artifact-dir ./artifacts
 
 # 双构建对比（branch vs develop）
 PERF_BASELINE_DIR=$DEVELOP_BUILD \
 PERF_BRANCH_DIR=$BRANCH_BUILD \
-  ./driver.sh $APP heatmap logs-heatmap --artifact-dir ./artifacts
+  $DRIVER $APP heatmap logs-heatmap --artifact-dir ./artifacts
 # 产物：
 #   ./artifacts/heatmap_summary.png
 #   ./artifacts/heatmap_summary.txt
@@ -254,36 +270,40 @@ PERF_BRANCH_DIR=$BRANCH_BUILD \
 
 ```bash
 # 测试缓冲区（通过 test_config 间接生效，或直接修改套件，默认heap）
-LOCALBUFTYPE=heap ./driver.sh $APP "putnbi 2 32 128 512" logs
+LOCALBUFTYPE=heap $DRIVER $APP "putnbi 2 32 128 512" logs
 ```
 
 > 套件内 `TestRMAPut`/`TestRMAGet` 已内置对 `heap`/`host`/`device`/`fine`/`uncached`/`managed` 五种缓冲区类型的循环测试。
 
-### 7.8 自定义组合测试
+### 7.7 自定义组合测试
 
 以下示例展示一次完整的 GDA 后端集合通信性能测试：以 mlx5 后端、16 ranks 运行 `coll` 套件，最大消息 8 MB，自定义 workgroup/thread 组合，并通过 `ROCSHMEM_TEST_MPI_PARAMS` 注入多节点 hostfile 与一系列后端调优参数。
 
 ```bash
-# 自定义 wg/thread 组合 + 完整 MPI/后端参数，运行 mlx5 后端 coll 性能测试
-ROCSHMEM_TEST_WGS="16 32" \
-ROCSHMEM_TEST_THDS="256 512" \
-ROCSHMEM_TEST_MPI_PARAMS="\
+HOSTFILE=/path/to/hostfile
+LOG_DIR=/path/to/logs/coll-performance
+
+MPI_PARAMS="\
   --allow-run-as-root \
+  --hostfile ${HOSTFILE} \
   --mca coll_hcoll_enable 0 \
   -x ROCSHMEM_BACKEND=gda \
   -x LD_LIBRARY_PATH \
   -x PATH \
   -x ROCSHMEM_TEST_UUID=1 \
-  --hostfile=/home/result_rocshmem/hostfile \
   -x ROCSHMEM_HEAP_SIZE=42949672960 \
   -x ROCSHMEM_GDA_NUM_QPS_DEFAULT_CTX=2 \
   -x ROCSHMEM_GDA_NUM_QPS_PER_PE_USR_CTX=2 \
   -x ROCSHMEM_ALIGN_BW_WITH_RCCL=1 \
   -x ROCSHMEM_IB_GID_INDEX=1 \
-  -x ROCSHMEM_GDR_DISABLE_XDP=1" \
-  ./driver.sh $APP \
+  -x ROCSHMEM_GDR_DISABLE_XDP=1"
+
+ROCSHMEM_TEST_WGS="16 32" \
+ROCSHMEM_TEST_THDS="256 512" \
+ROCSHMEM_TEST_MPI_PARAMS="$MPI_PARAMS" \
+  $DRIVER "$APP" \
     "perf-mlx5 coll 16 8388608" \
-    /home/result_rocshmem/coll_gda
+    "$LOG_DIR"
 ```
 
 **参数说明**：
@@ -353,8 +373,8 @@ ROCSHMEM_TEST_MPI_PARAMS="\
 
 | 后端 | 跳过的用例类别 | 原因 |
 |------|----------------|------|
-| `ro*` | get/g/amo_add/flood/putmem_signal/fence/hostteamsyncbarrier | 对应 AIROCSHMEM 工单 |
-| `gda*` | `_g` / `flood_g` | GDA 未实现 `_g` 路径（AIROCSHMEM-162） |
+| `ro*` | get/g/amo_add/flood/putmem_signal/fence/hostteamsyncbarrier | 当前后端不支持这些用例 |
+| `gda*` | `_g` / `flood_g` | 当前 GDA 后端不支持这些路径 |
 | `gda-mlx5*` | — | 额外启用 `*_dp` 双精度路径用例 |
 | 非 IPC 构建 | `tile_*`、`host_*` | 需 `USE_IPC=ON` |
 
