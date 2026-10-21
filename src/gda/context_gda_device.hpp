@@ -284,6 +284,19 @@ class GDAContext : public Context {
  private:
 
   static constexpr size_t kHierarchicalMinBytes = 256 * 1024;  // 256 KB: minimum size for hierarchical/proxy algorithms
+  struct CollectiveChunkPolicy {
+    size_t max_bytes;
+    // A nonzero budget caps aggregate per-peer traffic across cross-node WGs.
+    // Zero applies max_bytes unconditionally, e.g. to scratch-buffer algorithms.
+    size_t concurrent_bytes;
+  };
+  static constexpr CollectiveChunkPolicy kAlltoallChunks{16 * 1024, 256 * 1024};
+  static constexpr CollectiveChunkPolicy kFcollectChunks{16 * 1024, 128 * 1024};
+  static constexpr CollectiveChunkPolicy kReduceScatterChunks{64 * 1024, 0};
+
+  template <typename T>
+  __device__ __forceinline__ static int collective_chunk_elems(
+      int capacity, CollectiveChunkPolicy policy, bool inter_node = true);
 
   //internal functions used by collective operations
   template <typename T>
