@@ -106,12 +106,30 @@ include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
 # Original upstream version
 # set(VERSION_STRING 3.5.0)
 
-# Self-developed version (default 1.0.0), can be overridden via ROCSHMEM_VERSION env var
+# Self-developed version (default 1.0.0), can be overridden via ROCSHMEM_VERSION env var or tag
+# Prefer an explicit environment version, then a release tag, then the default.
 set(VERSION_STRING "1.0.0")
 if(DEFINED ENV{ROCSHMEM_VERSION})
-    set(VERSION_STRING $ENV{ROCSHMEM_VERSION})
+  set(VERSION_STRING "$ENV{ROCSHMEM_VERSION}")
+else()
+  execute_process(
+    COMMAND git describe --tags --abbrev=0 --match "v[0-9]*"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    RESULT_VARIABLE GIT_RET
+    OUTPUT_VARIABLE GIT_TAG_OUT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  if("${GIT_RET}" STREQUAL "0" AND
+     GIT_TAG_OUT MATCHES "^v([0-9]+[.][0-9]+[.][0-9]+)$")
+    set(VERSION_STRING "${CMAKE_MATCH_1}")
+  endif()
 endif()
-message(STATUS "rocSHMEM Version: " "${VERSION_STRING}")
+
+if(NOT VERSION_STRING MATCHES "^[0-9]+[.][0-9]+[.][0-9]+$")
+  message(FATAL_ERROR "rocSHMEM version must be major.minor.patch: ${VERSION_STRING}")
+endif()
+message(STATUS "rocSHMEM Version: ${VERSION_STRING}")
 
 project(rocshmem VERSION ${VERSION_STRING} LANGUAGES CXX)
 
