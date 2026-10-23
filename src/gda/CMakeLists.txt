@@ -30,6 +30,7 @@ target_sources(
   PRIVATE
     context_gda_device.cpp
     context_gda_device_coll.cpp
+    context_gda_device_coll_das.cpp
     context_gda_host.cpp
     backend_gda.cpp
     ibv_wrapper.cpp

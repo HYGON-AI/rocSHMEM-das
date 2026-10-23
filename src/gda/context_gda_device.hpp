@@ -35,6 +35,75 @@ class QueuePair;
 
 class GDAContext : public Context {
  public:
+
+#if defined(USE_DAS)
+  // DAS implementations called by the original collective entry points.
+  __device__ void internal_get_broadcastmem_wg_das(
+      void *dst, const void *src, int nelems, int pe_root, ActiveWFInfo &wf_info);
+
+  template <typename T>
+  __device__ void alltoall_das(rocshmem_team_t team, T *dest, const T *source,
+                           int nelems, int elem_offset = 0,
+                           int elem_count = -1);
+
+  template <typename T>
+  __device__ void alltoall_linear_das(rocshmem_team_t team, T *dest,
+    const T *source, int nelems, int elem_offset = 0, int elem_count = -1);
+
+  template <typename T>
+  __device__ void alltoall_linear_thread_puts_das(rocshmem_team_t team, T *dest,
+                                              const T *source, int nelems,
+                                              int elem_offset = 0,
+                                              int elem_count = -1);
+
+  template <typename T>
+  __device__ void alltoallv_das(rocshmem_team_t team,
+                            T *dest, const size_t dest_nelems[],
+                            const size_t dest_displs[],
+                            T *source, const size_t source_nelems[],
+                            const size_t source_displs[], int wg_id = 0,
+                            int wg_count = 1);
+
+  template <typename T>
+  __device__ void alltoallv_copy_das(rocshmem_team_t team,
+                                 T *dest, const size_t dest_nelems[],
+                                 const size_t dest_displs[],
+                                 T *source, const size_t source_nelems[],
+                                 const size_t source_displs[], int wg_id,
+                                 int wg_count);
+
+  template <typename T>
+  __device__ void alltoallv_get_das(rocshmem_team_t team,
+                                T *dest, const size_t dest_nelems[],
+                                const size_t dest_displs[],
+                                T *source, const size_t source_nelems[],
+                                const size_t source_displs[], int wg_id,
+                                int wg_count);
+
+  __device__ void broadcastmem_wg_das(rocshmem_team_t team, void *dest, const void* source,
+                                  int nelement, int PE_root);
+
+  template <typename T>
+  __device__ void fcollect_linear_das(rocshmem_team_t team, T *dest,
+      const T *source, int nelems, int elem_offset, int elem_count);
+
+  __device__ void internal_broadcastmem_wg_das(void *dest, const void *source, int nelems,
+      int pe_root, int pe_start, int stride, int pe_size, long *p_sync);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ void internal_ring_allreduce_das(T *dst, const T *src, int nelems,
+      GDATeam *team_obj, int n_seg, int seg_size, int chunk_size,
+      ActiveWFInfo &wf_info);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int reduce_das(rocshmem_team_t team, T *dest, const T *source, int nreduce);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int reduce_scatter_wg_das(rocshmem_team_t team, T *dest, const T *source,
+                                   int nreduce, int elem_offset = 0,
+                                   int elem_count = -1);
+#endif  // USE_DAS
+
   __host__ GDAContext(Backend *b, unsigned int ctx_id);
 
   __host__ ~GDAContext();
