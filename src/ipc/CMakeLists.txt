@@ -33,4 +33,5 @@ target_sources(
     backend_ipc.cpp
     ipc_team.cpp
     context_ipc_device_coll.cpp
+    context_ipc_device_coll_das.cpp
 )

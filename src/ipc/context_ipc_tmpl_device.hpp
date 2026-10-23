@@ -38,9 +38,6 @@
 
 namespace rocshmem {
 
-// Pipeline chunk size for large messages (256KB)
-constexpr size_t ROCSHMEM_CHUNK_BYTES = 262144;
-
 /******************************************************************************
  ************************** TEMPLATE SPECIALIZATIONS **************************
  *****************************************************************************/
@@ -272,6 +269,9 @@ template <typename T, ROCSHMEM_OP Op>
 __device__ void IPCContext::internal_ring_allreduce(
     T *dst, const T *src, int nelems, IPCTeam *team_obj,  // NOLINT(runtime/int)
     int n_seg, int seg_size, int chunk_size) {
+#if defined(USE_DAS)
+  return internal_ring_allreduce_das<T, Op>(dst, src, nelems, team_obj, n_seg, seg_size, chunk_size);
+#endif
 
   int PE_size = team_obj->tinfo_wrt_world->size;
   long *pSync = team_obj->reduce_pSync;
@@ -340,6 +340,10 @@ __device__ void IPCContext::internal_ring_allreduce(
 template <typename T, ROCSHMEM_OP Op>
 __device__ int IPCContext::reduce(rocshmem_team_t team, T *dest,
                                   const T *source, int nreduce) {
+#if defined(USE_DAS)
+  return reduce_das<T, Op>(team, dest, source, nreduce);
+#endif
+
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
 
   int PE_size = team_obj->tinfo_wrt_world->size;
@@ -347,53 +351,14 @@ __device__ int IPCContext::reduce(rocshmem_team_t team, T *dest,
   size_t direct_pWrk = PE_size * nreduce;
   size_t direct_pSync = PE_size;
   size_t ring_pSync = 2 * PE_size;
-  size_t provided_pWrk = ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
+  size_t provided_pWrk = max(nreduce / 2 + 1, ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE);
   size_t provided_pSync = ROCSHMEM_REDUCE_SYNC_SIZE;
 
-  // Messages above DIRECT_MAX use ring. default 8192 (8KB).
-  constexpr int DIRECT_MAX_NELEMS = 8192;
-
-  bool use_direct = (provided_pWrk >= direct_pWrk) &&
-                    (provided_pSync >= direct_pSync) &&
-                    (nreduce <= DIRECT_MAX_NELEMS);
-  const bool use_reduce_scatter_allgather =
-      !use_direct && (nreduce % PE_size == 0) &&
-      (nreduce / PE_size >= 1024);
-
-  if (use_reduce_scatter_allgather) {
-    const int block_count = nreduce / PE_size;
-    const int team_rank = team_obj->my_pe;
-    T *local_block = dest + team_rank * block_count;
-    int status = reduce_scatter_wg<T, Op>(team, local_block, source,
-                                          block_count);
-    if (status != ROCSHMEM_SUCCESS) {
-      return status;
-    }
-
-    // Specialized allgather for the allreduce result. local_block already
-    // occupies its final slot in dest, so avoid a redundant self-copy and
-    // send the complete block once to each remote PE.
-    const int wave_id = get_flat_block_id() / WF_SIZE;
-    const int num_waves = (get_flat_block_size() + WF_SIZE - 1) / WF_SIZE;
-    for (int remote_rank = wave_id; remote_rank < PE_size; remote_rank += num_waves) {
-      if (remote_rank != team_rank) {
-        const int remote_pe = team_obj->get_pe_in_world(remote_rank);
-        put_nbi_wave(dest + team_rank * block_count, local_block, block_count, remote_pe);
-      }
-    }
-    __syncthreads();
-    internal_sync_wg(constmem.my_pe,
-                     team_obj->tinfo_wrt_world->pe_start,
-                     team_obj->tinfo_wrt_world->stride, PE_size,
-                     team_obj->alltoall_pSync);
-    return ROCSHMEM_SUCCESS;
-  }
-
-  if (use_direct) {
+  if (provided_pWrk >= direct_pWrk && provided_pSync >= direct_pSync) {
     internal_direct_allreduce<T, Op>(dest, source, nreduce, team_obj);
   } else {
     if (ring_pSync <= ROCSHMEM_REDUCE_SYNC_SIZE) {
-      size_t ring_pWrk = provided_pWrk;
+      size_t ring_pWrk = ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
       // integer division truncating value
       int chunk_size = ring_pWrk / PE_size;
       int seg_size = chunk_size * PE_size;
@@ -438,181 +403,95 @@ __device__ int IPCContext::reduce(rocshmem_team_t team, T *dest,
   return ROCSHMEM_SUCCESS;
 }
 
-/* Reduce-scatter through wave-parallel peer PUTs into team scratch. */
+/*
+ * Reduce-scatter: PE r receives the element-wise reduction of
+ * source[r*nreduce .. (r+1)*nreduce - 1] across all PEs into dest[0..nreduce-1].
+ *
+ * Only workgroup 0 (is_block_zero_in_grid) runs the algorithm; all other
+ * workgroups wait at the final barrier_wg.  This prevents concurrent
+ * accumulation races when multiple workgroups share the same team
+ * pSync/pWrk/dest buffers.
+ */
 template <typename T, ROCSHMEM_OP Op>
 __device__ int IPCContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
                                              const T *source, int nreduce,
                                              int elem_offset, int elem_count) {
+#if defined(USE_DAS)
+  return reduce_scatter_wg_das<T, Op>(team, dest, source, nreduce, elem_offset, elem_count);
+#endif
+
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
 
-  const int pe_size = team_obj->tinfo_wrt_world->size;
-  const int pe_start = team_obj->tinfo_wrt_world->pe_start;
-  const int stride = team_obj->tinfo_wrt_world->stride;
-  const int team_rank = (constmem.my_pe - pe_start) / stride;
+  int PE_size   = team_obj->tinfo_wrt_world->size;
+  int PE_start  = team_obj->tinfo_wrt_world->pe_start;
+  int stride    = team_obj->tinfo_wrt_world->stride;
+  int team_rank = (my_pe - PE_start) / stride;
 
-  T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
-  long *pSync = team_obj->reduce_pSync;
-  const int thread_id = get_flat_block_id();
-  const int block_size = get_flat_block_size();
-  const int scratch_elems = static_cast<int>(ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double) / sizeof(T));
-  const int scratch_slots = max(1, pe_size - 1);
-  const int chunk_size = max(1, scratch_elems / scratch_slots);
-  const int wave_id = thread_id / WF_SIZE;
-  const int num_waves = (block_size + WF_SIZE - 1) / WF_SIZE;
+  long  *pSync = team_obj->reduce_pSync;
+  T     *pWrk  = reinterpret_cast<T *>(team_obj->pWrk);
 
-  // Each WG carries its own team (independent pWrk / reduce_pSync pool slot)
-  // and its own dest/source buffers, so all WGs run the collective in
-  // parallel without any cross-WG serialisation.
+  int wg_id   = get_flat_block_id();
+  int wg_size = get_flat_block_size();
 
-  if (elem_count < 0) elem_count = nreduce;
-  const int num_chunks = (elem_count + chunk_size - 1) / chunk_size;
+  int pWrk_elems = (int)(ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double) / sizeof(T));
+  int chunk_size = max(1, pWrk_elems / PE_size);
+  int n_chunks   = (nreduce + chunk_size - 1) / chunk_size;
+  int64_t flag_val = 1;
+  int finish = PE_start + stride * PE_size;
 
-  // Reserve one generation per chunk. Reusing a generation within a call lets
-  // a previous chunk's data/ack flag satisfy the next chunk's wait early.
-  if (is_thread_zero_in_block()) {
-    pSync[2 * pe_size] += num_chunks;
-  }
-  __syncthreads();
-  const int64_t first_flag = pSync[2 * pe_size] - num_chunks + 1;
+  // Only workgroup 0 runs the reduction algorithm; other workgroups participate
+  // in the barriers only (same number of barrier_wg calls as WG 0).
+  for (int c = 0; c < n_chunks; c++) {
+    if (is_block_zero_in_grid()) {
+      int offset = c * chunk_size;
+      int count  = min(chunk_size, nreduce - offset);
 
-  const int range_end = elem_offset + elem_count;
-  int chunk_index = 0;
-  for (int offset = elem_offset; offset < range_end;
-       offset += chunk_size, ++chunk_index) {
-    const int64_t flag_val = first_flag + chunk_index;
-    const int count = min(chunk_size, range_end - offset);
-
-    // ------------------------------------------------------------------
-    // Phase 1: send block-[remote_rank] to every peer.  Wave-level
-    // parallelism keeps all peer links busy at the same time.
-    // ------------------------------------------------------------------
-    if (pe_size - 1 <= num_waves) {
-      if (wave_id < pe_size - 1) {
-        const int remote_rank = wave_id + (wave_id >= team_rank);
-        const int pe = pe_start + remote_rank * stride;
-        const int scratch_slot = team_rank - (team_rank > remote_rank);
-        T *scratch = pWrk + scratch_slot * chunk_size;
-        const T *send = source + remote_rank * nreduce + offset;
-        internal_putmem_wave(scratch, send, count * sizeof(T), pe);
-        if (is_thread_zero_in_wave()) {
-          fence(pe);
-          internal_putmem(pSync + team_rank, &flag_val, sizeof(*pSync), pe);
-        }
+      // Seed dest[offset..offset+count) from my own contribution.
+      for (int j = wg_id; j < count; j += wg_size) {
+        dest[offset + j] = source[team_rank * nreduce + offset + j];
       }
-    } else {
-      for (int pe = pe_start; pe < pe_start + stride * pe_size; pe += stride) {
-        if (pe != constmem.my_pe) {
-          const int remote_rank = (pe - pe_start) / stride;
-          const int scratch_slot = team_rank - (team_rank > remote_rank);
-          internal_putmem_wg(pWrk + scratch_slot * chunk_size,
-                             source + remote_rank * nreduce + offset,
-                             count * sizeof(T), pe);
+      __syncthreads();
+
+      // Send my contribution for each remote PE's output block, then signal.
+      for (int i = PE_start; i < finish; i += stride) {
+        if (i != my_pe) {
+          int remote_rank = (i - PE_start) / stride;
+          internal_putmem_wg(&pWrk[team_rank * chunk_size],
+                             reinterpret_cast<const void *>(
+                                 source + remote_rank * nreduce + offset),
+                             count * sizeof(T), i);
           if (is_thread_zero_in_block()) {
-            fence(pe);
-            internal_putmem(pSync + team_rank, &flag_val, sizeof(*pSync), pe);
+            fence(i);
+            internal_putmem(&pSync[team_rank], &flag_val, sizeof(*pSync), i);
           }
         }
       }
-    }
-    __syncthreads();
+      threadfence_system();
+      __syncthreads();
 
-    // ------------------------------------------------------------------
-    // Phase 2: wait for all peers to deliver their data to my scratch.
-    // ------------------------------------------------------------------
-    if (pe_size - 1 <= num_waves) {
-      if (wave_id < pe_size - 1) {
-        const int remote_rank = wave_id + (wave_id >= team_rank);
-        if (is_thread_zero_in_wave()) {
-          wait_until(pSync + remote_rank, ROCSHMEM_CMP_EQ, flag_val);
+      // Wait for each remote PE s, then accumulate into dest.
+      for (int i = PE_start; i < finish; i += stride) {
+        if (i != my_pe) {
+          int remote_rank = (i - PE_start) / stride;
+          if (is_thread_zero_in_block()) {
+            wait_until(&pSync[remote_rank], ROCSHMEM_CMP_EQ, flag_val);
+          }
+          __syncthreads();
+          ipc_compute_reduce<T, Op>(&pWrk[remote_rank * chunk_size],
+                                    dest + offset, count, wg_id, wg_size);
+          threadfence_system();
         }
       }
       __syncthreads();
-    } else {
-      if (is_thread_zero_in_block()) {
-        for (int remote_rank = 0; remote_rank < pe_size; remote_rank++) {
-          if (remote_rank != team_rank) {
-            wait_until(pSync + remote_rank, ROCSHMEM_CMP_EQ, flag_val);
-          }
-        }
+
+      // Reset pSync before reuse.
+      for (int j = wg_id; j < PE_size; j += wg_size) {
+        pSync[j] = ROCSHMEM_SYNC_VALUE;
       }
       __syncthreads();
+      // Sync with workgroup 0 of other PEs
+      barrier_wg(team);
     }
-
-    // ------------------------------------------------------------------
-    // Phase 3: fuse local + peer scratch contributions into dest.
-    // Use vectorised load/store to reduce loop iterations, while
-    // OpWrap<Op>::Calc keeps the reduction generic for all Op types.
-    // ------------------------------------------------------------------
-    // Vector type selector: float->float4 (128-bit), double->double2 (128-bit), int->int4 (128-bit), uint->uint4 (128-bit)
-    using VecT = std::conditional_t<std::is_same_v<T, float>, float4,
-                 std::conditional_t<std::is_same_v<T, double>, double2,
-                 std::conditional_t<std::is_same_v<T, int>, int4,
-                 std::conditional_t<std::is_same_v<T, unsigned int>, uint4, T>>>>;
-
-    static_assert(sizeof(VecT) % sizeof(T) == 0, "Vector type must be a multiple of scalar type");
-    constexpr int VEC_WIDTH = sizeof(VecT) / sizeof(T);
-    constexpr bool IS_VECTORIZABLE = !std::is_same_v<VecT, T>;
-    bool vectorized_ok = false;
-
-    if constexpr (IS_VECTORIZABLE) {
-      if ((nreduce % VEC_WIDTH) == 0 && (offset % VEC_WIDTH) == 0 && (count % VEC_WIDTH) == 0) {
-        const int vectors = count / VEC_WIDTH;
-        const VecT *local = reinterpret_cast<const VecT *>(source + team_rank * nreduce + offset);
-        VecT *output = reinterpret_cast<VecT *>(dest + offset);
-        for (int i = thread_id; i < vectors; i += block_size) {
-          VecT result = local[i];
-          for (int remote_rank = 0; remote_rank < pe_size; remote_rank++) {
-            if (remote_rank != team_rank) {
-              const int scratch_slot = remote_rank - (remote_rank > team_rank);
-              const VecT value = reinterpret_cast<const VecT *>(pWrk + scratch_slot * chunk_size)[i];
-              T *res_elem = reinterpret_cast<T *>(&result);
-              const T *val_elem = reinterpret_cast<const T *>(&value);
-              for (int v = 0; v < VEC_WIDTH; ++v) {
-                OpWrap<Op>::Calc(const_cast<T *>(val_elem + v), res_elem + v, 0);
-              }
-            }
-          }
-          output[i] = result;
-        }
-        vectorized_ok = true;
-      }
-    }
-
-    if (!vectorized_ok) {
-      for (int i = thread_id; i < count; i += block_size) {
-        T result = source[team_rank * nreduce + offset + i];
-        for (int remote_rank = 0; remote_rank < pe_size; remote_rank++) {
-          if (remote_rank != team_rank) {
-            const int scratch_slot =
-                remote_rank - (remote_rank > team_rank);
-            OpWrap<Op>::Calc(pWrk + scratch_slot * chunk_size + i, &result, 0);
-          }
-        }
-        dest[offset + i] = result;
-      }
-    }
-    __syncthreads();
-
-    // ------------------------------------------------------------------
-    // Phase 4: point-to-point completion ACK. Receiver rank R notifies every
-    // sender through slot [pe_size + R] after consuming its scratch payload.
-    // A sender waits for all receiver ACKs before reusing pWrk in the next
-    // chunk/call. This provides the safety of a team barrier without forcing
-    // unrelated peers through the barrier protocol.
-    // ------------------------------------------------------------------
-    if (is_thread_zero_in_block()) {
-      for (int remote_rank = 0; remote_rank < pe_size; ++remote_rank) {
-        if (remote_rank == team_rank) continue;
-        const int pe = pe_start + remote_rank * stride;
-        internal_putmem(pSync + pe_size + team_rank, &flag_val,
-                        sizeof(*pSync), pe);
-      }
-      for (int remote_rank = 0; remote_rank < pe_size; ++remote_rank) {
-        if (remote_rank == team_rank) continue;
-        wait_until(pSync + pe_size + remote_rank, ROCSHMEM_CMP_EQ, flag_val);
-      }
-    }
-    __syncthreads();
   }
 
   return ROCSHMEM_SUCCESS;
@@ -620,7 +499,7 @@ __device__ int IPCContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
 
 template <typename T>
 __device__ void IPCContext::internal_put_broadcast_wave(T *dst, const T *src, int nelems, int pe_root, int pe_start,
-    int stride, int pe_size) {  // NOLINT(runtime/int)
+    int stride, int pe_size) {
   if (my_pe == pe_root) {
     int finish = pe_start + stride * pe_size;
     for (int i = pe_start; i < finish; i += stride) {
@@ -637,7 +516,7 @@ __device__ void IPCContext::internal_get_broadcast_wave(
 
 template <typename T>
 __device__ int IPCContext::broadcast_wave(rocshmem_team_t team,
-                              T *dest, const T *source, int nelems, int PE_root) {
+                              T *dest, const T *source, int nelement, int PE_root) {
   if (dest == nullptr ||
     source == nullptr ||
     team == ROCSHMEM_TEAM_INVALID)
@@ -652,7 +531,7 @@ __device__ int IPCContext::broadcast_wave(rocshmem_team_t team,
 
   // Passed pe_root is relative to team, convert to world root
   int pe_root_world = team_obj->get_pe_in_world(PE_root);
-  internal_broadcast_wave<T>(dest, source, nelems, pe_root_world,
+  internal_broadcast_wave<T>(dest, source, nelement, pe_root_world, 
                               pe_start, stride, pe_size, p_sync);
 
   return ROCSHMEM_SUCCESS;
@@ -693,16 +572,18 @@ template <typename T>
 __device__ void IPCContext::alltoall(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems,
                                      int elem_offset, int elem_count) {
-  // Normalize: elem_count == -1 means "process the full [0, nelems) range".
-  if (elem_count < 0) elem_count = nelems;
-#if defined(USE_SDMA)
-  if (sizeof(T) * elem_count < 512 || ipcImpl_.sdmaImpl_.sdmaEnabled)
-#else
-  if (sizeof(T) * elem_count < 512)
+#if defined(USE_DAS)
+  return alltoall_das<T>(team, dst, src, nelems, elem_offset, elem_count);
 #endif
-    alltoall_linear_thread_puts(team, dst, src, nelems, elem_offset, elem_count);
+
+#if defined(USE_SDMA)
+  if (sizeof(T) * nelems < 512 || ipcImpl_.sdmaImpl_.sdmaEnabled)
+#else
+  if (sizeof(T) * nelems < 512)
+#endif
+    alltoall_linear_thread_puts(team, dst, src, nelems);
   else
-    alltoall_linear(team, dst, src, nelems, elem_offset, elem_count);
+    alltoall_linear(team, dst, src, nelems);
 }
 
 template <typename T>
@@ -711,62 +592,22 @@ __device__ void IPCContext::alltoallv([[maybe_unused]] rocshmem_team_t team,
                                       [[maybe_unused]] const size_t dest_displs[],
                                       [[maybe_unused]] T *source, [[maybe_unused]] const size_t source_nelems[],
                                       [[maybe_unused]] const size_t source_displs[],
-                                      int wg_id, int wg_count) {
-  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
-  const int pe_size = team_obj->num_pes;
-  const int my_rank = team_obj->my_pe;
-  const int wave_id = get_flat_block_id() / WF_SIZE;
-  const int num_waves = (get_flat_block_size() + WF_SIZE - 1) / WF_SIZE;
+                                      [[maybe_unused]] int wg_id,
+                                      [[maybe_unused]] int wg_count) {
+#if defined(USE_DAS)
+  return alltoallv_das<T>(team, dest, dest_nelems, dest_displs, source, source_nelems, source_displs, wg_id, wg_count);
+#endif
 
-  // Uniform alltoallv is common in communication benchmarks and frameworks;
-  // route it through the vectorized alltoall path. Nonuniform counts and
-  // displacements continue through the fully general path below.
-  const size_t uniform_count = source_nelems[0];
-  bool uniform = uniform_count == dest_nelems[0];
-  for (int rank = 0; rank < pe_size && uniform; rank++) {
-    uniform = source_nelems[rank] == uniform_count &&
-              dest_nelems[rank] == uniform_count &&
-              source_displs[rank] == static_cast<size_t>(rank) * uniform_count &&
-              dest_displs[rank] == static_cast<size_t>(rank) * uniform_count;
-  }
-  if (uniform) {
-    // Uniform alltoallv is exactly alltoall. Split its per-peer element range
-    // across duplicate teams so single- and multi-WG launches share the same
-    // optimized alltoall implementation.
-    const int total = static_cast<int>(uniform_count);
-    size_t elem_offset = 0;
-    size_t elem_count = 0;
-    split_wg_range(uniform_count, wg_id, wg_count, &elem_offset, &elem_count);
-    alltoall(team, dest, source, total, elem_offset, elem_count);
-    return;
-  }
-
-  // Every WG runs the same alltoallv algorithm over all peers, restricted to
-  // its own slice of each peer's element range.  wg_id=0,wg_count=1 naturally
-  // covers the complete single-WG operation.
-  for (int remote_rank = wave_id; remote_rank < pe_size;
-       remote_rank += num_waves) {
-    const size_t total = source_nelems[remote_rank];
-    size_t elem_offset = 0;
-    size_t elem_count = 0;
-    split_wg_range(total, wg_id, wg_count, &elem_offset, &elem_count);
-    if (elem_count == 0) continue;
-    const int pe = team_obj->get_pe_in_world(remote_rank);
-    put_nbi_wave(dest + dest_displs[my_rank] + elem_offset,
-                 source + source_displs[remote_rank] + elem_offset,
-                 elem_count, pe);
-  }
-
-  internal_sync_wg(constmem.my_pe,
-                   team_obj->tinfo_wrt_world->pe_start,
-                   team_obj->tinfo_wrt_world->stride, pe_size,
-                   team_obj->alltoall_pSync);
+  LOGD_ERROR_ABORT("ipc:alltoallv not implemented");
 }
 
 template <typename T>
 __device__ void IPCContext::alltoall_linear(rocshmem_team_t team, T *dst,
-                                            const T *src, int nelems,
-                                            int elem_offset, int elem_count) {
+                                            const T *src, int nelems, int elem_offset, int elem_count) {
+#if defined(USE_DAS)
+  return alltoall_linear_das<T>(team, dst, src, nelems, elem_offset, elem_count);
+#endif
+
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
 
   int pe_start = team_obj->tinfo_wrt_world->pe_start;
@@ -775,41 +616,14 @@ __device__ void IPCContext::alltoall_linear(rocshmem_team_t team, T *dst,
   long *pSync = team_obj->alltoall_pSync;
   int my_pe_in_team = team_obj->my_pe;
 
-  // Normalize: elem_count == -1 means "process the full [0, nelems) range".
-  if (elem_count < 0) elem_count = nelems;
-
-  // pipeline chunking for large messages
-  constexpr int CHUNK_NELEMS = ROCSHMEM_CHUNK_BYTES / sizeof(T);
-  const bool use_pipeline = (elem_count > CHUNK_NELEMS);
-
-  int wf_id = get_flat_block_id() / WF_SIZE;
-  int wf_count = (get_flat_block_size() + WF_SIZE - 1) / WF_SIZE;
-
-  if (!use_pipeline) {
-    for (int j = wf_id; j < pe_size; j += wf_count) {
-      int dest_pe = team_obj->get_pe_in_world(j);
-      put_nbi_wave(&dst[my_pe_in_team * nelems + elem_offset],
-                   &src[j * nelems + elem_offset], elem_count, dest_pe);
-    }
-  } else {
-    for (int c_start = 0; c_start < elem_count; c_start += CHUNK_NELEMS) {
-      int c_end = min(c_start + CHUNK_NELEMS, elem_count);
-      int c_nelems = c_end - c_start;
-
-      for (int j = wf_id; j < pe_size; j += wf_count) {
-        int dest_pe = team_obj->get_pe_in_world(j);
-        put_nbi_wave(&dst[my_pe_in_team * nelems + elem_offset + c_start],
-                     &src[j * nelems + elem_offset + c_start],
-                     c_nelems, dest_pe);
-      }
-    }
+  // Have each PE put their designated data to the other PEs
+  for (int j = 0; j < pe_size; j++) {
+    int dest_pe = team_obj->get_pe_in_world(j);
+    put_nbi_wg(&dst[my_pe_in_team * nelems], &src[j * nelems], nelems, dest_pe);
   }
-
-  /* internal_sync_wg has threadfence_system */
-  //  if (is_thread_zero_in_block()) {
-  //    quiet();
-  //  }
-
+  if (is_thread_zero_in_block()) {
+    quiet();
+  }
   // wait until everyone has obtained their designated data
   internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, pSync);
 }
@@ -817,15 +631,16 @@ __device__ void IPCContext::alltoall_linear(rocshmem_team_t team, T *dst,
 template <typename T>
 __device__ void IPCContext::alltoall_linear_thread_puts(rocshmem_team_t team,
     T *dst, const T *src, int nelems, int elem_offset, int elem_count) {
+#if defined(USE_DAS)
+  return alltoall_linear_thread_puts_das<T>(team, dst, src, nelems, elem_offset, elem_count);
+#endif
+
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
 
   int pe_size = team_obj->num_pes;
   long *pSync = team_obj->alltoall_pSync;
   int my_pe_in_team = team_obj->my_pe;
   size_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
-
-  // Normalize: elem_count == -1 means "process the full [0, nelems) range".
-  if (elem_count < 0) elem_count = nelems;
 
   int tid = get_flat_block_id();
   int step_size = min(get_flat_block_size(), WF_SIZE);
@@ -835,8 +650,8 @@ __device__ void IPCContext::alltoall_linear_thread_puts(rocshmem_team_t team,
   for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
     put_nbi(
-      &dst[my_pe_in_team * nelems + elem_offset],
-      &src[j * nelems + elem_offset], elem_count, dest_pe);
+      &dst[my_pe_in_team * nelems],
+      &src[j * nelems], nelems, dest_pe);
   }
   for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
@@ -873,8 +688,11 @@ __device__ void IPCContext::fcollect(rocshmem_team_t team, T *dst,
 
 template <typename T>
 __device__ void IPCContext::fcollect_linear(rocshmem_team_t team, T *dst,
-                                            const T *src, int nelems,
-                                            int elem_offset, int elem_count) {
+                                            const T *src, int nelems, int elem_offset, int elem_count) {
+#if defined(USE_DAS)
+  return fcollect_linear_das<T>(team, dst, src, nelems, elem_offset, elem_count);
+#endif
+
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
 
   int pe_start = team_obj->tinfo_wrt_world->pe_start;
@@ -883,37 +701,19 @@ __device__ void IPCContext::fcollect_linear(rocshmem_team_t team, T *dst,
   long *pSync = team_obj->alltoall_pSync;
   int my_pe_in_team = team_obj->my_pe;
 
-  if (elem_count < 0) elem_count = nelems;
-  // pipeline chunking for large messages
-  constexpr int CHUNK_NELEMS = ROCSHMEM_CHUNK_BYTES / sizeof(T);
-  const bool use_pipeline = (elem_count > CHUNK_NELEMS);
-
-  int wf_id = get_flat_block_id() / WF_SIZE;
-  int wf_count = (get_flat_block_size() + WF_SIZE - 1) / WF_SIZE;
-
-  if (!use_pipeline) {
-    for (int j = wf_id; j < pe_size; j += wf_count) {
-      int dest_pe = team_obj->get_pe_in_world(j);
-      put_nbi_wave(&dst[my_pe_in_team * nelems + elem_offset],
-                   src + elem_offset, elem_count, dest_pe);
-    }
-  } else {
-    for (int c_start = 0; c_start < elem_count; c_start += CHUNK_NELEMS) {
-      int c_end = min(c_start + CHUNK_NELEMS, elem_count);
-      int c_nelems = c_end - c_start;
-
-      for (int j = wf_id; j < pe_size; j += wf_count) {
-        int dest_pe = team_obj->get_pe_in_world(j);
-        put_nbi_wave(&dst[my_pe_in_team * nelems + elem_offset + c_start],
-                     &src[elem_offset + c_start],
-                     c_nelems, dest_pe);
-      }
-    }
+  // Have each PE put their designated data to the other PEs
+  for (int j = 0; j < pe_size; j++) {
+    int dest_pe = team_obj->get_pe_in_world(j);
+    put_nbi_wg(&dst[my_pe_in_team * nelems], src, nelems, dest_pe);
   }
 
+  if (is_thread_zero_in_block()) {
+    quiet();
+  }
   // wait until everyone has obtained their designated data
   internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, pSync);
 }
+
 
 // Block/wave functions
 template <typename T>
@@ -1855,5 +1655,7 @@ __device__ inline int IPCContext::tile_min_reduce_wg([[maybe_unused]] rocshmem_t
 }
 
 }  // namespace rocshmem
+
+#include "context_ipc_tmpl_device_das.hpp"
 
 #endif  // LIBRARY_SRC_IPC_CONTEXT_TMPL_DEVICE_HPP_
