@@ -48,8 +48,10 @@ target_sources(
     wf_coal_policy.cpp
     ipc_policy.cpp
     sdma_policy.cpp
-    sdma/gin_anvil_sdma_factory.cpp
 )
+if(USE_SDMA)
+  target_sources(${PROJECT_NAME} PRIVATE sdma/gin_anvil_sdma_factory.cpp)
+endif()
 
 set(
   ROCSHMEM_COMPILE_FLAGS
