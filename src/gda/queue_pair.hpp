@@ -47,6 +47,9 @@
 #if defined(GDA_SHCA)
 #include "gda/shca/provider_gda_shca.hpp"
 #endif
+#if defined(GDA_ZXDH)
+#include "gda/zxdh/provider_gda_zxdh.hpp"
+#endif
 
 #include "containers/free_list.hpp"
 #include "memory/hip_allocator.hpp"
@@ -94,11 +97,20 @@ class QueuePair {
    * @param[in] pe Destination processing element of data transmission.
    */
   __device__ void get_nbi(void *dest, const void *source, size_t nelems, int pe, Collectivity cy = THREAD);
+#if defined(GDA_ZXDH)
+  __device__ void get_nbi_with_cst(void *dest, const void *source,
+                                   size_t nelems, int pe,
+                                   Collectivity cy = THREAD);
+  __device__ void ensure_consistency_at_target();
+#endif
 
   /**
    * @brief Empty all completions from the completion queue.
    */
   __device__ void quiet(Collectivity cy = THREAD);
+#if defined(GDA_ZXDH)
+  __device__ void quiet_with_cst(Collectivity cy = THREAD);
+#endif
   __device__ void quiet_single();
   __device__ void quiet_dp_single_lane();
 
@@ -293,6 +305,39 @@ class QueuePair {
   __device__ void ionic_post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy);
   __device__ void ionic_quiet();
 #endif
+#if defined(GDA_ZXDH)
+  __device__ void zxdh_ring_doorbell();
+  __device__ void zxdh_poll_cq(uint64_t target);
+  __device__ void zxdh_quiet_with_cst();
+  __device__ void zxdh_wait_for_sq_space(uint64_t base, uint32_t count);
+  __device__ void zxdh_build_rma_wqe(uint64_t wqe_idx, uintptr_t laddr,
+                                     uintptr_t raddr, uint32_t size,
+                                     uint8_t opcode, uint32_t lkey);
+  __device__ void zxdh_build_rma_wqe_with_key(
+      uint64_t wqe_idx, uintptr_t laddr, uintptr_t raddr, uint32_t size,
+      uint8_t opcode, uint32_t lkey, uint32_t remote_key);
+  __device__ void zxdh_build_inline_wqe(uint64_t wqe_idx, uintptr_t raddr,
+                                        uint64_t value, uint32_t remote_key);
+  __device__ void zxdh_submit_requests(uint64_t base, uint32_t count);
+  __device__ void zxdh_post_wqe_rma(int32_t size, uintptr_t laddr,
+                                    uintptr_t raddr, uint8_t opcode, int flag);
+  __device__ uint64_t zxdh_post_wqe_amo(uintptr_t raddr, uint8_t opcode,
+                                        int64_t atomic_data, int64_t atomic_cmp,
+                                        bool fetch);
+  __device__ uint64_t zxdh_reserve_amo_slot();
+  __device__ void zxdh_release_amo_slot(uint64_t slot_idx);
+  __device__ void zxdh_post_loopback_cst();
+  __device__ void zxdh_post_value_dp(uintptr_t raddr, uint64_t value);
+  __device__ void zxdh_quiet_raw();
+  __device__ void zxdh_quiet_dp_single_lane();
+  __device__ void zxdh_post_wqe_rma_dp_single_lane(int32_t size,
+                                                   uintptr_t laddr,
+                                                   uintptr_t raddr,
+                                                   uint8_t opcode);
+  __device__ uint64_t zxdh_post_wqe_amo_dp_single_lane(
+      uintptr_t raddr, uint8_t opcode, int64_t atomic_data,
+      int64_t atomic_cmp, bool fetch);
+#endif
 
   /**
    * @brief Helper method to ring the doorbell
@@ -451,6 +496,24 @@ class QueuePair {
 
   /* GDAProvider::IONIC END */
 
+  /* GDAProvider::ZXDH START */
+#if defined(GDA_ZXDH)
+  void *zxdh_sq_buf{nullptr};
+  uint32_t zxdh_sq_wqe_cnt{0};
+  uint32_t zxdh_qpn{0};
+  volatile uint32_t *zxdh_dbreg{nullptr};
+  void *zxdh_cq_buf{nullptr};
+  uint32_t zxdh_cq_cnt{0};
+  uint64_t zxdh_sq_resv_head{0};
+  uint64_t zxdh_sq_ready_head{0};
+  uint64_t zxdh_cq_consumed{0};
+  int zxdh_poll_lock{0};
+  uint64_t zxdh_amo_head{0};
+  uint64_t zxdh_amo_tail{0};
+  QueuePair *zxdh_loopback_qps{nullptr};
+#endif
+  /* GDAProvider::ZXDH END */
+
   uint32_t inline_threshold{0};
 
   char dev_name[24];
@@ -462,6 +525,7 @@ class QueuePair {
 
   uint64_t* nonfetching_atomic{nullptr};
   uint32_t nonfetching_atomic_lkey{0};
+  uint32_t nonfetching_atomic_rkey{0};
   struct ibv_mr *mr_nonfetching_atomic;
 
   uint64_t* fetching_atomic{nullptr};

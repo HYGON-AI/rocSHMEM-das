@@ -557,6 +557,9 @@ GDAProvider GDABackend::requested_provider() {
     if (envstr.find("shca") != std::string::npos) {
       return GDAProvider::SHCA;
     }
+    if (envstr.find("zxdh") != std::string::npos) {
+      return GDAProvider::ZXDH;
+    }
   }
   return GDAProvider::UNSET;
 }
@@ -586,6 +589,10 @@ bool GDABackend::device_matches_provider_vendor(GDAProvider provider,
     case GDAProvider::SHCA:
       expected_vendor_id = GDA_SHCA_VENDOR_ID;
       vendor_name = "SHCA/Dawning";
+      break;
+    case GDAProvider::ZXDH:
+      expected_vendor_id = GDA_ZXDH_VENDOR_ID;
+      vendor_name = "ZXDH/ZTE";
       break;
     case GDAProvider::UNSET:
       // UNSET accepts any vendor
@@ -721,6 +728,17 @@ int GDABackend::backend_can_run() {
   }
 #endif //defined(GDA_SHCA)
 
+#if defined(GDA_ZXDH)
+  if (requested == GDAProvider::UNSET || requested == GDAProvider::ZXDH) {
+    handle = zxdh_dv_dlopen();
+    if (handle) {
+      auto ret = has_active_ib_interface(GDAProvider::ZXDH);
+      if (ret) return ROCSHMEM_SUCCESS;
+      DPRINTF("ZXDH DV library found but no active InfiniBand interface available\n");
+    }
+  }
+#endif // defined(GDA_ZXDH)
+
   return ROCSHMEM_ERROR;
 }
 
@@ -777,6 +795,10 @@ void GDABackend::cleanup_ibv() {
       CHECK_HIP(hipFree(bnxt_scqs[i].buf));
       CHECK_HIP(hipFree(bnxt_rcqs[i].buf));
     }
+  } else if (gda_provider == GDAProvider::ZXDH) {
+#if defined(GDA_ZXDH)
+    zxdh_cleanup();
+#endif
   } else {
     for (int i = 0; i < qps.size(); i++) {
       err = ibv.destroy_qp(qps[i]);
@@ -863,6 +885,18 @@ void GDABackend::open_dv_libs() {
     }
   }
 #endif // defined(GDA_SHCA)
+
+#if defined(GDA_ZXDH)
+  if (gda_provider == GDAProvider::UNSET
+  && (requested == GDAProvider::UNSET || requested == GDAProvider::ZXDH)) {
+    ret = zxdh_dv_dl_init();
+    if (ret == ROCSHMEM_SUCCESS) {
+      gda_provider = GDAProvider::ZXDH;
+    } else {
+      DPRINTF("Initializing rocSHMEM ZXDH GDA support failed\n");
+    }
+  }
+#endif // defined(GDA_ZXDH)
   if (gda_provider == GDAProvider::UNSET) {
     printf("rocshmem::gda:open_dv_libs: no DV library could dlopen for IONIC, BNXT, or MLX5 GDA support\n");
     exit(1);
@@ -882,6 +916,11 @@ void GDABackend::close_dv_libs() {
 #if defined(GDA_SHCA)
   if (shcadv_handle_ != nullptr)
     dlclose(shcadv_handle_);
+#endif
+
+#if defined(GDA_ZXDH)
+  if (zxdh_dv_handle_ != nullptr)
+    dlclose(zxdh_dv_handle_);
 #endif
   gda_provider = GDAProvider::UNSET;
 }
@@ -913,7 +952,11 @@ void GDABackend::exchange_qp_dest_info() {
 
 void GDABackend::setup_heap_memory_rkey() {
   auto *base_heap = heap.get_local_heap_base();
-  int access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC;
+  int access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
+               IBV_ACCESS_REMOTE_READ;
+  if (gda_provider != GDAProvider::ZXDH) {
+    access |= IBV_ACCESS_REMOTE_ATOMIC;
+  }
 
   if (envvar::gda::pcie_relaxed_ordering) {
     access |= IBV_ACCESS_RELAXED_ORDERING;
@@ -947,7 +990,11 @@ void GDABackend::setup_heap_memory_rkey() {
 
 void GDABackend::setup_hdp_heap_memory_rkey() {
   auto *base_heap = heap.get_local_heap_base_hdp();
-  int access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC;
+  int access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
+               IBV_ACCESS_REMOTE_READ;
+  if (gda_provider != GDAProvider::ZXDH) {
+    access |= IBV_ACCESS_REMOTE_ATOMIC;
+  }
 
   if (envvar::gda::pcie_relaxed_ordering) {
     access |= IBV_ACCESS_RELAXED_ORDERING;
@@ -1011,6 +1058,12 @@ void GDABackend::setup_gpu_qps() {
 
     initialize_gpu_qp(&gpu_qps[i], i);
   }
+
+#if defined(GDA_ZXDH)
+  if (gda_provider == GDAProvider::ZXDH) {
+    zxdh_setup_loopback_qps();
+  }
+#endif
 }
 
 void GDABackend::cleanup_gpu_qps() {
@@ -1023,6 +1076,12 @@ void GDABackend::cleanup_gpu_qps() {
   }
 
   free(host_qps);
+
+#if defined(GDA_ZXDH)
+  if (gda_provider == GDAProvider::ZXDH) {
+    zxdh_cleanup_loopback_qps();
+  }
+#endif
 
   CHECK_HIP(hipFree(gpu_qps));
   gpu_qps = nullptr;
@@ -1125,8 +1184,10 @@ void GDABackend::modify_qps_reset_to_init() {
   attr.port_num        = port;
   attr.qp_access_flags = IBV_ACCESS_REMOTE_WRITE
                        | IBV_ACCESS_LOCAL_WRITE
-                       | IBV_ACCESS_REMOTE_READ
-                       | IBV_ACCESS_REMOTE_ATOMIC;
+                       | IBV_ACCESS_REMOTE_READ;
+  if (gda_provider != GDAProvider::ZXDH) {
+    attr.qp_access_flags |= IBV_ACCESS_REMOTE_ATOMIC;
+  }
 
   attr_mask = IBV_QP_STATE
             | IBV_QP_PKEY_INDEX
@@ -1134,10 +1195,18 @@ void GDABackend::modify_qps_reset_to_init() {
             | IBV_QP_ACCESS_FLAGS;
 
   for (int i =0; i < qps.size() ; i++) {
-    if (gda_provider == GDAProvider::BNXT) {
+    switch (gda_provider) {
+#if defined(GDA_ZXDH)
+    case GDAProvider::ZXDH:
+      err = zxdh_dv.modify_qp(zxdh_qps[i], &attr, attr_mask);
+      break;
+#endif
+    case GDAProvider::BNXT:
       err = bnxt_re_dv.modify_qp(qps[i], &attr, attr_mask, 0, 0);
-    } else {
+      break;
+    default:
       err = ibv.modify_qp(qps[i], &attr, attr_mask);
+      break;
     }
     CHECK_ZERO(err, "modify_qp (INIT)");
   }
@@ -1194,10 +1263,18 @@ void GDABackend::modify_qps_init_to_rtr() {
 #endif
     }
 
-    if (gda_provider == GDAProvider::BNXT) {
+    switch (gda_provider) {
+#if defined(GDA_ZXDH)
+    case GDAProvider::ZXDH:
+      err = zxdh_dv.modify_qp(zxdh_qps[i], &attr, attr_mask);
+      break;
+#endif
+    case GDAProvider::BNXT:
       err = bnxt_re_dv.modify_qp(qps[i], &attr, attr_mask, 0, 0);
-    } else {
+      break;
+    default:
       err = ibv.modify_qp(qps[i], &attr, attr_mask);
+      break;
     }
     CHECK_ZERO(err, "modify_qp (RTR)");
   }
@@ -1230,10 +1307,18 @@ void GDABackend::modify_qps_rtr_to_rts() {
   for (int i = 0; i < qps.size(); i++) {
     attr.sq_psn = dest_info[i].psn;
 
-    if (gda_provider == GDAProvider::BNXT) {
+    switch (gda_provider) {
+#if defined(GDA_ZXDH)
+    case GDAProvider::ZXDH:
+      err = zxdh_dv.modify_qp(zxdh_qps[i], &attr, attr_mask);
+      break;
+#endif
+    case GDAProvider::BNXT:
       err = bnxt_re_dv.modify_qp(qps[i], &attr, attr_mask, 0, 0);
-    } else {
+      break;
+    default:
       err = ibv.modify_qp(qps[i], &attr, attr_mask);
+      break;
     }
     CHECK_ZERO(err, "modify_qp (RTS)");
   }
@@ -1261,6 +1346,11 @@ void GDABackend::create_queues() {
   if (gda_provider == GDAProvider::BNXT) {
     bnxt_create_cqs(ncqes);
     bnxt_create_qps(envvar::sq_size);
+  } else if (gda_provider == GDAProvider::ZXDH) {
+#if defined(GDA_ZXDH)
+    zxdh_create_cqs(ncqes);
+    zxdh_create_qps(envvar::sq_size);
+#endif
   } else {
     create_cqs(ncqes);
     create_qps(envvar::sq_size);
@@ -1275,6 +1365,10 @@ void GDABackend::alternate_qp_ports() {
 
   /* We can't remap anything */
   if (envvar::max_num_contexts == 1) {
+    return;
+  }
+
+  if (gda_provider == GDAProvider::ZXDH) {
     return;
   }
 
@@ -1402,6 +1496,11 @@ void GDABackend::initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
 #if defined(GDA_SHCA)
   case GDAProvider::SHCA:
     shca_initialize_gpu_qp(gpu_qp, conn_num);
+    break;
+#endif
+#if defined(GDA_ZXDH)
+  case GDAProvider::ZXDH:
+    zxdh_initialize_gpu_qp(gpu_qp, conn_num);
     break;
 #endif
   default:

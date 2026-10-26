@@ -157,7 +157,11 @@ __device__ void GDAContext::getmem(void *dest, const void *source, size_t nelems
     return;
   }
   qps[pe].get_nbi(dest, get_remote_ptr(source, pe), nelems, pe);
+#if defined(GDA_ZXDH)
+  qps[pe].quiet_with_cst();
+#else
   qps[pe].quiet();
+#endif
 }
 
 __device__ void GDAContext::putmem_nbi(void *dest, const void *source,
@@ -177,7 +181,11 @@ __device__ void GDAContext::getmem_nbi(void *dest, const void *source,
     ipcImpl_.ipcCopy(dest, get_local_ptr(source, local_pe), nelems);
     return;
   }
+#if defined(GDA_ZXDH)
+  qps[pe].get_nbi_with_cst(dest, get_remote_ptr(source, pe), nelems, pe);
+#else
   qps[pe].get_nbi(dest, get_remote_ptr(source, pe), nelems, pe);
+#endif
 }
 
 __device__ void GDAContext::fence() { //TODO: optimize
@@ -195,6 +203,9 @@ __device__ void GDAContext::quiet() {
   for (int i = 0; i < num_qps; i++) {
     qps[i].quiet();
   }
+#if defined(GDA_ZXDH)
+  qps[0].ensure_consistency_at_target();
+#endif
 }
 
 __device__ void GDAContext::qp_quiet(size_t qp_idx) {
@@ -205,6 +216,11 @@ __device__ void GDAContext::quiet_wave() {
   for (int i = 0; i < num_qps; i++) {
     qps[i].quiet(QueuePair::WAVE);
   }
+#if defined(GDA_ZXDH)
+  if (is_thread_zero_in_wave()) {
+    qps[0].ensure_consistency_at_target();
+  }
+#endif
 }
 
 __device__ void GDAContext::pe_quiet(size_t pe) {
@@ -212,6 +228,9 @@ __device__ void GDAContext::pe_quiet(size_t pe) {
     int qp_index = i * num_pes + pe;
     qps[qp_index].quiet();
   }
+#if defined(GDA_ZXDH)
+  qps[0].ensure_consistency_at_target();
+#endif
 }
 
 __device__ void GDAContext::pe_quiet_single(size_t pe) {
@@ -252,7 +271,11 @@ __device__ void GDAContext::getmem_wg(void *dest, const void *source,
   }
   if (is_wave_zero_in_block()) {
     qps[pe].get_nbi(dest, get_remote_ptr(source, pe), nelems, pe, QueuePair::WAVE);
+#if defined(GDA_ZXDH)
+    qps[pe].quiet_with_cst();
+#else
     qps[pe].quiet();
+#endif
   }
 }
 
@@ -277,7 +300,12 @@ __device__ void GDAContext::getmem_nbi_wg(void *dest, const void *source,
     return;
   }
   if (is_wave_zero_in_block()) {
+#if defined(GDA_ZXDH)
+    qps[pe].get_nbi_with_cst(dest, get_remote_ptr(source, pe), nelems, pe,
+                             QueuePair::WAVE);
+#else
     qps[pe].get_nbi(dest, get_remote_ptr(source, pe), nelems, pe, QueuePair::WAVE);
+#endif
   }
 }
 
@@ -301,7 +329,11 @@ __device__ void GDAContext::getmem_wave(void *dest, const void *source,
     return;
   }
   qps[pe].get_nbi(dest, get_remote_ptr(source, pe), nelems, pe, QueuePair::WAVE);
+#if defined(GDA_ZXDH)
+  qps[pe].quiet_with_cst();
+#else
   qps[pe].quiet();
+#endif
 }
 
 __device__ void GDAContext::putmem_nbi_wave(void *dest, const void *source,
@@ -335,7 +367,12 @@ __device__ void GDAContext::getmem_nbi_wave(void *dest, const void *source,
     ipcImpl_.ipcCopy_wave(dest, get_local_ptr(source, local_pe), nelems);
     return;
   }
+#if defined(GDA_ZXDH)
+  qps[pe].get_nbi_with_cst(dest, get_remote_ptr(source, pe), nelems, pe,
+                           QueuePair::WAVE);
+#else
   qps[pe].get_nbi(dest, get_remote_ptr(source, pe), nelems, pe, QueuePair::WAVE);
+#endif
 }
 
 
@@ -343,6 +380,15 @@ __device__ void GDAContext::getmem_nbi_wave(void *dest, const void *source,
 __device__ void GDAContext::putmem_signal(void *dest, const void *source, size_t nelems,
                                           uint64_t *sig_addr, uint64_t signal, int sig_op,
                                           int pe) {
+#if defined(GDA_ZXDH)
+  if (gda_provider_ == GDAProvider::ZXDH &&
+      sig_op == ROCSHMEM_SIGNAL_SET) {
+    qps[pe].put_nbi(dest, source, nelems, pe, 1);
+    qps[pe].put_nbi(sig_addr, &signal, sizeof(signal), pe, 1);
+    qps[pe].quiet();
+    return;
+  }
+#endif
   putmem(dest, source, nelems, pe);
   fence();
 
@@ -363,6 +409,18 @@ __device__ void GDAContext::putmem_signal(void *dest, const void *source, size_t
 __device__ void GDAContext::putmem_signal_wg(void *dest, const void *source, size_t nelems,
                                              uint64_t *sig_addr, uint64_t signal, int sig_op,
                                              int pe) {
+#if defined(GDA_ZXDH)
+  if (gda_provider_ == GDAProvider::ZXDH &&
+      sig_op == ROCSHMEM_SIGNAL_SET) {
+    putmem_wg(dest, source, nelems, pe);
+    if (is_thread_zero_in_block()) {
+      qps[pe].put_nbi(sig_addr, &signal, sizeof(signal), pe, 1,
+                      QueuePair::WAVE);
+      qps[pe].quiet();
+    }
+    return;
+  }
+#endif
   putmem_wg(dest, source, nelems, pe);
   fence();
 
@@ -385,6 +443,18 @@ __device__ void GDAContext::putmem_signal_wg(void *dest, const void *source, siz
 __device__ void GDAContext::putmem_signal_wave(void *dest, const void *source, size_t nelems,
                                                uint64_t *sig_addr, uint64_t signal, int sig_op,
                                                int pe) {
+#if defined(GDA_ZXDH)
+  if (gda_provider_ == GDAProvider::ZXDH &&
+      sig_op == ROCSHMEM_SIGNAL_SET) {
+    putmem_wave(dest, source, nelems, pe);
+    if (is_thread_zero_in_wave()) {
+      qps[pe].put_nbi(sig_addr, &signal, sizeof(signal), pe, 1,
+                      QueuePair::WAVE);
+      qps[pe].quiet();
+    }
+    return;
+  }
+#endif
   putmem_wave(dest, source, nelems, pe);
   fence();
 
