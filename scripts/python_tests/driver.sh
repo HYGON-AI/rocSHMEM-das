@@ -72,8 +72,8 @@ ValidateLogDir() {
 DetectGPUs() {
   if command -v amd-smi >/dev/null && amd-smi version 2>&1 >/dev/null; then
     NUM_GPUS=${NUM_GPUS:-$(amd-smi list | grep GPU | wc -l)}
-  elif command -v rocm-smi >/dev/null && rocm-smi --version 2>&1 >/dev/null; then
-    NUM_GPUS=${NUM_GPUS:-$(rocm-smi --showserial | grep GPU | wc -l)}
+  elif command -v hy-smi >/dev/null && hy-smi --version 2>&1 >/dev/null; then
+    NUM_GPUS=${NUM_GPUS:-$(hy-smi --showserial | grep HCU | wc -l)}
   fi
   NUM_GPUS=${NUM_GPUS:-0}
   NUM_GPUS=$(($NUM_GPUS > 0 ? $NUM_GPUS : 8))
