@@ -25,6 +25,8 @@
 #ifndef LIBRARY_SRC_GDA_CONTEXT_TMPL_DEVICE_HPP_
 #define LIBRARY_SRC_GDA_CONTEXT_TMPL_DEVICE_HPP_
 
+#include "device_arch.hpp"
+
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "rocshmem/rocshmem.hpp"
 #include "constmem.hpp"
@@ -659,9 +661,9 @@ __device__ void GDAContext::internal_ring_allreduce_wg(T *dst, const T *src,
         wait_val = seg + 100;
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
           send_pe, wf_info);
-#if defined(__gfx936__) || defined (__gfx938__)
+#if ROCSHMEM_ARCH_HYGON
         __threadfence_system();
-#endif /* __gfx936__ */
+#endif  // ROCSHMEM_ARCH_HYGON
         wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
       fence();
@@ -681,9 +683,9 @@ __device__ void GDAContext::internal_ring_allreduce_wg(T *dst, const T *src,
         wait_val = seg + 10;
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
           send_pe, wf_info);
-#if defined(__gfx936__) || defined (__gfx938__)
+#if ROCSHMEM_ARCH_HYGON
         __threadfence_system();
-#endif /* __gfx936__ */
+#endif  // ROCSHMEM_ARCH_HYGON
         wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
       fence();
@@ -735,9 +737,9 @@ __device__ void GDAContext::internal_ring_allreduce_wave(T *dst, const T *src,
         wait_val = seg + 100;
         internal_putmem_wave(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
           send_pe, wf_info);
-#if defined(__gfx936__) || defined (__gfx938__)
+#if ROCSHMEM_ARCH_HYGON
         __threadfence_system();
-#endif /* __gfx936__ */
+#endif  // ROCSHMEM_ARCH_HYGON
         wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
       fence();
@@ -758,9 +760,9 @@ __device__ void GDAContext::internal_ring_allreduce_wave(T *dst, const T *src,
         wait_val = seg + 10;
         internal_putmem_wave(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
           send_pe, wf_info);
-#if defined(__gfx936__) || defined (__gfx938__)
+#if ROCSHMEM_ARCH_HYGON
         __threadfence_system();
-#endif /* __gfx936__ */
+#endif  // ROCSHMEM_ARCH_HYGON
         wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
     }

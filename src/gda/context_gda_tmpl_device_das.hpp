@@ -12,6 +12,8 @@
 #ifndef LIBRARY_SRC_GDA_CONTEXT_TMPL_DEVICE_DAS_HPP_
 #define LIBRARY_SRC_GDA_CONTEXT_TMPL_DEVICE_DAS_HPP_
 
+#include "device_arch.hpp"
+
 #include "rocshmem/rocshmem_config.h"
 
 #if defined(USE_DAS)
@@ -282,9 +284,9 @@ __device__ void GDAContext::internal_ring_allreduce_das(T *dst, const T *src,
       if (is_thread_zero_in_block()) {
         wait_val = sequence_base + seg + 1;
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe, qp_index, wf_info);
-#if defined(__gfx936__) || defined (__gfx938__)
+#if ROCSHMEM_ARCH_HYGON
         __threadfence_system();
-#endif /* __gfx936__ */
+#endif  // ROCSHMEM_ARCH_HYGON
         wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
       __syncthreads();
@@ -303,9 +305,9 @@ __device__ void GDAContext::internal_ring_allreduce_das(T *dst, const T *src,
       if (is_thread_zero_in_block()) {
         wait_val = sequence_base + seg + 1;
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe, qp_index, wf_info);
-#if defined(__gfx936__) || defined (__gfx938__)
+#if ROCSHMEM_ARCH_HYGON
         __threadfence_system();
-#endif /* __gfx936__ */
+#endif  // ROCSHMEM_ARCH_HYGON
         wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
       __syncthreads();
