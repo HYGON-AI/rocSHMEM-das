@@ -25,6 +25,8 @@
 #ifndef LIBRARY_SRC_ASSEMBLY_HPP_
 #define LIBRARY_SRC_ASSEMBLY_HPP_
 
+#include "device_arch.hpp"
+
 #include <hip/hip_runtime.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
@@ -42,7 +44,7 @@ namespace rocshmem {
 
 __device__ __forceinline__ int uncached_load_ubyte([[maybe_unused]] uint8_t* src) {
   int ret = 0;
-#if defined(__gfx936__) || defined (__gfx938__) || defined (__gfx1100__)
+#if ROCSHMEM_ARCH_HYGON || defined (__gfx1100__)
   int16_t val16;
   asm volatile(
       "global_load_ubyte %0 %1 off glc slc \n"
@@ -83,7 +85,7 @@ __device__ __forceinline__ int uncached_load_ubyte([[maybe_unused]] uint8_t* src
 
 __device__ __forceinline__ void refresh_volatile_sbyte([[maybe_unused]] volatile int *assigned_value,
                                                        [[maybe_unused]] volatile char *read_value) {
-#if defined(__gfx936__) || defined (__gfx938__) || defined (__gfx1100__)
+#if ROCSHMEM_ARCH_HYGON || defined (__gfx1100__)
   int16_t val16;
   asm volatile(
     "global_load_sbyte %0 %1 off glc slc\n "
@@ -123,7 +125,7 @@ __device__ __forceinline__ void refresh_volatile_sbyte([[maybe_unused]] volatile
 
 __device__ __forceinline__ void refresh_volatile_dwordx2([[maybe_unused]] volatile uint64_t *assigned_value,
                                                          [[maybe_unused]] volatile uint64_t *read_value) {
-#if defined(__gfx936__) || defined (__gfx938__) || defined (__gfx1100__)
+#if ROCSHMEM_ARCH_HYGON || defined (__gfx1100__)
   asm volatile(
     "global_load_dwordx2 %0 %1 off glc slc\n "
     "s_waitcnt vmcnt(0)"
@@ -157,7 +159,7 @@ __device__ __forceinline__ T uncached_load([[maybe_unused]] T* src) {
   T ret{};
   switch (sizeof(T)) {
     case 1: {
-#if defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__)
+#if ROCSHMEM_ARCH_HYGON || defined(__gfx90a__)
     
       int16_t val16;
       asm volatile(
@@ -201,7 +203,7 @@ __device__ __forceinline__ T uncached_load([[maybe_unused]] T* src) {
       break;
     }
     case 2: {
-#if defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__)
+#if ROCSHMEM_ARCH_HYGON || defined(__gfx90a__)
       asm volatile(
           "global_load_ushort %0 %1 off glc slc \n"
           "s_waitcnt vmcnt(0)"
@@ -240,7 +242,7 @@ __device__ __forceinline__ T uncached_load([[maybe_unused]] T* src) {
       break;
     }
     case 4: {
-#if defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__) || defined(__gfx1100__)
+#if ROCSHMEM_ARCH_HYGON || defined(__gfx90a__) || defined(__gfx1100__)
       asm volatile(
           "global_load_dword %0 %1 off glc slc \n"
           "s_waitcnt vmcnt(0)"
@@ -267,7 +269,7 @@ __device__ __forceinline__ T uncached_load([[maybe_unused]] T* src) {
       break;
     }
     case 8: {
-#if defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__) || defined(__gfx1100__)
+#if ROCSHMEM_ARCH_HYGON || defined(__gfx90a__) || defined(__gfx1100__)
       asm volatile(
           "global_load_dwordx2 %0 %1 off glc slc \n"
           "s_waitcnt vmcnt(0)"
@@ -294,7 +296,7 @@ __device__ __forceinline__ T uncached_load([[maybe_unused]] T* src) {
       break;
     }
     case 16: {
-#if defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__) || defined(__gfx1100__)
+#if ROCSHMEM_ARCH_HYGON || defined(__gfx90a__) || defined(__gfx1100__)
       asm volatile(
           "global_load_dwordx4 %0 %1 off glc slc \n"
           "s_waitcnt vmcnt(0)"
@@ -332,7 +334,7 @@ __device__ __forceinline__ void __roc_flush() {
 #endif
 #if defined(__gfx908__) || defined(__gfx1100__)
 #endif
-#if defined(__gfx936__) || defined (__gfx938__)
+#if ROCSHMEM_ARCH_HYGON
 //  asm volatile("s_dcache_wb;");
 //  asm volatile("buffer_wbl2;");
 #endif
@@ -348,7 +350,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
                                         int size) {
   switch (size) {
     case 1: [[unlikely]] {
-#if defined(__gfx90a__) || defined(__gfx936__) || defined (__gfx938__)
+#if defined(__gfx90a__) || ROCSHMEM_ARCH_HYGON
       int16_t val16{static_cast<int16_t>(*src)};
       asm volatile("flat_store_byte %0, %1, glc slc"
                    :
@@ -380,7 +382,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
     }
     case 2: [[unlikely]] {
       [[maybe_unused]] int16_t val16{*(reinterpret_cast<int16_t*>(src))};
-#if defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__)
+#if ROCSHMEM_ARCH_HYGON || defined(__gfx90a__)
       asm volatile("flat_store_short %0, %1, glc slc"
                    :
                    : "v"(dst), "v"(val16)
@@ -410,7 +412,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
     }
     case 4: [[unlikely]] {
       [[maybe_unused]] int32_t val32{*(reinterpret_cast<int32_t*>(src))};
-#if defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__) || defined(__gfx1100__)
+#if ROCSHMEM_ARCH_HYGON || defined(__gfx90a__) || defined(__gfx1100__)
       asm volatile("flat_store_dword %0, %1, glc slc"
                    :
                    : "v"(dst), "v"(val32)
@@ -432,7 +434,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
     }
     case 8: [[unlikely]] {
       [[maybe_unused]] int64_t val64{*(reinterpret_cast<int64_t*>(src))};
-#if  defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__) || defined(__gfx1100__)
+#if  ROCSHMEM_ARCH_HYGON || defined(__gfx90a__) || defined(__gfx1100__)
       asm volatile("flat_store_dwordx2 %0, %1, glc slc"
                    :
                    : "v"(dst), "v"(val64)
@@ -454,7 +456,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
     }
     case 12: [[unlikely]] { // Note: The branch cannot be reached now.
       int3 val96{*(reinterpret_cast<int3*>(src))};
-#if defined(__gfx936__) || defined (__gfx938__) || defined (__gfx1100__)
+#if ROCSHMEM_ARCH_HYGON || defined (__gfx1100__)
       int32_t* val32_ptr = reinterpret_cast<int32_t*>(&val96);
       int32_t* dst32_ptr = reinterpret_cast<int32_t*>(dst);
       __builtin_nontemporal_store(val32_ptr[0], &dst32_ptr[0]);
@@ -478,7 +480,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
     }
     case 16: [[likely]] {
       [[maybe_unused]] __int128_t val128{*(reinterpret_cast<__int128_t*>(src))};
-#if defined(__gfx90a__) || defined(__gfx1100__) || defined(__gfx936__) || defined (__gfx938__)
+#if defined(__gfx90a__) || defined(__gfx1100__) || ROCSHMEM_ARCH_HYGON
       asm volatile("flat_store_dwordx4 %0, %1, glc slc"
                    :
                    : "v"(dst), "v"(val128)
@@ -508,7 +510,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
                                         int size) {
   switch (size) {
     case 1: [[unlikely]] {
-#if defined(__gfx90a__) || defined(__gfx936__) || defined (__gfx938__)
+#if defined(__gfx90a__) || ROCSHMEM_ARCH_HYGON
       int16_t val16;
       asm volatile(
           "flat_load_ubyte %0, %1, glc slc\n"
@@ -551,7 +553,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
       break;
     }
     case 2: [[unlikely]] {
-#if defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__)
+#if ROCSHMEM_ARCH_HYGON || defined(__gfx90a__)
       int16_t val16;
       asm volatile(
           "flat_load_ushort %0, %1, glc slc\n"
@@ -594,7 +596,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
       break;
     }
     case 4: [[unlikely]] {
-#if defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__) || defined(__gfx1100__)
+#if ROCSHMEM_ARCH_HYGON || defined(__gfx90a__) || defined(__gfx1100__)
       int32_t val32;
       asm volatile(
           "flat_load_dword %0, %1, glc slc\n"
@@ -627,7 +629,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
       break;
     }
     case 8: [[unlikely]] {
-#if defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__) || defined(__gfx1100__)
+#if ROCSHMEM_ARCH_HYGON || defined(__gfx90a__) || defined(__gfx1100__)
       int64_t val64;
       asm volatile(
           "flat_load_dwordx2 %0, %1, glc slc\n"
@@ -660,7 +662,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
       break;
     }
     case 12: [[unlikely]] {  // Note: The branch cannot be reached now.
-#if defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__) || defined(__gfx1100__)
+#if ROCSHMEM_ARCH_HYGON || defined(__gfx90a__) || defined(__gfx1100__)
       int32_t* src32_ptr = reinterpret_cast<int32_t*>(src);
       int32_t* dst32_ptr = reinterpret_cast<int32_t*>(dst);
       dst32_ptr[0] = src32_ptr[0];
@@ -691,7 +693,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
       break;
     }      
     case 16: [[likely]] {
-#if defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__) || defined(__gfx1100__)
+#if ROCSHMEM_ARCH_HYGON || defined(__gfx90a__) || defined(__gfx1100__)
       __int128_t val128;
       asm volatile(
           "flat_load_dwordx4 %0, %1, glc slc\n"
@@ -857,7 +859,7 @@ struct AsmAccess<16, LoadPolicy, StorePolicy> {
         asm volatile("flat_load_dwordx4 %0, %1, sc0 sc1 nt\n"
                      "s_waitcnt vmcnt(0)" : "=&v"(val) : "v"(src) : "memory");
       }
-#elif defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__) || defined(__gfx1100__)
+#elif ROCSHMEM_ARCH_HYGON || defined(__gfx90a__) || defined(__gfx1100__)
       if constexpr (LoadPolicy == CachePolicy::FlatCache) {
         asm volatile("flat_load_dwordx4 %0, %1\n"
                      "s_waitcnt vmcnt(0)" : "=&v"(val) : "v"(src) : "memory");
@@ -902,7 +904,7 @@ struct AsmAccess<16, LoadPolicy, StorePolicy> {
       } else if constexpr (StorePolicy == CachePolicy::SystemScopeNT) {
         asm volatile("flat_store_dwordx4 %0, %1, sc0 sc1 nt" : : "v"(dst), "v"(val) : "memory");
       }
-#elif defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__) || defined(__gfx1100__)
+#elif ROCSHMEM_ARCH_HYGON || defined(__gfx90a__) || defined(__gfx1100__)
       if constexpr (StorePolicy == CachePolicy::FlatCache) {
         asm volatile("flat_store_dwordx4 %0, %1" : : "v"(dst), "v"(val) : "memory");
       } else if constexpr (StorePolicy == CachePolicy::DeviceScope) {
@@ -973,7 +975,7 @@ struct AsmAccess<8, LoadPolicy, StorePolicy> {
         asm volatile("flat_load_dwordx2 %0, %1, sc0 sc1 nt\n"
                      "s_waitcnt vmcnt(0)" : "=&v"(val) : "v"(src) : "memory");
       }
-#elif defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__) || defined(__gfx1100__)
+#elif ROCSHMEM_ARCH_HYGON || defined(__gfx90a__) || defined(__gfx1100__)
       if constexpr (LoadPolicy == CachePolicy::FlatCache) {
         asm volatile("flat_load_dwordx2 %0, %1\n"
                      "s_waitcnt vmcnt(0)" : "=&v"(val) : "v"(src) : "memory");
@@ -1018,7 +1020,7 @@ struct AsmAccess<8, LoadPolicy, StorePolicy> {
       } else if constexpr (StorePolicy == CachePolicy::SystemScopeNT) {
         asm volatile("flat_store_dwordx2 %0, %1, sc0 sc1 nt" : : "v"(dst), "v"(val) : "memory");
       }
-#elif defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__) || defined(__gfx1100__)
+#elif ROCSHMEM_ARCH_HYGON || defined(__gfx90a__) || defined(__gfx1100__)
       if constexpr (StorePolicy == CachePolicy::FlatCache) {
         asm volatile("flat_store_dwordx2 %0, %1" : : "v"(dst), "v"(val) : "memory");
       } else if constexpr (StorePolicy == CachePolicy::DeviceScope) {
@@ -1089,7 +1091,7 @@ struct AsmAccess<4, LoadPolicy, StorePolicy> {
         asm volatile("flat_load_dword %0, %1, sc0 sc1 nt\n"
                      "s_waitcnt vmcnt(0)" : "=&v"(val) : "v"(src) : "memory");
       }
-#elif defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__) || defined(__gfx1100__)
+#elif ROCSHMEM_ARCH_HYGON || defined(__gfx90a__) || defined(__gfx1100__)
       if constexpr (LoadPolicy == CachePolicy::FlatCache) {
         asm volatile("flat_load_dword %0, %1\n"
                      "s_waitcnt vmcnt(0)" : "=&v"(val) : "v"(src) : "memory");
@@ -1134,7 +1136,7 @@ struct AsmAccess<4, LoadPolicy, StorePolicy> {
       } else if constexpr (StorePolicy == CachePolicy::SystemScopeNT) {
         asm volatile("flat_store_dword %0, %1, sc0 sc1 nt" : : "v"(dst), "v"(val) : "memory");
       }
-#elif defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__) || defined(__gfx1100__)
+#elif ROCSHMEM_ARCH_HYGON || defined(__gfx90a__) || defined(__gfx1100__)
       if constexpr (StorePolicy == CachePolicy::FlatCache) {
         asm volatile("flat_store_dword %0, %1" : : "v"(dst), "v"(val) : "memory");
       } else if constexpr (StorePolicy == CachePolicy::DeviceScope) {
@@ -1187,7 +1189,7 @@ struct AsmAccess<2, LoadPolicy, StorePolicy> {
     if constexpr (LoadPolicy == CachePolicy::Standard) {
       return *reinterpret_cast<type*>(src);
     } else {
-#if defined(__gfx936__) || defined (__gfx938__) || defined(__gfx942__) || defined(__gfx950__) || defined(__gfx90a__)
+#if ROCSHMEM_ARCH_HYGON || defined(__gfx942__) || defined(__gfx950__) || defined(__gfx90a__)
       int16_t val{};  // Gfx9 supports native 16-bit vector registers
   #if defined(__gfx942__) || defined(__gfx950__)
       if constexpr (LoadPolicy == CachePolicy::FlatCache) {
@@ -1255,7 +1257,7 @@ struct AsmAccess<2, LoadPolicy, StorePolicy> {
     if constexpr (StorePolicy == CachePolicy::Standard) {
       *reinterpret_cast<type*>(dst) = val;
     } else {
-#if defined(__gfx936__) || defined (__gfx938__) || defined(__gfx942__) || defined(__gfx950__) || defined(__gfx90a__)
+#if ROCSHMEM_ARCH_HYGON || defined(__gfx942__) || defined(__gfx950__) || defined(__gfx90a__)
       int16_t val16 = val;
   #if defined(__gfx942__) || defined(__gfx950__)
       if constexpr (StorePolicy == CachePolicy::FlatCache) {
@@ -1334,7 +1336,7 @@ struct AsmAccess<1, LoadPolicy, StorePolicy> {
     if constexpr (LoadPolicy == CachePolicy::Standard) {
       return *reinterpret_cast<type*>(src);
     } else {
-#if defined(__gfx936__) || defined (__gfx938__) || defined(__gfx942__) || defined(__gfx950__) || defined(__gfx90a__)
+#if ROCSHMEM_ARCH_HYGON || defined(__gfx942__) || defined(__gfx950__) || defined(__gfx90a__)
       int16_t val{};  // Gfx9 loads bytes into 16-bit registers minimum
   #if defined(__gfx942__) || defined(__gfx950__)
       if constexpr (LoadPolicy == CachePolicy::FlatCache) {
@@ -1402,7 +1404,7 @@ struct AsmAccess<1, LoadPolicy, StorePolicy> {
     if constexpr (StorePolicy == CachePolicy::Standard) {
       *reinterpret_cast<type*>(dst) = val;
     } else {
-#if defined(__gfx936__) || defined (__gfx938__) || defined(__gfx942__) || defined(__gfx950__) || defined(__gfx90a__)
+#if ROCSHMEM_ARCH_HYGON || defined(__gfx942__) || defined(__gfx950__) || defined(__gfx90a__)
       int16_t val16 = static_cast<int16_t>(val);
   #if defined(__gfx942__) || defined(__gfx950__)
       if constexpr (StorePolicy == CachePolicy::FlatCache) {
@@ -1489,7 +1491,7 @@ __device__ __forceinline__ void wait_on_vmem_loads([[maybe_unused]] int waits) {
     case 1:  asm volatile("s_wait_loadcnt 1"  ::: "memory"); break;
     default: asm volatile("s_wait_loadcnt 0"  ::: "memory"); break;
   }
-#elif defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__) || defined(__gfx942__) || \
+#elif ROCSHMEM_ARCH_HYGON || defined(__gfx90a__) || defined(__gfx942__) || \
       defined(__gfx950__) || defined(__gfx1100__)
   switch (waits) {
     case 15: asm volatile("s_waitcnt vmcnt(15)" ::: "memory"); break;
@@ -1532,7 +1534,7 @@ __device__ __forceinline__ void wait_on_vmem_stores([[maybe_unused]] int waits) 
     case 1:  asm volatile("s_wait_storecnt 1"  ::: "memory"); break;
     default: asm volatile("s_wait_storecnt 0"  ::: "memory"); break;
   }
-#elif defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__) || defined(__gfx942__) || \
+#elif ROCSHMEM_ARCH_HYGON || defined(__gfx90a__) || defined(__gfx942__) || \
       defined(__gfx950__) || defined(__gfx1100__)
   switch (waits) {
     case 15: asm volatile("s_waitcnt vmcnt(15)" ::: "memory"); break;
@@ -1560,7 +1562,7 @@ __device__ __forceinline__ void wait_on_vmem([[maybe_unused]] int waits) {
   // GFX12 has no unified vmcnt; issue both load and store waits separately.
   wait_on_vmem_loads(waits);
   wait_on_vmem_stores(waits);
-#elif defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__) || defined(__gfx942__) || \
+#elif ROCSHMEM_ARCH_HYGON || defined(__gfx90a__) || defined(__gfx942__) || \
       defined(__gfx950__) || defined(__gfx1100__)
   wait_on_vmem_loads(waits);  // vmcnt covers both loads and stores on GFX9
 #endif
@@ -1590,7 +1592,7 @@ __device__ __forceinline__ void wait_on_vmem_and_lds([[maybe_unused]] int waits)
     case 1:  asm volatile("s_wait_dscnt 1"  ::: "memory"); break;
     default: asm volatile("s_wait_dscnt 0"  ::: "memory"); break;
   }
-#elif defined(__gfx936__) || defined (__gfx938__) || defined(__gfx90a__) || defined(__gfx942__) || \
+#elif ROCSHMEM_ARCH_HYGON || defined(__gfx90a__) || defined(__gfx942__) || \
       defined(__gfx950__) || defined(__gfx1100__)
   // vmcnt covers both loads and stores; lgkmcnt covers LDS (DS) operations.
   switch (waits) {

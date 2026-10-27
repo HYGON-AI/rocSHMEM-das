@@ -22,6 +22,8 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
+#include "device_arch.hpp"
+
 #include "rocshmem/rocshmem.hpp"
 #include "context_incl.hpp"
 #include "context_gda_tmpl_device.hpp"
@@ -36,9 +38,9 @@ __device__ void GDAContext::internal_direct_barrier(int pe, int PE_start,
   if (pe == PE_start) {
     // Go through all PE offsets (except current offset = 0)
     // and wait until they all reach
-#if defined(__gfx936__) || defined (__gfx938__)
+#if ROCSHMEM_ARCH_HYGON
     __threadfence_system();
-#endif /* __gfx936__ */
+#endif  // ROCSHMEM_ARCH_HYGON
     for (int i = 1; i < n_pes; i++) {
       wait_until(&pSync[i], ROCSHMEM_CMP_EQ, flag_val);
       pSync[i] = ROCSHMEM_SYNC_VALUE;
@@ -49,9 +51,9 @@ __device__ void GDAContext::internal_direct_barrier(int pe, int PE_start,
     for (int i = 1, j = PE_start + stride; i < n_pes; ++i, j += stride) {
       pSync[0] = flag_val;
       internal_putmem(&pSync[0], &pSync[0], sizeof(*pSync), j, j, wf_info);
-#if defined(__gfx936__) || defined (__gfx938__)
+#if ROCSHMEM_ARCH_HYGON
       __threadfence_system();
-#endif /* __gfx936__ */
+#endif  // ROCSHMEM_ARCH_HYGON
     }
     pSync[0] = ROCSHMEM_SYNC_VALUE;
   } else {
@@ -60,9 +62,9 @@ __device__ void GDAContext::internal_direct_barrier(int pe, int PE_start,
     pSync[pe_offset] = flag_val;
     internal_putmem(&pSync[pe_offset], &pSync[pe_offset], sizeof(*pSync),
       PE_start, PE_start, wf_info);
-#if defined(__gfx936__) || defined (__gfx938__)
+#if ROCSHMEM_ARCH_HYGON
     __threadfence_system();
-#endif /* __gfx936__ */
+#endif  // ROCSHMEM_ARCH_HYGON
     wait_until(&pSync[0], ROCSHMEM_CMP_EQ, flag_val);
     pSync[0] = ROCSHMEM_SYNC_VALUE;
     pSync[pe_offset] = ROCSHMEM_SYNC_VALUE;

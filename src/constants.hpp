@@ -1,3 +1,5 @@
+#include "device_arch.hpp"
+
 /******************************************************************************
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
@@ -57,7 +59,7 @@ inline const unsigned MAX_WG_SIZE{1024};
  *
  * @note Wavefront size on most systems is either 32 or 64.
  */
-#if defined(__gfx936__) || defined(__gfx938__) || defined(__gfx942__) || defined (__gfx950__)
+#if ROCSHMEM_ARCH_HYGON || defined(__gfx942__) || defined (__gfx950__)
 inline const int WF_SIZE{64};
 #else
 inline const int WF_SIZE{32};

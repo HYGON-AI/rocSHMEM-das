@@ -24,6 +24,8 @@
 #ifndef LIBRARY_SRC_SDMA_ANVIL_DEVICE_HPP_
 #define LIBRARY_SRC_SDMA_ANVIL_DEVICE_HPP_
 
+#include "device_arch.hpp"
+
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime_api.h>
 #include <stdint.h>
@@ -291,7 +293,7 @@ struct SdmaQueueDeviceHandle {
         // inactive, so that other lanes in the same wavefront can proceed.
 #if defined(__GFX12__)
         asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
-#elif defined(__gfx936__) || defined(__gfx938__)
+#elif ROCSHMEM_ARCH_HYGON
         __builtin_amdgcn_s_waitcnt(0);
         __threadfence_system();
 #else
@@ -304,7 +306,7 @@ struct SdmaQueueDeviceHandle {
 
 #if defined(__GFX12__)
         asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
-#elif defined(__gfx936__) || defined(__gfx938__)
+#elif ROCSHMEM_ARCH_HYGON
         __builtin_amdgcn_s_waitcnt(0);
         __threadfence_system();
 #else
@@ -317,7 +319,7 @@ struct SdmaQueueDeviceHandle {
 
 #if defined(__GFX12__)
         asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
-#elif defined(__gfx936__) || defined(__gfx938__)
+#elif ROCSHMEM_ARCH_HYGON
         __builtin_amdgcn_s_waitcnt(0);
         __threadfence_system();
 #else
@@ -330,7 +332,7 @@ struct SdmaQueueDeviceHandle {
 
 #if defined(__GFX12__)
         asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
-#elif defined(__gfx936__) || defined(__gfx938__)
+#elif ROCSHMEM_ARCH_HYGON
         __builtin_amdgcn_s_waitcnt(0);
         __threadfence_system();
 #else
@@ -384,7 +386,7 @@ struct SdmaQueueDeviceHandle {
                          : "=v"(vdst)
                          : "v"(vaddr), "v"(vdata)
                          : "memory");
-#elif defined(__gfx936__) || defined(__gfx938__)
+#elif ROCSHMEM_ARCH_HYGON
     __asm__ __volatile__("flat_atomic_cmpswap_x2 %0, %1, %2 sc0 nt;\n s_waitcnt vmcnt(0); \n\t"
                          : "=v"(vdst)
                          : "v"(vaddr), "v"(vdata));
@@ -464,7 +466,7 @@ struct SdmaQueueSingleProducerDeviceHandle : SdmaQueueDeviceHandle {
     *wptr = pendingWptr;
 #if defined(__GFX12__)
     asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
-#elif defined(__gfx936__) || defined(__gfx938__)
+#elif ROCSHMEM_ARCH_HYGON
     __builtin_amdgcn_s_waitcnt(0);
     __threadfence_system();
 #else
