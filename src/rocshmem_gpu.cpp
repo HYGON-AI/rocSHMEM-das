@@ -528,6 +528,28 @@ get_backend_ctx(rocshmem_ctx_t ctx) {
       get_backend_ctx<BackendType::IPC_BACKEND>(CTX)->FUNC;             \
       break;                                                            \
   }
+#elif defined(USE_RO) && defined(USE_IPC)
+#define ROCSHMEM_DIRECT_BACKEND_DISPATCH(CTX, FUNC) \
+  switch (constmem.backend_type) { \
+    case BackendType::RO_BACKEND: \
+      get_backend_ctx<BackendType::RO_BACKEND>(CTX)->FUNC; \
+      break; \
+    case BackendType::IPC_BACKEND: \
+    default: \
+      get_backend_ctx<BackendType::IPC_BACKEND>(CTX)->FUNC; \
+      break; \
+  }
+#elif defined(USE_GDA) && defined(USE_IPC)
+#define ROCSHMEM_DIRECT_BACKEND_DISPATCH(CTX, FUNC) \
+  switch (constmem.backend_type) { \
+    case BackendType::GDA_BACKEND: \
+      get_backend_ctx<BackendType::GDA_BACKEND>(CTX)->FUNC; \
+      break; \
+    case BackendType::IPC_BACKEND: \
+    default: \
+      get_backend_ctx<BackendType::IPC_BACKEND>(CTX)->FUNC; \
+      break; \
+  }
 #elif defined(USE_GDA)
 #define ROCSHMEM_DIRECT_BACKEND_DISPATCH(CTX, FUNC) \
   get_backend_ctx<BackendType::GDA_BACKEND>(CTX)->FUNC
@@ -550,6 +572,24 @@ get_backend_ctx(rocshmem_ctx_t ctx) {
   } else {                                                              \
     auto ret3 = get_backend_ctx<BackendType::IPC_BACKEND>(CTX)->FUNC;   \
     return ret3;                                                        \
+  }
+#elif defined(USE_RO) && defined(USE_IPC)
+#define ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET(CTX, FUNC) \
+  if (constmem.backend_type == BackendType::RO_BACKEND) { \
+    auto ret_val = get_backend_ctx<BackendType::RO_BACKEND>(CTX)->FUNC; \
+    return ret_val; \
+  } else { \
+    auto ret_val = get_backend_ctx<BackendType::IPC_BACKEND>(CTX)->FUNC; \
+    return ret_val; \
+  }
+#elif defined(USE_GDA) && defined(USE_IPC)
+#define ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET(CTX, FUNC) \
+  if (constmem.backend_type == BackendType::GDA_BACKEND) { \
+    auto ret_val = get_backend_ctx<BackendType::GDA_BACKEND>(CTX)->FUNC; \
+    return ret_val; \
+  } else { \
+    auto ret_val = get_backend_ctx<BackendType::IPC_BACKEND>(CTX)->FUNC; \
+    return ret_val; \
   }
 #elif defined(USE_GDA)
 #define ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET(CTX, FUNC)                 \
@@ -580,6 +620,32 @@ get_backend_ctx(rocshmem_ctx_t ctx) {
       ret_val = get_backend_ctx<BackendType::IPC_BACKEND>(CTX)->FUNC;   \
       break;                                                            \
   }                                                                     \
+  return ret_val;
+#elif defined(USE_RO) && defined(USE_IPC)
+#define ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET_PTR(CTX, FUNC) \
+  void *ret_val{nullptr}; \
+  switch (constmem.backend_type) { \
+    case BackendType::RO_BACKEND: \
+      ret_val = get_backend_ctx<BackendType::RO_BACKEND>(CTX)->FUNC; \
+      break; \
+    case BackendType::IPC_BACKEND: \
+    default: \
+      ret_val = get_backend_ctx<BackendType::IPC_BACKEND>(CTX)->FUNC; \
+      break; \
+  } \
+  return ret_val;
+#elif defined(USE_GDA) && defined(USE_IPC)
+#define ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET_PTR(CTX, FUNC) \
+  void *ret_val{nullptr}; \
+  switch (constmem.backend_type) { \
+    case BackendType::GDA_BACKEND: \
+      ret_val = get_backend_ctx<BackendType::GDA_BACKEND>(CTX)->FUNC; \
+      break; \
+    case BackendType::IPC_BACKEND: \
+    default: \
+      ret_val = get_backend_ctx<BackendType::IPC_BACKEND>(CTX)->FUNC; \
+      break; \
+  } \
   return ret_val;
 #elif defined(USE_GDA)
 #define ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET_PTR(CTX, FUNC)             \
@@ -1279,6 +1345,26 @@ __device__ __forceinline__ bool direct_create_ctx(int64_t options,
       return get_backend<BackendType::IPC_BACKEND>(device_backend_proxy)
           ->create_ctx(options, ctx);
   }
+#elif defined(USE_RO) && defined(USE_IPC)
+  switch (constmem.backend_type) {
+    case BackendType::RO_BACKEND:
+      return get_backend<BackendType::RO_BACKEND>(device_backend_proxy)
+          ->create_ctx(options, ctx);
+    case BackendType::IPC_BACKEND:
+    default:
+      return get_backend<BackendType::IPC_BACKEND>(device_backend_proxy)
+          ->create_ctx(options, ctx);
+  }
+#elif defined(USE_GDA) && defined(USE_IPC)
+  switch (constmem.backend_type) {
+    case BackendType::GDA_BACKEND:
+      return get_backend<BackendType::GDA_BACKEND>(device_backend_proxy)
+          ->create_ctx(options, ctx);
+    case BackendType::IPC_BACKEND:
+    default:
+      return get_backend<BackendType::IPC_BACKEND>(device_backend_proxy)
+          ->create_ctx(options, ctx);
+  }
 #elif defined(USE_GDA)
   return get_backend<BackendType::GDA_BACKEND>(device_backend_proxy)
       ->create_ctx(options, ctx);
@@ -1300,6 +1386,30 @@ __device__ __forceinline__ void direct_destroy_ctx(rocshmem_ctx_t *ctx) {
       break;
     case BackendType::RO_BACKEND:
       get_backend<BackendType::RO_BACKEND>(device_backend_proxy)
+          ->destroy_ctx(ctx);
+      break;
+    case BackendType::IPC_BACKEND:
+    default:
+      get_backend<BackendType::IPC_BACKEND>(device_backend_proxy)
+          ->destroy_ctx(ctx);
+      break;
+  }
+#elif defined(USE_RO) && defined(USE_IPC)
+  switch (constmem.backend_type) {
+    case BackendType::RO_BACKEND:
+      get_backend<BackendType::RO_BACKEND>(device_backend_proxy)
+          ->destroy_ctx(ctx);
+      break;
+    case BackendType::IPC_BACKEND:
+    default:
+      get_backend<BackendType::IPC_BACKEND>(device_backend_proxy)
+          ->destroy_ctx(ctx);
+      break;
+  }
+#elif defined(USE_GDA) && defined(USE_IPC)
+  switch (constmem.backend_type) {
+    case BackendType::GDA_BACKEND:
+      get_backend<BackendType::GDA_BACKEND>(device_backend_proxy)
           ->destroy_ctx(ctx);
       break;
     case BackendType::IPC_BACKEND:
