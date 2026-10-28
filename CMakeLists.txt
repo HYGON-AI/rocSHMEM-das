@@ -106,9 +106,9 @@ include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
 # Original upstream version
 # set(VERSION_STRING 3.5.0)
 
-# Self-developed version (default 1.0.0), can be overridden via ROCSHMEM_VERSION env var or tag
+# Self-developed version (initial v1.0.0), overridable via ROCSHMEM_VERSION or tag
 # Prefer an explicit environment version, then a release tag, then the default.
-set(VERSION_STRING "1.0.0")
+set(VERSION_STRING "1.1.0")
 if(DEFINED ENV{ROCSHMEM_VERSION})
   set(VERSION_STRING "$ENV{ROCSHMEM_VERSION}")
 else()
