@@ -17,7 +17,7 @@ validate_run_package() {
     sh "$installer" --prefix "$destination" || return 1
     test -s "$destination/lib/librocshmem.a" &&
         test -s "$destination/lib/cmake/rocshmem/rocshmem-config.cmake" &&
-        test -x "$destination/share/rocshmem/rocshmem_functional_tests" &&
+        test -x "$destination/bin/rocshmem_functional_tests" &&
         test -x "$destination/share/rocshmem/run_ctest.sh" &&
         test -s "$destination/share/rocshmem/rocshmem-env.sh" &&
         test -x "$destination/bin/rocshmem-uninstall" &&
