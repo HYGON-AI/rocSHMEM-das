@@ -1,7 +1,7 @@
 # rocSHMEM 单元测试驱动脚本使用文档
 
-> 脚本路径：`scripts/unit_tests/driver.sh`
-> 适用对象：rocSHMEM 单元测试二进制 `rocshmem_unit_tests`
+> 源码路径：`scripts/unit_tests/driver.sh`；安装后路径：`<安装前缀>/share/rocshmem/rocshmem_unit_driver.sh`
+> 适用对象：rocSHMEM 单元测试二进制 `rocshmem_unit_tests`；安装后路径：`<安装前缀>/bin/rocshmem_unit_tests`
 
 ## 1. 概述
 
@@ -125,6 +125,16 @@ unit_tests_<YYYY-MM-DD-HH:MM:SS>.log
 - 结束时打印 `Tests Completed` 与日志文件路径
 
 ## 8. 典型用法示例
+
+安装后的驱动脚本位于 `<安装前缀>/share/rocshmem`，测试程序位于 `<安装前缀>/bin`：
+
+```bash
+ROCSHMEM_INSTALL_PREFIX=/path/to/install-prefix
+"${ROCSHMEM_INSTALL_PREFIX}/share/rocshmem/rocshmem_unit_driver.sh" \
+  "${ROCSHMEM_INSTALL_PREFIX}/bin/rocshmem_unit_tests" all
+```
+
+以下示例使用源码构建目录，测试程序仍位于 `<构建目录>/tests/unit_tests`。
 
 ### 8.1 基础用法
 

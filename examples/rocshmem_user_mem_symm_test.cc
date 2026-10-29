@@ -99,7 +99,7 @@ static bool check_recvbuf(int *dest, int nelem, int my_pe, int npes) {
       if (dest[idx] != result) {
         res = false;
 #ifdef VERBOSE
-        std::cout << "recvbuf[" << i << "] = " << dest[i] << " expected "
+        std::cout << "recvbuf[" << idx << "] = " << dest[idx] << " expected "
                   << result << std::endl;
 #endif
       }

@@ -454,6 +454,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case TeamFCollectOnStreamTestType:
       test_name = "FCollect_On_Stream";
       testers.push_back(new TeamFcollectOnStreamTester(args));
+      break;
     case AllToAllWaveTestType:
       test_name = "AllToAll Wave Test";
       testers.push_back(new AlltoallWaveTester<float>(args));

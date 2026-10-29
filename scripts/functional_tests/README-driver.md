@@ -1,7 +1,7 @@
 # rocSHMEM 功能测试驱动脚本使用文档
 
 > 源码路径：`scripts/functional_tests/driver.sh`；安装后路径：`<安装前缀>/share/rocshmem/rocshmem_functional_driver.sh`
-> 适用对象：rocSHMEM 功能测试套件 `rocshmem_functional_tests`
+> 适用对象：rocSHMEM 功能测试套件 `rocshmem_functional_tests`；安装后路径：`<安装前缀>/bin/rocshmem_functional_tests`
 
 ## 1. 概述
 
@@ -14,7 +14,7 @@
 - 失败用例自动重试（阈值可配置）
 - 可选生成性能热力图等可视化产物
 
-安装测试组件后，驱动脚本与测试程序位于同一目录；直接运行示例见第 7 节。
+安装测试组件后，驱动脚本位于 `<安装前缀>/share/rocshmem`，测试程序位于 `<安装前缀>/bin`；直接运行示例见第 7 节。
 
 ## 2. 命令行用法
 
@@ -186,21 +186,24 @@ ROCSHMEM_TEST_SLR=1 ./driver.sh $APP all logs
 
 ## 7. 典型用法示例
 
-**安装包直接运行**：将下例的安装前缀替换为构建时使用的 `INSTALL_PREFIX`（即 `CMAKE_INSTALL_PREFIX`）。驱动脚本与测试程序同在 `<安装前缀>/share/rocshmem`，日志写入可写的 `/tmp` 目录。
+以下示例统一使用驱动脚本 `$DRIVER` 和测试程序 `$APP`。根据使用方式，选择下面一组设置，并将占位路径替换为实际路径。运行时请在可写目录下执行，或将日志目录改为可写的绝对路径。
 
-```bash
-ROCSHMEM_INSTALL_PREFIX=/path/to/install-prefix
-cd "${ROCSHMEM_INSTALL_PREFIX}/share/rocshmem"
-./rocshmem_functional_driver.sh ./rocshmem_functional_tests rma /tmp/rocshmem-test-logs
-```
-
-以下示例以源码构建目录为例。先将 `BUILD_DIR` 替换为实际构建目录，并设置共用的测试程序和驱动脚本路径；使用安装包时，改用上面的安装路径。
+**方式一：源码构建路径**
 
 ```bash
 BUILD_DIR=/path/to/rocshmem/build
-cd "$BUILD_DIR"
-APP=tests/functional_tests/rocshmem_functional_tests
-DRIVER=../scripts/functional_tests/driver.sh
+DRIVER="${BUILD_DIR}/tests/functional_tests/rocshmem_functional_driver.sh"
+APP="${BUILD_DIR}/tests/functional_tests/rocshmem_functional_tests"
+```
+
+**方式二：安装路径**
+
+`ROCSHMEM_INSTALL_PREFIX` 对应构建时的 `CMAKE_INSTALL_PREFIX`。驱动脚本位于 `share/rocshmem`，测试程序位于 `bin`。
+
+```bash
+ROCSHMEM_INSTALL_PREFIX=/path/to/install-prefix
+DRIVER="${ROCSHMEM_INSTALL_PREFIX}/share/rocshmem/rocshmem_functional_driver.sh"
+APP="${ROCSHMEM_INSTALL_PREFIX}/bin/rocshmem_functional_tests"
 ```
 
 ### 7.1 单节点 MPI 基础功能测试
