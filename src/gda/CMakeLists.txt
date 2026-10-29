@@ -45,3 +45,7 @@ add_subdirectory(ionic)
 if(GDA_SHCA)
   add_subdirectory(shca)
 endif()
+
+if(GDA_MLX5 AND GDA_SHCA)
+  add_subdirectory(verbs_adapter)
+endif()

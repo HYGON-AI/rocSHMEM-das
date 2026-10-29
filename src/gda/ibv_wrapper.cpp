@@ -38,10 +38,17 @@ namespace rocshmem {
 
 IBVWrapper ibv;
 
+#if defined(GDA_MLX5) && defined(GDA_SHCA)
+#include "verbs_adapter/ibv_wrapper_adapter.inc"
+#endif
+
 IBVWrapper::IBVWrapper() {
   int err;
 
   ibv_handle = dlopen("libibverbs.so.1", RTLD_NOW);
+
+  if (!ibv_handle) ibv_handle = dlopen("libibverbs.so", RTLD_NOW);
+
   if (!ibv_handle) {
     LOG_WARN("Could not open libibverbs. Disabled.");
     return;
@@ -163,6 +170,17 @@ struct ibv_context* IBVWrapper::open_device(struct ibv_device *device) {
 
 }
 
+IBVWrapper::ContextInfo IBVWrapper::context_info(ibv_context* context) const {
+#if defined(GDA_MLX5) && defined(GDA_SHCA)
+  const auto info = adapter_api(context)->context_info(context);
+  return {static_cast<ibv_device*>(info.device), info.cmd_fd, info.async_fd,
+          info.num_comp_vectors, info.abi_compat};
+#else
+  return {context->device, context->cmd_fd, context->async_fd,
+          context->num_comp_vectors, context->abi_compat};
+#endif
+}
+
 int IBVWrapper::close_device(struct ibv_context *context) {
   return ibv.close_device(context);
 }
@@ -177,6 +195,13 @@ int IBVWrapper::query_device(struct ibv_context *context, struct ibv_device_attr
 
 int IBVWrapper::query_port(struct ibv_context* context, uint8_t port_num,
                            struct ibv_port_attr* port_attr) {
+#if defined(GDA_MLX5) && defined(GDA_SHCA)
+  verbs_adapter::PortAttr value{};
+  int rc = adapter_api(context)->query_port(context, port_num, &value);
+  if (rc) return rc;
+  to_ibv_port_attr(value, port_attr);
+  return 0;
+#else
   // Passthrough function for ibv_query_port macro in verbs.h
   struct verbs_context *vctx = verbs_get_ctx_op(context, query_port);
 
@@ -190,6 +215,7 @@ int IBVWrapper::query_port(struct ibv_context* context, uint8_t port_num,
   }
 
   return vctx->query_port(context, port_num, port_attr, sizeof(*port_attr));
+#endif
 }
 
 ssize_t IBVWrapper::query_gid_table(struct ibv_context *context,
@@ -210,8 +236,12 @@ struct ibv_pd* IBVWrapper::alloc_pd(struct ibv_context *context) {
 
 struct ibv_pd * IBVWrapper::alloc_parent_domain(struct ibv_context *context,
                                                 struct ibv_parent_domain_init_attr *attr) {
+#if defined(GDA_MLX5) && defined(GDA_SHCA)
+  return static_cast<ibv_pd*>(adapter_api(context)->alloc_parent_domain(context, attr));
+#else
   // Passthrough function for ibv_alloc_parent_domain macro in verbs.h
   return ibv_alloc_parent_domain(context, attr);
+#endif
 }
 
 int IBVWrapper::dealloc_pd(struct ibv_pd *pd) {
@@ -278,8 +308,12 @@ int IBVWrapper::dereg_mr(struct ibv_mr *mr) {
 
 struct ibv_cq_ex *IBVWrapper::create_cq_ex(struct ibv_context *context,
                                            struct ibv_cq_init_attr_ex *cq_attr) {
+#if defined(GDA_MLX5) && defined(GDA_SHCA)
+  return static_cast<ibv_cq_ex*>(adapter_api(context)->create_cq_ex(context, cq_attr));
+#else
   // Passthrough function for ibv_create_cq_ex macro in verbs.h
   return ibv_create_cq_ex(context, cq_attr);
+#endif
 }
 
 struct ibv_cq* IBVWrapper::cq_ex_to_cq(struct ibv_cq_ex *cq) {
@@ -293,6 +327,9 @@ int IBVWrapper::destroy_cq(struct ibv_cq *cq) {
 
 struct ibv_qp * IBVWrapper::create_qp_ex(struct ibv_context *context,
                                          struct ibv_qp_init_attr_ex *qp_init_attr_ex) {
+#if defined(GDA_MLX5) && defined(GDA_SHCA)
+  return static_cast<ibv_qp*>(adapter_api(context)->create_qp_ex(context, qp_init_attr_ex));
+#else
   // Passthrough function for ibv_create_qp_ex macro in verbs.h
   struct verbs_context *vctx;
   uint32_t mask = qp_init_attr_ex->comp_mask;
@@ -306,10 +343,16 @@ struct ibv_qp * IBVWrapper::create_qp_ex(struct ibv_context *context,
     return NULL;
   }
   return vctx->create_qp_ex(context, qp_init_attr_ex);
+#endif
 }
 
 int IBVWrapper::modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask) {
+#if defined(GDA_MLX5) && defined(GDA_SHCA)
+  auto value = to_adapter_qp_attr(*attr, attr_mask);
+  return adapter_api(qp->context)->modify_qp(qp, &value, attr_mask);
+#else
   return ibv.modify_qp(qp, attr, attr_mask);
+#endif
 }
 
 int IBVWrapper::destroy_qp(struct ibv_qp *qp) {
@@ -322,7 +365,12 @@ uint16_t IBVWrapper::flow_label_to_udp_sport(uint32_t fl) {
 }
 
 struct ibv_ah* IBVWrapper::create_ah(struct ibv_pd *pd, struct ibv_ah_attr *attr) {
+#if defined(GDA_MLX5) && defined(GDA_SHCA)
+  auto value = to_adapter_ah_attr(*attr);
+  return static_cast<ibv_ah*>(adapter_api(pd->context)->create_ah(pd, &value));
+#else
   return ibv.create_ah(pd, attr);
+#endif
 }
 
 int IBVWrapper::destroy_ah(struct ibv_ah *ah) {

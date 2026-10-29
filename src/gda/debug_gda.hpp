@@ -26,9 +26,11 @@
 #define LIBRARY_SRC_GDA_DEBUG_GDA_HPP_
 
 #include "log.hpp"
+#include "ibv_wrapper.hpp"
 
 
 static void dump_ibv_context([[maybe_unused]] struct ibv_context* x) {
+  [[maybe_unused]] const auto info = rocshmem::ibv.context_info(x);
   LOG_TRACE("== IBV_CONTEXT =============================================\n"
             "  (ibv_device*)        device              = %p\n"
             "  (int)                cmd_fd              = %d\n"
@@ -36,7 +38,8 @@ static void dump_ibv_context([[maybe_unused]] struct ibv_context* x) {
             "  (int)                num_comp_vectors    = %d\n"
             "  (void*)              abi_compat          = %p\n"
             "========",
-            x->device, x->cmd_fd, x->async_fd, x->num_comp_vectors, x->abi_compat);
+            info.device, info.cmd_fd, info.async_fd, info.num_comp_vectors,
+            info.abi_compat);
 }
 
 static void dump_ibv_device([[maybe_unused]] struct ibv_device* x) {

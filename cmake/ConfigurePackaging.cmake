@@ -67,7 +67,9 @@ else()
 endif()
 
 set(_rocshmem_package_name "rocshmem")
-if(GDA_SHCA)
+if(GDA_MLX5 AND NOT GDA_SHCA)
+  set(_rocshmem_package_name "rocshmem_mlx5")
+elseif(GDA_SHCA AND NOT GDA_MLX5)
   set(_rocshmem_package_name "rocshmem_shca")
 endif()
 
