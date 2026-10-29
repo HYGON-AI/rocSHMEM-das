@@ -192,6 +192,18 @@
   X(HostWaitUntilAnyStatus,    147)  \
   X(HostWaitUntilSomeStatus,   148)  \
   X(TeamReduceScatter,         149)  \
+  X(BroadcastWave,             150)  \
+  X(AllToAllWave,              151)  \
+  X(FcollectWave,              152)  \
+  X(ReduceWave,                153)  \
+  X(TeamReduceScatterWave,     154)  \
+  X(TileReduce,                155)  \
+  X(TileReduceWave,            156)  \
+  X(TileReduceWG,              157)  \
+  X(QpPingPong,                158)  \
+  X(QpPutNbi,                  159)  \
+  X(SdmaPingPong,              160)  \
+  X(SdmaPutNbi,                161)  \
   X(DefaultCtx_WAVEPutNBI_DP,  500)  \
   X(DefaultCtx_AMO_Add_DP,     501)  \
   X(WAVEPutNBI_DP,             502)  \
@@ -199,7 +211,8 @@
   X(TeamAlltoallvOnStream,     504)  \
   X(TeamReduceScatterOnStream, 505)  \
   X(TeamFCollectOnStream,      506)
-  
+
+
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {
   ROCSHMEM_FOREACH_TEST_TYPE(_ROCSHMEM_ENUM_ENTRY)

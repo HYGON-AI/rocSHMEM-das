@@ -354,6 +354,12 @@ namespace rocshmem
 
     // Build list on first use
     if (!isInitialized) {
+      if (!ibv.is_initialized) {
+        LOG_WARN("libibverbs not available; no InfiniBand devices will be reported.");
+        isInitialized = true;
+        return ibvDeviceList;
+      }
+
       char* allowedDevicesEnv = std::getenv("ROCSHMEM_ALLOWED_IBV_DEVICES");
       if (allowedDevicesEnv) {
           std::string envStr(allowedDevicesEnv);

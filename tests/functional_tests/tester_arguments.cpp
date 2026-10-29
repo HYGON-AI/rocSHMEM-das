@@ -49,6 +49,7 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     } else if (arg == "-s") {
       i++;
       max_msg_size = atoll(argv[i]);
+      max_msg_size_set = true;
     } else if (arg == "-a") {
       i++;
       std::string a_arg = argv[i];
@@ -138,6 +139,17 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       batch_quiet = (value == "1");
     } else if (arg == "-noverif" || arg == "-nocheck") {
       verif = false;
+    } else if (arg == "--num-wf") {
+      i++;
+      if (argc < i + 1) {
+        fprintf(stderr, "Invalid arguments for --num-wf.\n");
+        exit(-1);
+      }
+      num_wf = atoi(argv[i]);
+      if (num_wf <= 0) {
+        fprintf(stderr, "--num-wf must be a positive integer.\n");
+        exit(-1);
+      }
     } else if (arg == "-localbuftype") {
       i++;
 
@@ -206,6 +218,22 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       max_msg_size = 8;
       break;
     case PingPongTestType:
+    case SdmaPingPongTestType:
+      if (op_type == 2) {
+        min_msg_size = 1;
+      } else {
+        min_msg_size = 4;
+        max_msg_size = 4;
+      }
+      break;
+    case QpPingPongTestType:
+      if (op_type == 2) {
+        min_msg_size = 1;
+      } else {
+        min_msg_size = 4;
+        max_msg_size = 4;
+      }
+      break;
     case PingAllTestType:
     case ShmemPtrTestType:
       min_msg_size = 4;
@@ -220,9 +248,13 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       min_msg_size = 4;
       break;
     case TeamFCollectTestType:
+    case FcollectWaveTestType:
     case TeamAllToAllTestType:
     case TeamAllToAllvTestType:
     case TeamBroadcastTestType:
+    case BroadcastWaveTestType:
+    case AllToAllWaveTestType:
+    case ReduceWaveTestType:
       min_msg_size = 8;
       break;
     case TeamCtxInfraTestType:
@@ -277,6 +309,7 @@ void TesterArguments::show_usage(std::string executable_name) {
   std::cout << "\t-b|-batch Set buffer rotation batch size (default: loop count)\n";
   std::cout << "\t-bq <0|1> enable batch-boundary quiet (default: 1; disabled by -noverif)\n";
   std::cout << "\t-noverif|-nocheck disable buffer verification\n";
+  std::cout << "\t--num-wf <number of wave-fronts per workgroup> (detected at runtime via HIP, overwrites -z if used)\n";
 }
 
 void TesterArguments::get_arguments() {
@@ -300,10 +333,15 @@ void TesterArguments::get_arguments() {
     case TeamWGSyncTestType:
     case TeamAllToAllTestType:
     case TeamAllToAllvTestType:
+    case AllToAllWaveTestType:
+    case BroadcastWaveTestType:
     case TeamFCollectTestType:
+    case FcollectWaveTestType:
     case TeamReductionTestType:
     case TeamReduceScatterTestType:
     case ReduceOnStreamTestType:
+    case ReduceWaveTestType:
+    case TeamReduceScatterWaveTestType:
     case TeamBroadcastTestType:
     case PingAllTestType:
     case TeamBarrierTestType:
@@ -348,6 +386,9 @@ void TesterArguments::get_arguments() {
     case TileAllgatherTestType:
     case TileAllgatherWaveTestType:
     case TileAllgatherWGTestType:
+    case TileReduceTestType:
+    case TileReduceWaveTestType:
+    case TileReduceWGTestType:
       requires_two_pes = false;
       break;
     default:

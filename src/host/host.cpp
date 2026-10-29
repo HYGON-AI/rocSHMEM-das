@@ -153,7 +153,7 @@ __host__ void HostInterface::create_hdp_window() {
                             size, /* size of window */
                             sizeof(unsigned int), /* displacement */
                             MPI_INFO_NULL, host_comm_world_, &hdp_win);
-  
+
   /*
    * Start a shared access epoch on windows of all ranks,
    * and let the library there is no need to check for
@@ -451,32 +451,31 @@ __host__ void HostInterface::sync_on_stream(rocshmem_team_t team,
 __host__ void HostInterface::alltoallmem_on_stream(rocshmem_team_t team,
                                                    void *dest,
                                                    const void *source,
-                                                   size_t size,
+                                                   size_t nelems,
                                                    hipStream_t stream) {
   CollectiveLauncher::TeamStreamOrder ordered(team, stream);
 #if defined(USE_RCCL)
   Team* team_obj{get_internal_team(team)};
-  if (rccl_alltoall(team_obj, host_bootstrap_, source, dest, size, stream))
+  if (rccl_alltoall(team_obj, host_bootstrap_, source, dest, nelems, stream))
     return;
 #endif
 
-  if (!CollectiveLauncher::use_single_wg(team, size) &&
+  if (!CollectiveLauncher::use_single_wg(team, nelems) &&
       CollectiveLauncher::enqueue_multi_wg(
-          team, size, stream,
-          [dest, source, size](rocshmem_team_t *dev_wg_teams,
+          team, nelems, stream,
+          [dest, source, nelems](rocshmem_team_t *dev_wg_teams,
                                 hipStream_t launch_stream, size_t num_wgs) {
-            int nelems = static_cast<int>(size);
             int threads = std::max(1, envvar::num_threads_on_stream.get_value());
             rocshmem_alltoall_multi_wg_kernel<char>
                 <<<static_cast<int>(num_wgs), threads, 0, launch_stream>>>(
                     dev_wg_teams, static_cast<char *>(dest),
-                    static_cast<const char *>(source), nelems);
+                    static_cast<const char *>(source), static_cast<int>(nelems));
           })) {
     return;
   }
 
   CollectiveLauncher::enqueue_single_wg<rocshmem_alltoallmem_kernel>(
-      size, stream, 1, team, dest, source, size);
+      nelems, stream, 1, team, dest, source, nelems);
 }
 
 __host__ void HostInterface::broadcastmem_on_stream(rocshmem_team_t team,

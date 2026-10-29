@@ -190,7 +190,20 @@ EOF
     ../scripts/build_configs/gda_mlx5
 
     test -x /opt/rocshmem/share/rocshmem/run_ctest.sh
-    test -x /opt/rocshmem/share/rocshmem/rocshmem_functional_tests
+    # Upstream installs the test binaries into CMAKE_INSTALL_BINDIR (bin/);
+    # older revisions used share/rocshmem. Accept either layout.
+    local functional_tests=''
+    for candidate in /opt/rocshmem/bin /opt/rocshmem/share/rocshmem; do
+        if [[ -x "${candidate}/rocshmem_functional_tests" ]]; then
+            functional_tests="${candidate}/rocshmem_functional_tests"
+            break
+        fi
+    done
+    [[ -n "$functional_tests" ]] || {
+        echo 'ERROR: rocshmem_functional_tests was not installed' >&2
+        exit 1
+    }
+    echo "Functional tests binary: ${functional_tests}"
     ctest --test-dir /opt/rocshmem/bin/rocshmem -N | tail -n 3
 }
 
@@ -442,7 +455,19 @@ fi
 # The validated manual run used the same functional-test executable on both
 # nodes. Preserve that invariant even if separate builds contain timestamps or
 # other non-reproducible sections.
-CANONICAL_BINARY=/opt/rocshmem/share/rocshmem/rocshmem_functional_tests
+# Resolve the installed location inside the container: upstream now installs to
+# CMAKE_INSTALL_BINDIR (bin/), older revisions used share/rocshmem.
+CANONICAL_BINARY="$(docker exec "$PRIMARY_CONTAINER" bash -c '
+    for candidate in /opt/rocshmem/bin /opt/rocshmem/share/rocshmem; do
+        if [ -x "$candidate/rocshmem_functional_tests" ]; then
+            printf "%s\n" "$candidate/rocshmem_functional_tests"
+            break
+        fi
+    done')"
+[[ -n "$CANONICAL_BINARY" ]] || {
+    echo 'ERROR: rocshmem_functional_tests was not installed in the primary container' >&2
+    exit 1
+}
 docker cp "${PRIMARY_CONTAINER}:${CANONICAL_BINARY}" "${LOCAL_ROOT}/rocshmem_functional_tests"
 scp "${SSH_OPTIONS[@]}" "${LOCAL_ROOT}/rocshmem_functional_tests" "${REMOTE}:${REMOTE_ROOT}/"
 ssh "${SSH_OPTIONS[@]}" "$REMOTE" \

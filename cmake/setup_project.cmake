@@ -46,40 +46,57 @@ else()
 endif()
 set(ENV{ROCM_PATH} ${ROCM_PATH})
 
-#if (NOT DEFINED CACHE{ROCM_MAJOR_VERSION})
-#  ## Check for ROCm version
-#  if(EXPLICIT_ROCM_VERSION)
-#    set(rocm_version_string "${EXPLICIT_ROCM_VERSION}")
-#  else()
-#    find_file(rocm_version_file "version" PATH_SUFFIXES ".info"
-#      HINTS ${ROCM_PATH} ENV ROCM_PATH ${ROCM_ROOT} ENV ROCM_ROOT ${hip_ROOT} ENV hip_ROOT ${HIP_ROOT} ENV HIP_ROOT
-#      PATHS ${ROCM_PATH}
-#      REQUIRED)
-#    cmake_path(GET rocm_version_file PARENT_PATH version_file_dir)
-#    cmake_path(GET version_file_dir PARENT_PATH rocm_path)
+if (NOT DEFINED CACHE{ROCM_MAJOR_VERSION})
+  ## Check for ROCm version
+  if(EXPLICIT_ROCM_VERSION)
+    set(rocm_version_string "${EXPLICIT_ROCM_VERSION}")
+  else()
+    set(dtk_hip_version_found FALSE)
+    # Use DTK's HIP version to match C++ HIP_VERSION guards.
+    set(hip_version_header "${ROCM_PATH}/include/hip/hip_version.h")
+    if(EXISTS "${hip_version_header}")
+      file(READ "${hip_version_header}" hip_version_contents)
+      if(ROCM_PATH MATCHES "[dD][tT][kK]" OR hip_version_contents MATCHES "[dD][tT][kK]")
+        foreach(component MAJOR MINOR PATCH)
+          string(REGEX MATCH "#[ \t]*define[ \t]+HIP_VERSION_${component}[ \t]+([0-9]+)"
+            hip_version_match "${hip_version_contents}")
+          if(NOT hip_version_match)
+            message(FATAL_ERROR "Cannot read HIP_VERSION_${component} from ${hip_version_header}")
+          endif()
+          set(hip_version_${component} "${CMAKE_MATCH_1}")
+        endforeach()
+        set(rocm_path "${ROCM_PATH}")
+        set(dtk_hip_version_found TRUE)
+        set(rocm_version_string "${hip_version_MAJOR}.${hip_version_MINOR}.${hip_version_PATCH}")
+      endif()
+    endif()
 
-#    file(READ ${rocm_version_file} rocm_version_string)
-#  endif()
-#  string(REGEX MATCH "([0-9]+)\\.([0-9]+)\\.([0-9]+)" rocm_version_matches ${rocm_version_string})
-#  if (rocm_version_matches)
-#    set(ROCM_MAJOR_VERSION ${CMAKE_MATCH_1} CACHE INTERNAL "")
-#    set(ROCM_MINOR_VERSION ${CMAKE_MATCH_2} CACHE INTERNAL "")
-#    set(ROCM_PATCH_VERSION ${CMAKE_MATCH_3} CACHE INTERNAL "")
-#  else()
-#    message(FATAL_ERROR "Could not determine ROCm version (set EXPLICIT_ROCM_VERSION or set ROCM_PATH to a valid installation)")
-#  endif()
+    if(NOT dtk_hip_version_found)
+      find_file(rocm_version_file "version" PATH_SUFFIXES ".info" "core/.info"
+        HINTS ${ROCM_PATH} ENV ROCM_PATH ${ROCM_ROOT} ENV ROCM_ROOT ${hip_ROOT} ENV hip_ROOT ${HIP_ROOT} ENV HIP_ROOT
+        PATHS ${ROCM_PATH}
+        REQUIRED)
+      cmake_path(GET rocm_version_file PARENT_PATH version_file_dir)
+      cmake_path(GET version_file_dir PARENT_PATH rocm_path)
 
-#  set(ROCM_PATH "${rocm_path}" CACHE PATH "Location of the ROCm SDK")
-#  message(STATUS "ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION} from ${ROCM_PATH}")
-#endif()
+      file(READ ${rocm_version_file} rocm_version_string)
+    endif()
+  endif()
+  string(REGEX MATCH "([0-9]+)\\.([0-9]+)\\.([0-9]+)" rocm_version_matches ${rocm_version_string})
+  if (rocm_version_matches)
+    set(ROCM_MAJOR_VERSION ${CMAKE_MATCH_1} CACHE INTERNAL "")
+    set(ROCM_MINOR_VERSION ${CMAKE_MATCH_2} CACHE INTERNAL "")
+    set(ROCM_PATCH_VERSION ${CMAKE_MATCH_3} CACHE INTERNAL "")
+  else()
+    message(FATAL_ERROR "Could not determine ROCm version (set EXPLICIT_ROCM_VERSION or set ROCM_PATH to a valid installation)")
+  endif()
+
+  set(ROCM_PATH "${rocm_path}" CACHE PATH "Location of the ROCm SDK")
+endif()
+message(STATUS "ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION} from ${ROCM_PATH}")
 
 # Always prefer the ROCm we found
 list(PREPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
-
-set(ROCM_MAJOR_VERSION "6")
-set(ROCM_MINOR_VERSION "1")
-set(ROCM_PATCH_VERSION "25085")
-message(STATUS "ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}")
 
 # Use hipcc from our rocm install
 if (NOT DEFINED CMAKE_CXX_COMPILER)

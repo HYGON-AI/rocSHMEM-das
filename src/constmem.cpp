@@ -35,6 +35,7 @@ void init_constant_memory(void) {
                                  ? backend->ipcImpl.shm_size : 0;
   constmem_values.heap_base =
       reinterpret_cast<uintptr_t>(backend->heap.get_local_heap_base());
+  constmem_values.heap_size = backend->heap.get_size();
 
   constmem_values.backend_type = backend->get_type();
 #if defined(USE_GDA)

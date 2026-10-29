@@ -49,6 +49,9 @@ target_sources(
     ipc_policy.cpp
     sdma_policy.cpp
 )
+if(USE_SDMA)
+  target_sources(${PROJECT_NAME} PRIVATE sdma/gin_anvil_sdma_factory.cpp)
+endif()
 
 set(
   ROCSHMEM_COMPILE_FLAGS

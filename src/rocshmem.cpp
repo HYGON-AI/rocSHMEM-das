@@ -162,6 +162,7 @@ static BackendType select_backend_type(MPI_Comm comm,
   return BackendType::IPC_BACKEND;
 }
 #endif
+
 static void setFilesLimit() {
   rlimit filesLimit;
   if (getrlimit(RLIMIT_NOFILE, &filesLimit) != 0) {
@@ -178,11 +179,14 @@ static void setFilesLimit() {
 [[maybe_unused]] __host__ void inline library_init(MPI_Comm comm) {
   assert(!backend);
 
-#if defined(USE_HEAP_DEVICE_VMM_POSIX)
-  LOG_ERROR_EXIT("VMM POSIX allocator (USE_HEAP_DEVICE_VMM_POSIX) is not compatible with MPI-based initialization.\n"
-                 "  Please use ROCSHMEM_INIT_WITH_UNIQUEID instead or disable VMM POSIX allocator.\n"
-                 "  ");
-#endif
+  {
+    const std::string alloc_type = envvar::heap_allocator_type.get_value();
+    if (alloc_type == "vmm_posix" || alloc_type == "VMM_POSIX") {
+      LOG_ERROR_EXIT("ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_posix is not compatible with MPI-based initialization.\n"
+                     "  Please use ROCSHMEM_INIT_WITH_UNIQUEID instead or choose a different allocator type.\n"
+                     "  ");
+    }
+  }
 
   int count = 0;
   CHECK_HIP(hipGetDeviceCount(&count));
@@ -683,6 +687,21 @@ __host__ void rocshmem_buffer_unregister_all() {
   backend->buffer_unregister_all();
 }
 
+__host__ void *rocshmem_buffer_register_symmetric(void *addr, size_t length) {
+  VERIFY_BACKEND();
+  void *registered_addr = nullptr;
+  if (backend->buffer_register_symmetric(addr, length, &registered_addr) !=
+      ROCSHMEM_SUCCESS) {
+    return nullptr;
+  }
+  return registered_addr;
+}
+
+__host__ int rocshmem_buffer_unregister_symmetric(void *addr) {
+  VERIFY_BACKEND();
+  return backend->buffer_unregister_symmetric(addr);
+}
+
 [[maybe_unused]] __host__ void rocshmem_free(void *ptr) {
   VERIFY_BACKEND();
 
@@ -894,10 +913,10 @@ __host__ int rocshmem_team_split_strided(
   return 0;
 }
 
-__host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange, const 
-                                    rocshmem_team_config_t *xaxis_config, long xaxis_mask, 
-                                    rocshmem_team_t *xaxis_team, 
-                                    const rocshmem_team_config_t *yaxis_config, long yaxis_mask, 
+__host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange,
+                                    const rocshmem_team_config_t *xaxis_config, long xaxis_mask,
+                                    rocshmem_team_t *xaxis_team,
+                                    const rocshmem_team_config_t *yaxis_config, long yaxis_mask,
                                     rocshmem_team_t *yaxis_team)
 {
   VERIFY_BACKEND();
@@ -937,10 +956,10 @@ __host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange, con
       LOG_ERROR("Unable to make xteam %d out of %d", i + 1, num_xteams);
       return ROCSHMEM_ERROR;
     }
-    
+
     start += _xrange;
 
-    if (my_xteam != ROCSHMEM_TEAM_INVALID) 
+    if (my_xteam != ROCSHMEM_TEAM_INVALID)
       *xaxis_team = my_xteam;
   }
 
@@ -950,7 +969,7 @@ __host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange, con
     rocshmem_team_t my_yteam;
     int ysize = yrange;
     if (remainder && i < remainder) ysize += 1;
-    
+
     ret = rocshmem_team_split_strided(parent_team, start, _xrange, ysize, yaxis_config,
                                       yaxis_mask, &my_yteam);
 
@@ -961,7 +980,7 @@ __host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange, con
 
     start += 1;
 
-    if (my_yteam != ROCSHMEM_TEAM_INVALID) 
+    if (my_yteam != ROCSHMEM_TEAM_INVALID)
       *yaxis_team = my_yteam;
   }
   return ROCSHMEM_SUCCESS;
@@ -1398,9 +1417,9 @@ __host__ void rocshmem_team_sync_on_stream(rocshmem_team_t team,
 }
 
 __host__ void rocshmem_alltoallmem_on_stream(rocshmem_team_t team, void *dest,
-                                             const void *source, size_t size,
+                                             const void *source, size_t nelems,
                                              hipStream_t stream) {
-  RocshmemGetFunctionTable()->alltoallmem_on_stream_fn(team, dest, source, size, stream);
+  RocshmemGetFunctionTable()->alltoallmem_on_stream_fn(team, dest, source, nelems, stream);
 }
 
 __host__ void rocshmem_broadcastmem_on_stream(rocshmem_team_t team, void *dest,
@@ -1450,24 +1469,24 @@ __host__ void rocshmem_team_sync(rocshmem_team_t team) {
 
 template <typename T>
 __host__ void rocshmem_broadcast([[maybe_unused]] rocshmem_ctx_t ctx, T *dest,
-                                  const T *source, int nelem, int pe_root,
+                                  const T *source, int nelems, int pe_root,
                                   int pe_start, int log_pe_stride, int pe_size,
                                   long *p_sync) {
-  LOG_API("host::broadcast (dest=%p, source=%p, nelem=%d, pe_root=%d)", dest, source, nelem, pe_root);
+  LOG_API("host::broadcast (dest=%p, source=%p, nelems=%d, pe_root=%d)", dest, source, nelems, pe_root);
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
-      ->broadcast<T>(dest, source, nelem, pe_root, pe_start, log_pe_stride,
+      ->broadcast<T>(dest, source, nelems, pe_root, pe_start, log_pe_stride,
                      pe_size, p_sync);
 }
 
 template <typename T>
 __host__ void rocshmem_broadcast([[maybe_unused]] rocshmem_ctx_t ctx,
                                   rocshmem_team_t team, T *dest,
-                                  const T *source, int nelem, int pe_root) {
-  LOG_API("host::broadcast (dest=%p, source=%p, nelem=%d, pe_root=%d)", dest, source, nelem, pe_root);
+                                  const T *source, int nelems, int pe_root) {
+  LOG_API("host::broadcast (dest=%p, source=%p, nelems=%d, pe_root=%d)", dest, source, nelems, pe_root);
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
-      ->broadcast<T>(team, dest, source, nelem, pe_root);
+      ->broadcast<T>(team, dest, source, nelems, pe_root);
 }
 
 template <typename T, ROCSHMEM_OP Op>
@@ -1631,11 +1650,11 @@ __host__ int rocshmem_test(T *ivars, int cmp, T val) {
                                               size_t nelems, int pe);         \
   template __host__ T rocshmem_g<T>(const T *source, int pe);                 \
   template __host__ void rocshmem_broadcast<T>(                               \
-      rocshmem_ctx_t ctx, T * dest, const T *source, int nelem, int pe_root,  \
+      rocshmem_ctx_t ctx, T * dest, const T *source, int nelems, int pe_root,  \
       int pe_start, int log_pe_stride, int pe_size, long *p_sync);            \
   template __host__ void rocshmem_broadcast<T>(                               \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, const T *source,    \
-      int nelem, int pe_root);
+      int nelems, int pe_root);
 
 /**
  * Declare templates for the standard amo types
@@ -1815,15 +1834,15 @@ __host__ int rocshmem_test(T *ivars, int cmp, T val) {
     return rocshmem_g<T>(source, pe);                                         \
   }                                                                           \
   __host__ void rocshmem_ctx_##TNAME##_broadcast(                             \
-      rocshmem_ctx_t ctx, T *dest, const T *source, int nelem, int pe_root,   \
+      rocshmem_ctx_t ctx, T *dest, const T *source, int nelems, int pe_root,  \
       int pe_start, int log_pe_stride, int pe_size, long *p_sync) {           \
-    rocshmem_broadcast<T>(ctx, dest, source, nelem, pe_root, pe_start,        \
+    rocshmem_broadcast<T>(ctx, dest, source, nelems, pe_root, pe_start,       \
                            log_pe_stride, pe_size, p_sync);                   \
   }                                                                           \
   __host__ void rocshmem_ctx_##TNAME##_broadcast(                             \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,     \
-      int nelem, int pe_root) {                                               \
-    rocshmem_broadcast<T>(ctx, team, dest, source, nelem, pe_root);           \
+      int nelems, int pe_root) {                                              \
+    rocshmem_broadcast<T>(ctx, team, dest, source, nelems, pe_root);          \
   }
 
 #define AMO_STANDARD_DEF_GEN(T, TNAME)                                        \

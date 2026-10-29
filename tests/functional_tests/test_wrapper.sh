@@ -386,15 +386,25 @@ if [[ "$BACKEND" == "ro" ]]; then
     esac
 fi
 
+# AIROCSHMEM-418: wave tests not supported on RO
+if [[ "$BACKEND" == "ro" ]]; then
+    case "$TEST_NAME" in
+        *_wave)
+            echo "Skip: $TEST_NAME (AIROCSHMEM-409: wave tests not supported on RO)"
+            exit $SKIP_CODE
+            ;;
+    esac
+fi
+
 # Check GPU availability
 if command -v amd-smi >/dev/null && amd-smi version 2>&1 >/dev/null; then
-    NUM_GPUS=$(amd-smi list | grep GPU | wc -l)
-elif command -v rocm-smi >/dev/null && rocm-smi --version 2>&1 >/dev/null; then
-    NUM_GPUS=$(rocm-smi --showserial | grep GPU | wc -l)
+    NUM_GPUS=$(amd-smi list | grep HCU | wc -l)
+elif command -v hy-smi >/dev/null && hy-smi --version 2>&1 >/dev/null; then
+    NUM_GPUS=$(hy-smi --showserial | grep HCU | wc -l)
 else
     NUM_GPUS=0
 fi
-NUM_GPUS=$((NUM_GPUS > 0 ? NUM_GPUS : 8))
+NUM_GPUS=$((NUM_GPUS > 0 ? NUM_GPUS : 0))
 
 # Extract number of ranks from test name (format: testname_n<ranks>_w<wg>_z<threads>)
 # Or from ROCSHMEM_SLR_NP if in SLR mode
