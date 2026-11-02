@@ -43,6 +43,9 @@
 #if defined(GDA_SHCA)
 #include "gda/shca/provider_gda_shca.hpp"
 #endif
+#if defined(GDA_ZXDH)
+#include "gda/zxdh/provider_gda_zxdh.hpp"
+#endif
 
 namespace rocshmem {
 
@@ -56,13 +59,15 @@ enum GDAProvider {
   IONIC,
   BNXT,
   MLX5,
-  SHCA
+  SHCA,
+  ZXDH
 };
 
 inline constexpr uint32_t GDA_IONIC_VENDOR_ID = 0x1DD8;
 inline constexpr uint32_t GDA_MLX5_VENDOR_ID  = 0x02c9; //PCI-ID is 15b3
 inline constexpr uint32_t GDA_BNXT_VENDOR_ID  = 0x14E4;
 inline constexpr uint32_t GDA_SHCA_VENDOR_ID  = 0x1cb8;
+inline constexpr uint32_t GDA_ZXDH_VENDOR_ID  = 0x1cf2;
 
 class GDABackend : public Backend {
  private:
@@ -107,6 +112,21 @@ class GDABackend : public Backend {
   std::vector<struct bnxt_host_cq> bnxt_scqs;
   std::vector<struct bnxt_host_cq> bnxt_rcqs;
   /* GDA_BNXT END */
+
+  /* GDA_ZXDH START */
+  std::vector<struct zxdh_devx_qp *> zxdh_qps;
+  std::vector<struct zxdh_devx_cq *> zxdh_cqs;
+  std::vector<void *> zxdh_qp_bufs;
+  std::vector<void *> zxdh_cq_bufs;
+  std::vector<struct zxdh_devx_qp *> zxdh_loopback_devx_qps;
+  std::vector<struct zxdh_devx_cq *> zxdh_loopback_devx_cqs;
+  std::vector<void *> zxdh_loopback_qp_bufs;
+  std::vector<void *> zxdh_loopback_cq_bufs;
+  QueuePair *zxdh_loopback_gpu_qps{nullptr};
+  QueuePair *zxdh_loopback_host_qps{nullptr};
+  void *zxdh_uar_hptr{nullptr};
+  void *zxdh_uar_dptr{nullptr};
+  /* GDA_ZXDH END */
 
   /* GDA_IONIC & GDA_MLX5 START */
   struct ibv_pd *pd_parent = nullptr;
@@ -364,6 +384,16 @@ class GDABackend : public Backend {
 #if defined(GDA_SHCA)
   void shca_initialize_gpu_qp(QueuePair* qp, int conn_num);
 #endif
+#if defined(GDA_ZXDH)
+  void zxdh_initialize_gpu_qp(QueuePair* qp, int conn_num);
+  void zxdh_create_cqs(int ncqes);
+  void zxdh_create_qps(int sq_length);
+  void zxdh_create_loopback_qps(int ncqes, int sq_length);
+  void zxdh_setup_loopback_qps();
+  void zxdh_cleanup_loopback_qps();
+  void zxdh_initialize_loopback_gpu_qp(QueuePair* qp, int index);
+  void zxdh_cleanup();
+#endif
 
   /**
    * @brief Setup InfiniBand Resources
@@ -602,6 +632,13 @@ class GDABackend : public Backend {
   void *shcadv_handle_{nullptr};
   int shca_dv_dl_init();
   static void* shca_dv_dlopen();
+#endif
+
+#if defined(GDA_ZXDH)
+  zxdh_dv_funcs_t zxdh_dv;
+  void *zxdh_dv_handle_{nullptr};
+  int zxdh_dv_dl_init();
+  static void* zxdh_dv_dlopen();
 #endif
   /**
    * @brief structures holding the function pointers to the direct verbs functionality

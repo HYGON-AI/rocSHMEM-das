@@ -35,8 +35,11 @@ namespace rocshmem {
 QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider) {
   int access = IBV_ACCESS_LOCAL_WRITE
              | IBV_ACCESS_REMOTE_WRITE
-             | IBV_ACCESS_REMOTE_READ
-             | IBV_ACCESS_REMOTE_ATOMIC;
+             | IBV_ACCESS_REMOTE_READ;
+
+  if (gda_provider != GDAProvider::ZXDH) {
+    access |= IBV_ACCESS_REMOTE_ATOMIC;
+  }
 
   if (envvar::gda::pcie_relaxed_ordering) {
     access |= IBV_ACCESS_RELAXED_ORDERING;
@@ -60,6 +63,7 @@ QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider) {
     fetching_atomic_lkey = htobe32(mr_fetching_atomic->lkey);
   } else {
     nonfetching_atomic_lkey = mr_nonfetching_atomic->lkey;
+    nonfetching_atomic_rkey = mr_nonfetching_atomic->rkey;
     fetching_atomic_lkey = mr_fetching_atomic->lkey;
   }
 
@@ -110,6 +114,14 @@ QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider) {
     gda_op_atomic_cs  = IBV_WR_ATOMIC_CMP_AND_SWP;
     break;
 #endif //defined(GDA_SHCA)
+#if defined(GDA_ZXDH)
+  case GDAProvider::ZXDH:
+    gda_op_rdma_write = ROCSHMEM_ZXDH_OP_WRITE;
+    gda_op_rdma_read = ROCSHMEM_ZXDH_OP_READ;
+    gda_op_atomic_fa = 0;
+    gda_op_atomic_cs = 0;
+    break;
+#endif
   default:
     assert(false /* invalid nic provider */);
   }
@@ -184,6 +196,11 @@ __device__ void QueuePair::post_wqe_rma_mt(int pe, int32_t size, uintptr_t laddr
     bnxt_post_wqe_rma(pe, size, laddr, raddr, opcode);
     return;
 #endif
+#if defined(GDA_ZXDH)
+  case GDAProvider::ZXDH:
+    zxdh_post_wqe_rma(size, laddr, raddr, opcode, flag);
+    return;
+#endif
   default:
     assert(false /* invalid nic provider */);
   }
@@ -198,6 +215,7 @@ __device__ void QueuePair::post_wqe_rma_single(int32_t size, uintptr_t laddr, ui
   case GDAProvider::IONIC:
   case GDAProvider::MLX5:
   case GDAProvider::SHCA:
+  case GDAProvider::ZXDH:
   default:
     assert(false /* invalid nic provider */);
   }
@@ -222,6 +240,10 @@ __device__ uint64_t QueuePair::post_wqe_amo(int pe, int32_t size, uintptr_t radd
   case GDAProvider::IONIC:
     return ionic_post_wqe_amo(pe, size, raddr, opcode, atomic_data, atomic_cmp, fetching);
 #endif
+#if defined(GDA_ZXDH)
+  case GDAProvider::ZXDH:
+    return zxdh_post_wqe_amo(raddr, opcode, atomic_data, atomic_cmp, fetching);
+#endif
   default:
     assert(false /* invalid nic provider */);
     return 0;
@@ -239,6 +261,7 @@ __device__ uint64_t QueuePair::post_wqe_amo_single(uintptr_t raddr, uint8_t opco
   case GDAProvider::MLX5:
   case GDAProvider::SHCA:
   case GDAProvider::IONIC:
+  case GDAProvider::ZXDH:
   default:
     assert(false /* invalid nic provider */);
     return 0;
@@ -273,10 +296,25 @@ __device__ void QueuePair::quiet(Collectivity cy) {
     ionic_quiet();
     return;
 #endif
+#if defined(GDA_ZXDH)
+  case GDAProvider::ZXDH:
+    if (cy == THREAD || is_thread_zero_in_wave()) {
+      zxdh_quiet_raw();
+    }
+    return;
+#endif
   default:
     assert(false /* invalid nic provider */);
   }
 }
+
+#if defined(GDA_ZXDH)
+__device__ void QueuePair::quiet_with_cst(Collectivity cy) {
+  if (cy == THREAD || is_thread_zero_in_wave()) {
+    zxdh_quiet_with_cst();
+  }
+}
+#endif
 
 __device__ void QueuePair::quiet_single() {
   switch (gda_provider_) {
@@ -288,6 +326,7 @@ __device__ void QueuePair::quiet_single() {
   case GDAProvider::MLX5:
   case GDAProvider::SHCA:
   case GDAProvider::IONIC:
+  case GDAProvider::ZXDH:
   default:
     assert(false /* invalid nic provider */);
   }
@@ -306,6 +345,13 @@ __device__ void QueuePair::quiet_dp_single_lane() {
   case GDAProvider::SHCA:
     if (is_thread_zero_in_wave()) {
       shca_quiet_dp_single_lane();
+    }
+    return;
+#endif
+#if defined(GDA_ZXDH)
+  case GDAProvider::ZXDH:
+    if (is_thread_zero_in_wave()) {
+      zxdh_quiet_dp_single_lane();
     }
     return;
 #endif
@@ -341,6 +387,12 @@ __device__ void QueuePair::put_nbi_dp(void *dest, const void *source, size_t nel
 #if defined(GDA_SHCA)
   case GDAProvider::SHCA:
     shca_post_wqe_rma_dp_single_lane(nelems, src, dst, gda_op_rdma_write);
+    return;
+#endif
+#if defined(GDA_ZXDH)
+  case GDAProvider::ZXDH:
+    zxdh_post_wqe_rma_dp_single_lane(nelems, src, dst,
+                                     gda_op_rdma_write);
     return;
 #endif
   default:
@@ -385,6 +437,12 @@ __device__ void QueuePair::atomic_nofetch_dp(void *dest, int64_t atomic_data, in
 #if defined(GDA_SHCA)
   case GDAProvider::SHCA:
     shca_post_wqe_amo_dp_single_lane(sizeof(int64_t), dst, gda_op_atomic_fa, atomic_data, atomic_cmp, false);
+    return;
+#endif
+#if defined(GDA_ZXDH)
+  case GDAProvider::ZXDH:
+    zxdh_post_wqe_amo_dp_single_lane(dst, gda_op_atomic_fa, atomic_data,
+                                     atomic_cmp, false);
     return;
 #endif
   default:

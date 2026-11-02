@@ -46,4 +46,5 @@
 #cmakedefine GDA_BNXT
 #cmakedefine GDA_MLX5
 #cmakedefine GDA_SHCA
+#cmakedefine GDA_ZXDH
 #cmakedefine HAVE_EXTERNAL_MPI

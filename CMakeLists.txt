@@ -73,6 +73,7 @@ option(GDA_IONIC "Build for the IONIC RDMA provider" OFF)
 option(GDA_BNXT "Build for Broadcom RDMA provider" OFF)
 option(GDA_MLX5 "Build for Mellanox MLX5 RDMA provider" OFF)
 option(GDA_SHCA "Build for Dawning SHCA RDMA provider" OFF)
+option(GDA_ZXDH "Build for ZTE ZXDH RDMA provider" OFF)
 
 set(USE_EXTERNAL_MPI AUTO CACHE STRING "Link with an external MPI (required if used MPI is ABI incompatible with Open MPI v5)")
 set_property(CACHE USE_EXTERNAL_MPI PROPERTY STRINGS AUTO ON OFF)
