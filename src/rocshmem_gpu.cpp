@@ -317,7 +317,7 @@ __device__ void rocshmem_quiet() {
 
 __device__ void rocshmem_quiet_dp(size_t qp_idx) {
 #if defined(GDA_MLX5) || defined(GDA_SHCA)
-  static_cast<GDAContext*>(ROCSHMEM_CTX_DEFAULT.ctx_opaque)->qp_quiet(qp_idx);  
+  static_cast<GDAContext*>(ROCSHMEM_CTX_DEFAULT.ctx_opaque)->qp_quiet(qp_idx);
 #endif
 }
 
@@ -2310,10 +2310,10 @@ __device__ uint32_t rocshmem_ctx_num_qps_per_pe(rocshmem_ctx_t ctx) {
 
 __device__ uint32_t rocshmem_ctx_num_qps_per_pe() {
 #if defined(GDA_MLX5)
-  return static_cast<GDAContext*>(ROCSHMEM_CTX_DEFAULT.ctx_opaque)->get_num_qps_per_pe(); 
+  return static_cast<GDAContext*>(ROCSHMEM_CTX_DEFAULT.ctx_opaque)->get_num_qps_per_pe();
 #endif
 
-  LOGD_API("device::ctx_num_qps_per_pe (ctx=%zd) not implemented for GDA_MLX5\n", ctx.ctx_opaque);
+  LOGD_API("device::ctx_num_qps_per_pe (ctx=%zd) not implemented for GDA_MLX5\n", ROCSHMEM_CTX_DEFAULT.ctx_opaque);
   return 0;
 }
 
