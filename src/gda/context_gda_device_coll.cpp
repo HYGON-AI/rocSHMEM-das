@@ -471,12 +471,12 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wg(rocshmem_team_t te
   for (int j = tid; j < pe_size; j+= step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
 
-    long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
+    long *sync_flags = &pSync[alltoall_pSync_offset + j];
     while (uncached_load(sync_flags) != 1) { }
 
     qps[dest_pe].quiet_single();
 
-    pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
+    pSync[alltoall_pSync_offset + j] = ROCSHMEM_SYNC_VALUE;
   }
 
   if (is_thread_zero_in_block()) {
@@ -570,12 +570,12 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
   for (int j = tid; j < pe_size; j+= step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
 
-    long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
+    long *sync_flags = &pSync[alltoall_pSync_offset + j];
     while (uncached_load(sync_flags) != 1) { }
 
     qps[dest_pe].quiet_single();
 
-    pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
+    pSync[alltoall_pSync_offset + j] = ROCSHMEM_SYNC_VALUE;
   }
 
   if (is_thread_zero_in_wave()) {

@@ -52,7 +52,6 @@ __device__ void GDAContext::internal_get_broadcastmem_wg_das(void *dst, const vo
     rails = min(rails, num_qps_per_pe);
 
     const size_t chunk = (nbytes + rails - 1) / rails;
-    const uint64_t src_offset = reinterpret_cast<const char *>(src) - base_heap[constmem.my_pe];
     char *dst_bytes = reinterpret_cast<char *>(dst);
 
     for (uint32_t rail = 0; rail < rails; rail++) {
@@ -62,7 +61,7 @@ __device__ void GDAContext::internal_get_broadcastmem_wg_das(void *dst, const vo
       const uint32_t qp_row = (static_cast<uint32_t>(blockIdx.x) + rail * active_wgs) % num_qps_per_pe;
       const uint32_t qp_index = qp_row * constmem.num_pes + pe_root;
       qps[qp_index].get_nbi(dst_bytes + begin,
-                            base_heap[pe_root] + src_offset + begin,
+                            reinterpret_cast<const char *>(src) + begin,
                             length, wf_info);
     }
 
@@ -87,7 +86,7 @@ __device__ void GDAContext::broadcastmem_wg_das(rocshmem_team_t team, void *dst,
 
   // Passed pe_root is relative to team, convert to world root
   int pe_root_world = team_obj->get_pe_in_world(pe_root);
-  internal_broadcastmem_wg(dst, src, nelems, pe_root_world, pe_start, stride,
+  internal_broadcastmem_wg_das(dst, src, nelems, pe_root_world, pe_start, stride,
                pe_size, p_sync);
 }
 
@@ -126,7 +125,7 @@ __device__ void GDAContext::internal_broadcastmem_wg_das(void *dst, const void *
   if (constmem.my_pe == pe_root) {
     memcpy_wg<MemcpyKind::Put>(dst, const_cast<void *>(src), nbytes);
   } else if (constmem.my_pe == node_leader) {
-    internal_get_broadcastmem_wg(dst, src, nelems, pe_root, wf_info);
+    internal_get_broadcastmem_wg_das(dst, src, nelems, pe_root, wf_info);
   }
 
   // Node leaders must finish the inter-node phase before local IPC readers
