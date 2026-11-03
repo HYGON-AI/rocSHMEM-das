@@ -85,7 +85,7 @@ template <typename T1, ROCSHMEM_OP T2>
 __global__ void TeamReduceScatterWaveTest(int loop, int skip,
                                           long long int *start_time,
                                           long long int *end_time, T1 *s_buf,
-                                          T1 *r_buf, size_t size,
+                                          T1 *r_buf, size_t num_elems,
                                           [[maybe_unused]] TestType type,
                                           ShmemContextType ctx_type,
                                           rocshmem_team_t *teams,
@@ -109,15 +109,15 @@ __global__ void TeamReduceScatterWaveTest(int loop, int skip,
   int n_pes = rocshmem_ctx_n_pes(ctx_array[wf_id]);
 
   // Each wave uses its own buffer slice
-  T1 *my_s_buf = s_buf + flat_wf_id * n_pes * size;
-  T1 *my_r_buf = r_buf + flat_wf_id * size;
+  T1 *my_s_buf = s_buf + flat_wf_id * n_pes * num_elems;
+  T1 *my_r_buf = r_buf + flat_wf_id * num_elems;
 
   for (int i = 0; i < loop + skip; i++) {
     if (i == skip && t_id % WF_SIZE == 0) {
       start_time[flat_wf_id] = wall_clock64();
     }
     wave_team_reduce_scatter<T1, T2>(ctx_array[wf_id], teams[flat_wf_id],
-                                     my_r_buf, my_s_buf, size);
+                                     my_r_buf, my_s_buf, num_elems);
   }
 
   __syncthreads();
@@ -147,10 +147,10 @@ TeamReduceScatterWaveTester<T1, T2>::TeamReduceScatterWaveTester(
   int total_waves = args.num_wgs * num_warps;
 
   // One source slice (n_pes * max_msg_size) and one dest slice (max_msg_size)
-  // per wave across all WGs
-  s_buf = (T1 *)alloc_test_buffer(n_pes * max_msg_size * sizeof(T1) * total_waves,
+  // bytes per wave across all WGs
+  s_buf = (T1 *)alloc_test_buffer(n_pes * max_msg_size * total_waves,
                                   args.local_buf_type);
-  r_buf = (T1 *)alloc_test_buffer(max_msg_size * sizeof(T1) * total_waves);
+  r_buf = (T1 *)alloc_test_buffer(max_msg_size * total_waves);
 
   char* value{nullptr};
   if ((value = getenv("ROCSHMEM_MAX_NUM_TEAMS"))) {
@@ -196,10 +196,11 @@ void TeamReduceScatterWaveTester<T1, T2>::launchKernel(dim3 gridSize,
                                                         int loop,
                                                         uint64_t size) {
   size_t shared_bytes = num_warps * sizeof(rocshmem_ctx_t);
+  const size_t num_elems = size / sizeof(T1);
 
   hipLaunchKernelGGL(HIP_KERNEL_NAME(TeamReduceScatterWaveTest<T1, T2>),
                      gridSize, blockSize, shared_bytes, stream, loop, args.skip,
-                     start_time, end_time, s_buf, r_buf, size, _type,
+                     start_time, end_time, s_buf, r_buf, num_elems, _type,
                      _shmem_context, team_reduce_scatter_wave_world_dup,
                      num_warps);
 
@@ -218,23 +219,25 @@ void TeamReduceScatterWaveTester<T1, T2>::postLaunchKernel() {
 template <typename T1, ROCSHMEM_OP T2>
 void TeamReduceScatterWaveTester<T1, T2>::resetBuffers(
     [[maybe_unused]] uint64_t size) {
+  const size_t num_elems = max_msg_size / sizeof(T1);
   int total_waves = args.num_wgs * num_warps;
 
-  for (uint64_t i = 0; i < (uint64_t)n_pes * max_msg_size * total_waves; i++) {
+  for (uint64_t i = 0; i < (uint64_t)n_pes * num_elems * total_waves; i++) {
     s_buf[i] = static_cast<T1>(1);
   }
-  for (uint64_t i = 0; i < (uint64_t)max_msg_size * total_waves; i++) {
+  for (uint64_t i = 0; i < (uint64_t)num_elems * total_waves; i++) {
     r_buf[i] = static_cast<T1>(0);
   }
 }
 
 template <typename T1, ROCSHMEM_OP T2>
 void TeamReduceScatterWaveTester<T1, T2>::verifyResults(uint64_t size) {
+  const size_t num_elems = size / sizeof(T1);
   int total_waves = args.num_wgs * num_warps;
 
   for (int wave_id = 0; wave_id < total_waves; wave_id++) {
-    T1 *wave_r_buf = r_buf + wave_id * size;
-    for (uint64_t i = 0; i < size; i++) {
+    T1 *wave_r_buf = r_buf + wave_id * num_elems;
+    for (uint64_t i = 0; i < num_elems; i++) {
       auto r = verify_buf(wave_r_buf[i], (T1)n_pes);
       if (r.first == false) {
         fprintf(stderr, "Data validation error at wave %d idx %lu\n", wave_id, i);
