@@ -622,14 +622,9 @@ __device__ __forceinline__ uint64_t GDAContext::get_next_qp_group(
                   qp_index == selected_qp);
 }
 
-/** @brief Submit a PUT safely through a QP shared across workgroups. */
+/** @brief Submit a PUT to a local symmetric destination through a shared QP. */
 __device__ __forceinline__ void GDAContext::put_nbi_shared_qp(
     int qp_index, void *dest, const void *source, size_t length, bool ring_db) {
-  if (ctx_id_ != 0) {
-    qps[qp_index].put_nbi_single(dest, source, length, ring_db);
-    return;
-  }
-
   uint64_t pending_lanes = get_active_lane_mask();
   const int lane_id = get_flat_block_id() % WF_SIZE;
   // Submit each QP group through the existing wave-batched path.
@@ -647,11 +642,6 @@ __device__ __forceinline__ void GDAContext::put_nbi_shared_qp(
 /** @brief Submit a GET safely through a QP shared across workgroups. */
 __device__ __forceinline__ void GDAContext::get_nbi_shared_qp(
     int qp_index, void *dest, const void *source, size_t length) {
-  if (ctx_id_ != 0) {
-    qps[qp_index].get_nbi_single(dest, source, length, true);
-    return;
-  }
-
   uint64_t pending_lanes = get_active_lane_mask();
   const int lane_id = get_flat_block_id() % WF_SIZE;
   // Submit each QP group through the existing wave-batched path.
@@ -665,25 +655,26 @@ __device__ __forceinline__ void GDAContext::get_nbi_shared_qp(
   }
 }
 
-/** @brief Submit a non-fetching atomic safely through a shared QP. */
-__device__ __forceinline__ void GDAContext::atomic_nofetch_shared_qp(
-    int qp_index, void *dest, int64_t value) {
-  if (ctx_id_ != 0) {
-    qps[qp_index].atomic_add_single(dest, value);
-    return;
-  }
-
+/** @brief Drain shared QPs using the provider's concurrent CQ path. */
+__device__ __forceinline__ void GDAContext::quiet_shared_qp(int qp_index) {
   uint64_t pending_lanes = get_active_lane_mask();
   const int lane_id = get_flat_block_id() % WF_SIZE;
-  // Submit each QP group through the existing wave-batched path.
   while (pending_lanes) {
     const uint64_t qp_group = get_next_qp_group(qp_index, pending_lanes);
     if (qp_group & (uint64_t{1} << lane_id)) {
       ActiveWFInfo wf_info(qp_index);
-      qps[qp_index].atomic_add(dest, value, 0, wf_info);
+      qps[qp_index].quiet(wf_info);
     }
     pending_lanes &= ~qp_group;
   }
+}
+
+/** @brief Publish the completion count to a slot owned by this sender. */
+__device__ __forceinline__ void GDAContext::publish_completion_shared_qp(
+    int qp_index, void *dest, int64_t completion_count) {
+  // Each peer owns a separate slot; overwrite its completion count instead of
+  // requiring a remote atomic increment. dest is a local symmetric address.
+  put_nbi_shared_qp(qp_index, dest, &completion_count, sizeof(completion_count), true);
 }
 
 __device__ __forceinline__ bool gda_copy_if_self(int pe, void* dst,
@@ -770,7 +761,6 @@ __device__ void GDAContext::alltoall_linear_thread_puts_das(rocshmem_team_t team
     ActiveWFInfo wf_info(dest_pe);
     int qp_index = get_qp_index(dest_pe, wf_info);
     qp_indices[j] = qp_index;
-    uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
     if (gda_copy_if_self(
           dest_pe, &dst[my_pe_in_team * nelems + elem_offset],
           &src[j * nelems + elem_offset], elem_count * sizeof(T))) {
@@ -778,22 +768,20 @@ __device__ void GDAContext::alltoall_linear_thread_puts_das(rocshmem_team_t team
       continue;
     }
 
+    // Submit payload before the completion notification.
     put_nbi_shared_qp(qp_index,
-      reinterpret_cast<char*>(&dst[my_pe_in_team * nelems + elem_offset]) + base_heap_offset,
-      &src[j * nelems + elem_offset], elem_count * sizeof(T), false);
-    atomic_nofetch_shared_qp(qp_index,
-      reinterpret_cast<char *>(&pSync[alltoall_pSync_offset + my_pe_in_team]) +
-      base_heap_offset, 1);
+      &dst[my_pe_in_team * nelems + elem_offset],
+      &src[j * nelems + elem_offset], elem_count * sizeof(T), true);
+    publish_completion_shared_qp(qp_index,
+      &pSync[alltoall_pSync_offset + my_pe_in_team], completion_count);
   }
 
   // wait until everyone has obtained their designated data
   for (int j = tid; j < pe_size; j+= step_size) {
-    int dest_pe = team_obj->get_pe_in_world(j);
-
-    long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
+    long *sync_flags = &pSync[alltoall_pSync_offset + j];
     while (uncached_load(sync_flags) < completion_count) { }
 
-    qps[qp_indices[j]].quiet_single();
+    quiet_shared_qp(qp_indices[j]);
 
   }
 
@@ -888,21 +876,19 @@ __device__ void GDAContext::alltoallv_copy_das(rocshmem_team_t team, T *dest,
   for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
     int qp_index = get_team_qp_index(team_obj, dest_pe);
-    uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
     const size_t total = source_nelems[j];
     size_t elem_offset = 0;
     size_t elem_count = 0;
     split_wg_range(total, wg_id, wg_count, &elem_offset, &elem_count);
     size_t nelems = elem_count * sizeof(T);
-    char* amo_dst = ((char*)&pSync[alltoall_pSync_offset + my_pe_in_team] + base_heap_offset);
 
     if (nelems != 0) {
       T* src = source + source_displs[j] + elem_offset;
-      T* dst = (T*)((char*)&tmp_buf[my_pe_in_team * tmp_buf_off] + base_heap_offset);
-      put_nbi_shared_qp(qp_index, dst, src, nelems, false);
+      T* dst = &tmp_buf[my_pe_in_team * tmp_buf_off];
+      put_nbi_shared_qp(qp_index, dst, src, nelems, true);
     }
 
-    atomic_nofetch_shared_qp(qp_index, amo_dst, 1);
+    publish_completion_shared_qp(qp_index, &pSync[alltoall_pSync_offset + my_pe_in_team], completion_count);
   }
 
   // wait until everyone has obtained their designated data
@@ -913,7 +899,7 @@ __device__ void GDAContext::alltoallv_copy_das(rocshmem_team_t team, T *dest,
     long *sync_flags = &pSync[alltoall_pSync_offset + j];
     while (uncached_load(sync_flags) < completion_count) { }
 
-    qps[qp_index].quiet_single();
+    quiet_shared_qp(qp_index);
 
   }
 
@@ -972,7 +958,6 @@ __device__ void GDAContext::alltoallv_get_das(rocshmem_team_t team, T *dest,
 
     int dest_pe = team_obj->get_pe_in_world(j);
     int qp_index = get_team_qp_index(team_obj, dest_pe);
-    uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
 
     /* Pack Ctrl Message * 16 bits seq | 48bit displ */
     seq_bits = (seq_mask & (a2a_sn + 1)) << seq_shift;
@@ -985,10 +970,10 @@ __device__ void GDAContext::alltoallv_get_das(rocshmem_team_t team, T *dest,
 
     /* Prepare Ctrl Message */
     src = (uint64_t*)&ctrl_msg;
-    dst = (uint64_t*)((char*)&tmp_buf[constmem.my_pe] + base_heap_offset);
+    dst = &tmp_buf[constmem.my_pe];
 
     put_nbi_shared_qp(qp_index, dst, src, sizeof(uint64_t), true);
-    qps[qp_index].quiet_single();
+    quiet_shared_qp(qp_index);
   }
 
   __syncthreads();
@@ -997,7 +982,6 @@ __device__ void GDAContext::alltoallv_get_das(rocshmem_team_t team, T *dest,
   for (int j = tid; j < pe_size; j+= step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
     int qp_index = get_team_qp_index(team_obj, dest_pe);
-    uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
     uint64_t ctrl_value;
     uint64_t *vol_ctrl = &tmp_buf[dest_pe];
     uint64_t seq_bits;
@@ -1016,7 +1000,7 @@ __device__ void GDAContext::alltoallv_get_das(rocshmem_team_t team, T *dest,
     split_wg_range(recv_total, wg_id, wg_count, &recv_offset, &recv_count);
     size_t nelems = recv_count * sizeof(T);
     const void *src = reinterpret_cast<const char *>(source) +
-                      (displ_bits * sizeof(T)) + base_heap_offset;
+                      (displ_bits * sizeof(T));
     void *dst = dest + dest_displs[j] + recv_offset;
 
     // Most workgroups have an empty slice for small variable-count messages.
@@ -1026,8 +1010,7 @@ __device__ void GDAContext::alltoallv_get_das(rocshmem_team_t team, T *dest,
     }
 
     /* Put Completion */
-    char* amo_dst = ((char*)&pSync[alltoall_pSync_offset + my_pe_in_team] + base_heap_offset);
-    atomic_nofetch_shared_qp(qp_index, amo_dst, 1);
+    publish_completion_shared_qp(qp_index, &pSync[alltoall_pSync_offset + my_pe_in_team], completion_count);
   }
 
   __syncthreads();
@@ -1039,7 +1022,7 @@ __device__ void GDAContext::alltoallv_get_das(rocshmem_team_t team, T *dest,
     long *sync_flags = &pSync[alltoall_pSync_offset + j];
     while (uncached_load(sync_flags) < completion_count) { }
 
-    qps[qp_index].quiet_single();
+    quiet_shared_qp(qp_index);
   }
 
   if (is_thread_zero_in_block()) {
@@ -1074,7 +1057,7 @@ __device__ void GDAContext::fcollect_linear_das(rocshmem_team_t team, T *dst,
     // sending the same source segment independently to every remote PE.
     for (int rank = 0; rank < pe_size; rank++) {
       const int root = team_obj->get_pe_in_world(rank);
-      internal_broadcastmem_wg(dst + rank * nelems + elem_offset, src + elem_offset,
+      internal_broadcastmem_wg_das(dst + rank * nelems + elem_offset, src + elem_offset,
                          elem_count * sizeof(T), root, pe_start, stride, pe_size, pSync);
     }
     return;

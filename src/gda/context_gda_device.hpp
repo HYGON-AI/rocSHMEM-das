@@ -477,8 +477,10 @@ class GDAContext : public Context {
   __device__ __forceinline__ void get_nbi_shared_qp(int qp_index, void *dest,
       const void *source, size_t length);
 
-  __device__ __forceinline__ void atomic_nofetch_shared_qp(int qp_index, void *dest,
-      int64_t value);
+  __device__ __forceinline__ void quiet_shared_qp(int qp_index);
+
+  __device__ __forceinline__ void publish_completion_shared_qp(int qp_index, void *dest,
+      int64_t completion_count);
 
   __device__ void alltoallmem_linear_wave(rocshmem_team_t team, void *dst,
                                           const void *src, int nelems);
