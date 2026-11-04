@@ -140,7 +140,7 @@ COMMON_MPI="--allow-run-as-root \
 -x ROCSHMEM_GDR_DISABLE_XDP=1 \
 --mca coll_hcoll_enable 0 \
 -x UCX_WARN_UNUSED_ENV_VARS=n \
--x LD_LIBRARY_PATH -x PATH \
+-x ROCM_PATH -x LD_LIBRARY_PATH -x PATH \
 $IB_GID_PARAMS \
 --map-by numa \
 $EXTRA_MPI_ARGS"
