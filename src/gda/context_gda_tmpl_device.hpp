@@ -503,6 +503,12 @@ __device__ void GDAContext::internal_direct_allreduce_wave(T *dst, const T *src,
 template <typename T, ROCSHMEM_OP Op>
 __device__ int GDAContext::reduce_wave(rocshmem_team_t team, T *dest,
                                        const T *source, int nreduce) {
+#if defined(USE_DAS)
+  if (reduce_wave_pxn<T, Op, false>(team, dest, source, nreduce)) {
+    return ROCSHMEM_SUCCESS;
+  }
+#endif
+
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
 
   int PE_size = team_obj->tinfo_wrt_world->size;
@@ -778,7 +784,7 @@ template <typename T, ROCSHMEM_OP Op>
 __device__ int GDAContext::reduce_wg(rocshmem_team_t team, T *dest,
                                   const T *source, int nreduce) {
 #if defined(USE_DAS)
-  return reduce_das<T, Op>(team, dest, source, nreduce);
+  return reduce_wg_das<T, Op>(team, dest, source, nreduce);
 #endif
 
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
@@ -938,6 +944,12 @@ __device__ int GDAContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
 template <typename T, ROCSHMEM_OP Op>
 __device__ int GDAContext::reduce_scatter_wave(rocshmem_team_t team, T *dest,
                                                const T *source, int nreduce) {
+#if defined(USE_DAS)
+  if (reduce_wave_pxn<T, Op, true>(team, dest, source, nreduce)) {
+    return ROCSHMEM_SUCCESS;
+  }
+#endif
+
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
 
   int PE_size   = team_obj->tinfo_wrt_world->size;
@@ -1049,6 +1061,12 @@ __device__ void GDAContext::internal_get_broadcast_wave(T *dst, const T *src,
 template <typename T>
 __device__ int GDAContext::broadcast_wave(rocshmem_team_t team, T *dest,
     const T* source, int nelems, int PE_root) {
+#if defined(USE_DAS)
+  if (constmem.pxn_enabled) {
+    return broadcastmem_wave(team, dest, source, nelems * sizeof(T), PE_root);
+  }
+#endif
+
   if (dest == nullptr ||
     source == nullptr ||
     team == ROCSHMEM_TEAM_INVALID)
@@ -1088,6 +1106,13 @@ __device__ void GDAContext::internal_broadcast_wave(T *dst, const T *src,
 template <typename T>
 __device__ void GDAContext::broadcast_wg(rocshmem_team_t team, T *dst,
     const T *src, int nelems, int pe_root) {
+#if defined(USE_DAS)
+  if (constmem.pxn_enabled) {
+    // Typed and byte APIs must share the same team route and epoch handling.
+    return broadcastmem_wg_das(team, dst, src, nelems * sizeof(T), pe_root);
+  }
+#endif
+
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
 
   int stride = team_obj->tinfo_wrt_world->stride;
@@ -1140,7 +1165,7 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
     const size_t source_nelems[], const size_t source_displs[],
     int wg_id, int wg_count) {
 #if defined(USE_DAS)
-  return alltoallv_copy_das<T>(team, dest, dest_nelems, dest_displs, source, source_nelems, source_displs, wg_id, wg_count);
+  return alltoallv_copy_nopxn<T>(team, dest, dest_nelems, dest_displs, source, source_nelems, source_displs, wg_id, wg_count);
 #endif
 
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
@@ -1208,7 +1233,7 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
     [[maybe_unused]] const size_t source_nelems[], const size_t source_displs[],
     int wg_id, int wg_count) {
 #if defined(USE_DAS)
-  return alltoallv_get_das<T>(team, dest, dest_nelems, dest_displs, source, source_nelems, source_displs, wg_id, wg_count);
+  return alltoallv_get_nopxn<T>(team, dest, dest_nelems, dest_displs, source, source_nelems, source_displs, wg_id, wg_count);
 #endif
 
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
@@ -1288,7 +1313,7 @@ __device__ void GDAContext::alltoall_linear_wg(rocshmem_team_t team, T *dst,
                                             const T *src, int nelems,
                                             int elem_offset, int elem_count) {
 #if defined(USE_DAS)
-  return alltoall_linear_wg_das<T>(team, dst, src, nelems, elem_offset, elem_count);
+  return alltoall_linear_wg_nopxn<T>(team, dst, src, nelems, elem_offset, elem_count);
 #endif
 
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
@@ -1322,6 +1347,12 @@ __device__ void GDAContext::alltoall_linear_wg(rocshmem_team_t team, T *dst,
 template <typename T>
 __device__ int GDAContext::alltoall_wave(rocshmem_team_t team,
                           T* dest, const T* source, int nelems) {
+#if defined(USE_DAS)
+  if (constmem.pxn_enabled) {
+    return alltoallmem_wave(team, dest, source, nelems * sizeof(T));
+  }
+#endif
+
   if (dest == nullptr || source == nullptr)
     return ROCSHMEM_ERROR;
 
@@ -1335,7 +1366,7 @@ __device__ void GDAContext::fcollect_wg(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems,
                                      int elem_offset, int elem_count) {
 #if defined(USE_DAS)
-  return fcollect_linear_das<T>(team, dst, src, nelems, elem_offset, elem_count);
+  return fcollect_wg_das<T>(team, dst, src, nelems, elem_offset, elem_count);
 #endif
 
   fcollectmem_linear_wg(team, dst, src, nelems * sizeof(T));
@@ -1344,6 +1375,12 @@ __device__ void GDAContext::fcollect_wg(rocshmem_team_t team, T *dst,
 template <typename T>
 __device__ int GDAContext::fcollect_wave(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
+#if defined(USE_DAS)
+  if (constmem.pxn_enabled) {
+    return fcollectmem_wave(team, dst, src, nelems * sizeof(T));
+  }
+#endif
+
   if (dst == nullptr || src == nullptr || team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
 

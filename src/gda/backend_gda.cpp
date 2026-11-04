@@ -30,6 +30,9 @@
 #include <cstdlib>
 #include <cassert>
 #include <algorithm>
+#include <map>
+#include <set>
+#include <utility>
 #include <vector>
 
 #include "backend_gda.hpp"
@@ -155,6 +158,12 @@ void GDABackend::init() {
   if (!envvar::disable_mixed_ipc)
     setup_ipc();
   setup_team_shared();
+
+  // Unrestricted collectives retain their original slot-based proxy selection.
+  if (!envvar::disable_pxn) {
+    setup_proxy_candidates();
+    setup_pxn_sync_routes();
+  }
 
   /*
    * Allocate the symmetric-registration table before contexts are created so
@@ -307,6 +316,169 @@ void GDABackend::setup_ipc() {
 
 void GDABackend::cleanup_ipc() {
   ipcImpl.ipcHostStop();
+}
+
+namespace {
+
+// WORLD and TEAM report the same directed synchronization endpoints.
+void LogProxySyncRoute(const char *scope, int pe_start, int stride, int pe_size,
+    int source_first_pe, int source_proxy_pe, int target_first_pe, int target_proxy_pe,
+    const std::string &nic_name) {
+  LOG_INFO("PXN %-5s fixed sync route: team(start=%d,stride=%d,size=%d); "
+           "source={first_pe=%d,proxy_pe=%d}; target={first_pe=%d,proxy_pe=%d}; "
+           "NIC=%s (data routes selected separately)",
+           scope, pe_start, stride, pe_size, source_first_pe, source_proxy_pe,
+           target_first_pe, target_proxy_pe, nic_name.c_str());
+}
+
+/* Print selected-NIC advertisements, grouped by IPC domain and NIC.
+ * Per-task endpoint constraints are applied later by the device selector.
+ */
+void LogProxyDataCandidates(const char *scope, int pe_start, int stride, int pe_size,
+    const std::vector<proxy::ProxyNicCandidate> &candidates, const char *policy) {
+  std::map<int, std::map<std::string, std::set<int>>> domains;
+  for (const auto &candidate : candidates) {
+    if (proxy::TeamContainsPe(pe_start, stride, pe_size, candidate.proxy_pe)) {
+      domains[candidate.ipc_domain_first_pe][candidate.nic_name].insert(candidate.proxy_pe);
+    }
+  }
+
+  LOG_INFO("PXN %-5s data candidates: team(start=%d,stride=%d,size=%d); "
+           "policy=%s; IPC domains=%zu; candidates:",
+           scope, pe_start, stride, pe_size, policy, domains.size());
+
+  for (const auto &[first_pe, nics] : domains) {
+    for (const auto &[nic, pes] : nics) {
+      std::string proxies;
+      for (int pe : pes) {
+        proxies += (proxies.empty() ? "" : ",") + std::to_string(pe);
+      }
+
+      bool common_nic = true;
+      for (const auto &domain : domains) {
+        if (domain.second.count(nic) == 0) {
+          common_nic = false;
+          break;
+        }
+      }
+
+      LOG_INFO("  IPC domain first PE=%d; NIC=%s; proxy PEs=[%s]; "
+               "NIC in all IPC domains=%s",
+               first_pe, nic.c_str(), proxies.c_str(), common_nic ? "yes" : "no");
+    }
+  }
+}
+
+}  // namespace
+
+void GDABackend::setup_proxy_candidates() {
+  const bool has_ipc_domain = ipcImpl.shm_size > 0 && ipcImpl.ipc_first_pe >= 0;
+  if (!has_ipc_domain && !envvar::disable_pxn) {
+    LOG_ERROR_EXIT("PXN requires valid local IPC membership");
+  }
+
+  std::vector<std::string> selected_nics;
+  for (const auto& nic : nic_devices_) {
+    selected_nics.push_back(nic.nic_name);
+  }
+  auto local_candidates = proxy::BuildLocalNicCandidates(
+                          selected_nics, my_pe, has_ipc_domain ? ipcImpl.ipc_first_pe : my_pe);
+
+  auto all_gather = [this](void *buffer, size_t bytes_per_pe) {
+    if (backend_comm != MPI_COMM_NULL) {
+      NET_CHECK(mpilib_ftable_.Allgather(
+          MPI_IN_PLACE, static_cast<int>(bytes_per_pe), MPI_CHAR,
+          buffer, static_cast<int>(bytes_per_pe), MPI_CHAR, backend_comm));
+    } else {
+      backend_bootstr->allGather(buffer, static_cast<int>(bytes_per_pe));
+    }
+  };
+
+  auto candidates = proxy::GatherProxyNicCandidates(
+                    local_candidates, my_pe, num_pes, all_gather);
+  auto& routing_state = proxy_routing_state_;
+  routing_state.candidates = candidates;
+
+  std::vector<int> ipc_domain_first_pes;
+  for (const auto& candidate : candidates) {
+    ipc_domain_first_pes.push_back(candidate.ipc_domain_first_pe);
+  }
+  std::sort(ipc_domain_first_pes.begin(), ipc_domain_first_pes.end());
+  ipc_domain_first_pes.erase(std::unique(ipc_domain_first_pes.begin(), ipc_domain_first_pes.end()),
+                       ipc_domain_first_pes.end());
+
+  // Prepare the shared PE/NIC and IPC-domain mapping for device data selection.
+  auto data_layout = proxy::BuildWorldNicLayout(candidates, num_pes, ROCSHMEM_BARRIER_SYNC_SIZE);
+
+  if (data_layout) {
+    routing_state.world_nic_name_count = static_cast<int>(data_layout.nic_names.size());
+    routing_state.world_pe_nic_name_ids = std::move(data_layout.pe_nic_name_ids);
+    routing_state.world_ipc_domain_first_pes = std::move(ipc_domain_first_pes);
+  }
+}
+
+void GDABackend::setup_pxn_sync_routes() {
+  auto& routing_state = proxy_routing_state_;
+  const auto& candidates = routing_state.candidates;
+  std::vector<int> ipc_domain_first_pes;
+  for (const auto& candidate : candidates) {
+    ipc_domain_first_pes.push_back(candidate.ipc_domain_first_pe);
+  }
+  std::sort(ipc_domain_first_pes.begin(), ipc_domain_first_pes.end());
+  ipc_domain_first_pes.erase(std::unique(ipc_domain_first_pes.begin(), ipc_domain_first_pes.end()),
+      ipc_domain_first_pes.end());
+  std::map<std::pair<int, int>, proxy::ProxyRoute> sync_routes;
+
+  for (size_t source_ipc_domain_index = 0; source_ipc_domain_index < ipc_domain_first_pes.size(); source_ipc_domain_index++) {
+    for (size_t target_ipc_domain_index = 0; target_ipc_domain_index < ipc_domain_first_pes.size(); target_ipc_domain_index++) {
+      if (source_ipc_domain_index == target_ipc_domain_index) continue;
+      const int source_ipc_domain_first_pe = ipc_domain_first_pes[source_ipc_domain_index];
+      const int target_ipc_domain_first_pe = ipc_domain_first_pes[target_ipc_domain_index];
+      auto schedule = proxy::BuildProxyRouteSchedule(
+                      candidates, source_ipc_domain_first_pe, target_ipc_domain_first_pe);
+      if (!schedule) {
+        LOG_ERROR_EXIT("PXN found no common NIC between PE %d and PE %d",
+                       source_ipc_domain_first_pe, target_ipc_domain_first_pe);
+      }
+
+      auto sync_route = proxy::SelectScheduledProxyRoute(schedule, 0);
+      sync_routes[{source_ipc_domain_first_pe, target_ipc_domain_first_pe}] = sync_route;
+
+      if (my_pe == 0) {
+        LogProxySyncRoute("WORLD", 0, 1, num_pes,
+            source_ipc_domain_first_pe, sync_route.source_proxy_pe,
+            target_ipc_domain_first_pe, sync_route.target_proxy_pe, sync_route.nic_name);
+      }
+    }
+  }
+
+  auto world_layout = proxy::BuildWorldProxySyncLayout(candidates, sync_routes,
+                      num_pes, ROCSHMEM_BARRIER_SYNC_SIZE);
+  if (ipc_domain_first_pes.size() > 1 && !world_layout) {
+    LOG_ERROR_EXIT("PXN WORLD proxy synchronization layout is unavailable");
+  }
+
+  routing_state.world_sync_available = static_cast<bool>(world_layout);
+  routing_state.world_ipc_domain_first_pes = std::move(world_layout.ipc_domain_first_pes);
+  routing_state.world_aligned_data_available = routing_state.world_sync_available &&
+                proxy::CanUseAlignedWorldProxyData(candidates, num_pes, ipcImpl.shm_size);
+
+  if (routing_state.world_sync_available) {
+    auto data_layout = proxy::BuildWorldNicLayout(candidates, num_pes, ROCSHMEM_BARRIER_SYNC_SIZE);
+    if (data_layout) {
+      routing_state.world_nic_name_count = static_cast<int>(data_layout.nic_names.size());
+      routing_state.world_pe_nic_name_ids = std::move(data_layout.pe_nic_name_ids);
+
+      if (my_pe == 0) {
+        LogProxyDataCandidates("WORLD", 0, 1, num_pes, candidates,
+            "NIC-first round-robin");
+      }
+    } else if (my_pe == 0) {
+      LOG_INFO("PXN WORLD data routing: team(start=0,stride=1,size=%d); "
+               "policy=validated fixed route; PE-to-NIC mapping unavailable "
+               "(subject to algorithm eligibility)", num_pes);
+    }
+  }
 }
 
 void GDABackend::setup_host_ctx() {
@@ -544,6 +716,75 @@ void GDABackend::Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_byte
   delete[] tmp_buffer;
 }
 
+void GDABackend::setup_team_proxy_routes(GDATeam *team_obj) {
+  const TeamInfo& team_info_wrt_world = *team_obj->tinfo_wrt_world;
+  // The team proxy protocol addresses pSync by world PE, not team rank.
+  const int64_t highest_team_pe = static_cast<int64_t>(team_info_wrt_world.pe_start) +
+      static_cast<int64_t>(team_info_wrt_world.size - 1) * team_info_wrt_world.stride;
+  if (!envvar::disable_pxn && !proxy_routing_state_.candidates.empty() &&
+      team_info_wrt_world.size > 0 && team_info_wrt_world.stride > 0 &&
+      highest_team_pe < ROCSHMEM_BARRIER_SYNC_SIZE) {
+    auto layout = proxy::BuildInTeamProxyLayout(proxy_routing_state_.candidates,
+                  team_info_wrt_world.pe_start, team_info_wrt_world.stride,
+                  team_info_wrt_world.size);
+
+    if (layout && layout.proxy_pe_by_ipc_domain_first_pe.size() <= ROCSHMEM_BARRIER_SYNC_SIZE) {
+      for (const auto& route : layout.proxy_pe_by_ipc_domain_first_pe) {
+        const int index = team_obj->in_team_proxy_ipc_domain_count++;
+        team_obj->in_team_proxy_ipc_domain_first_pes[index] = route.first;
+        team_obj->in_team_proxy_pes[index] = route.second;
+      }
+
+      if (team_obj->my_pe == 0) {
+        // Fixed sync proxies also serve as the validated data-route fallback.
+        // Eligible data tasks select NICs and proxy PEs separately on device.
+        for (const auto &source : layout.proxy_pe_by_ipc_domain_first_pe) {
+          for (const auto &target : layout.proxy_pe_by_ipc_domain_first_pe) {
+            if (source.first == target.first) {
+              continue;
+            }
+
+            LogProxySyncRoute("TEAM", team_info_wrt_world.pe_start,
+                team_info_wrt_world.stride, team_info_wrt_world.size,
+                source.first, source.second, target.first, target.second, layout.nic_name);
+          }
+        }
+
+        LogProxyDataCandidates("TEAM", team_info_wrt_world.pe_start,
+            team_info_wrt_world.stride, team_info_wrt_world.size,
+            proxy_routing_state_.candidates,
+            proxy_routing_state_.has_world_nic_layout()
+                ? "NIC-first round-robin"
+                : "validated fixed route (PE-to-NIC mapping unavailable)");
+      }
+    }
+  }
+
+  const bool is_world_team = team_info_wrt_world.pe_start == 0 &&
+                             team_info_wrt_world.stride == 1 &&
+                             team_info_wrt_world.size == this->num_pes;
+  if (!envvar::disable_pxn && !is_world_team &&
+      team_obj->in_team_proxy_ipc_domain_count <= 1) {
+    std::set<int> participating_ipc_domains;
+    for (const auto& candidate : proxy_routing_state_.candidates) {
+      if (proxy::TeamContainsPe(team_info_wrt_world.pe_start,
+                                team_info_wrt_world.stride,
+                                team_info_wrt_world.size,
+                                candidate.proxy_pe)) {
+        participating_ipc_domains.insert(candidate.ipc_domain_first_pe);
+      }
+    }
+
+    if (participating_ipc_domains.size() > 1) {
+      LOG_ERROR_EXIT("PXN team has no usable in-team proxy route: "
+                     "start=%d stride=%d size=%d",
+                     team_info_wrt_world.pe_start,
+                     team_info_wrt_world.stride,
+                     team_info_wrt_world.size);
+    }
+  }
+}
+
 void GDABackend::create_new_team([[maybe_unused]] Team *parent_team,
                                 const TeamInfo& team_info_wrt_parent,
                                 const TeamInfo& team_info_wrt_world,
@@ -585,6 +826,8 @@ void GDABackend::create_new_team([[maybe_unused]] Team *parent_team,
   new (new_team_obj)
       GDATeam(this, team_info_wrt_parent, team_info_wrt_world, num_pes,
                 my_pe_in_new_team, new_team_comm, common_index);
+
+  setup_team_proxy_routes(new_team_obj);
 
   /* Ensure every PE finishes clearing the reused pSync slot before the new
    * team can issue remote signals. */

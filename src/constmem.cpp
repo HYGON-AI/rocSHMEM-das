@@ -41,6 +41,21 @@ void init_constant_memory(void) {
 #if defined(USE_GDA)
   if (constmem_values.backend_type == BackendType::GDA_BACKEND) {
     constmem_values.gda_provider = static_cast<GDABackend*>(backend)->get_gda_provider();
+    constmem_values.pxn_enabled = !envvar::disable_pxn;
+    constmem_values.world_proxy_sync_available = static_cast<GDABackend*>(backend)->world_proxy_sync_available();
+    constmem_values.world_proxy_aligned_data_available = static_cast<GDABackend*>(backend)->world_proxy_aligned_data_available();
+    const auto& ipc_domain_first_pes = static_cast<GDABackend*>(backend)->world_proxy_ipc_domain_first_pes();
+    constmem_values.world_proxy_ipc_domain_count = static_cast<int>(ipc_domain_first_pes.size());
+    for (size_t i = 0; i < ipc_domain_first_pes.size(); i++) {
+      constmem_values.world_proxy_ipc_domain_first_pes[i] = ipc_domain_first_pes[i];
+    }
+    auto* gda_backend = static_cast<GDABackend*>(backend);
+    constmem_values.world_proxy_nic_layout_available = gda_backend->world_proxy_nic_layout_available();
+    constmem_values.world_proxy_nic_name_count = gda_backend->world_proxy_nic_name_count();
+    const auto& pe_nic_name_ids = gda_backend->world_proxy_pe_nic_name_ids();
+    for (size_t i = 0; i < pe_nic_name_ids.size(); i++) {
+      constmem_values.world_proxy_pe_nic_name_ids[i] = pe_nic_name_ids[i];
+    }
   }
 #endif
 

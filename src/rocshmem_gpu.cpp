@@ -783,10 +783,19 @@ __device__ __noinline__ void direct_ctx_barrier_wg(rocshmem_ctx_t ctx,
   ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, barrier_wg(team));
 }
 
-/*
- * NOTE: rocshmem_ctx_sync/_wave/_wg all three call sync_wg (pre-existing
- * quirk in rocshmem_gpu.cpp being replicated exactly, not fixed).
- */
+// Match the collective participation scope of each public sync API.
+__device__ __noinline__ void direct_ctx_sync(rocshmem_ctx_t ctx,
+    rocshmem_team_t team) {
+  get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_SYNC);
+  ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, sync(team));
+}
+
+__device__ __noinline__ void direct_ctx_sync_wave(rocshmem_ctx_t ctx,
+    rocshmem_team_t team) {
+  get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_SYNC_WAVE);
+  ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, sync_wave(team));
+}
+
 __device__ __noinline__ void direct_ctx_sync_wg(rocshmem_ctx_t ctx,
                                                 rocshmem_team_t team) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_SYNC_WG);
@@ -1743,7 +1752,7 @@ __device__ void rocshmem_alltoallv_wg(rocshmem_ctx_t ctx,
   LOGD_API("device::alltoallv_wg(team=%zd, dest=%p, source=%p)",
               team, dest, source);
 
-  direct_ctx_alltoallv<T>(ROCSHMEM_CTX_DEFAULT,team,
+  direct_ctx_alltoallv<T>(ctx, team,
                                       dest, dest_nelems, dest_displs,
                                       source, source_nelems, source_displs,
                                       wg_id, wg_count);
@@ -2236,7 +2245,7 @@ __device__ void rocshmem_ctx_sync(rocshmem_ctx_t ctx,
   LOGD_API("device::ctx_sync (ctx=%zd, team=%zd)",
     ctx.ctx_opaque, team);
 
-  direct_ctx_sync_wg(ctx, team);
+  direct_ctx_sync(ctx, team);
 }
 
 __device__ void rocshmem_ctx_sync_wave(rocshmem_ctx_t ctx,
@@ -2244,7 +2253,7 @@ __device__ void rocshmem_ctx_sync_wave(rocshmem_ctx_t ctx,
   LOGD_API("device::ctx_sync_wave (ctx=%zd, team=%zd)",
       ctx.ctx_opaque, team);
 
-  direct_ctx_sync_wg(ctx, team);
+  direct_ctx_sync_wave(ctx, team);
 }
 
 __device__ void rocshmem_ctx_sync_wg(rocshmem_ctx_t ctx,

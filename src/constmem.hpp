@@ -44,6 +44,24 @@ struct constmem_t {
   int ipc_first_pe;
   int ipc_stride;    // 0 = pattern invalid (use fallback linear scan)
   int ipc_shm_size;
+  /*
+   * An IPC domain contains node-local PEs with direct IPC connectivity.
+   * A physical node may contain multiple IPC domains.
+   */
+  bool pxn_enabled;  // Enforce same-name NIC proxy routes when DISABLE_PXN=0.
+  bool world_proxy_sync_available;  // Host-validated WORLD proxy sync layout is available.
+  // Corresponding PE slots in equal-sized IPC domains own matching NICs.
+  bool world_proxy_aligned_data_available;
+  int world_proxy_ipc_domain_count;  // Number of IPC domains in the WORLD proxy layout.
+  // [IPC domain index] -> first world PE; this is not a physical node ID.
+  int world_proxy_ipc_domain_first_pes[ROCSHMEM_BARRIER_SYNC_SIZE];
+  bool world_proxy_nic_layout_available;  // WORLD PE-to-NIC-name mapping is available.
+  int world_proxy_nic_name_count;  // Number of distinct NIC names in that mapping.
+  /*
+   * [world PE] -> NIC-name ID, shared across nodes and assigned by sorted name.
+   * This ID is not a node-local IB device index. Valid only when the mapping is enabled.
+   */
+  int world_proxy_pe_nic_name_ids[ROCSHMEM_BARRIER_SYNC_SIZE];
   uintptr_t heap_base;  // Local symmetric heap base
   size_t heap_size;     // Local symmetric heap size in bytes
 } __attribute__ ((aligned (16)));

@@ -539,6 +539,7 @@ namespace envvar {
     extern const var<std::string> requested_nic;
     extern const var<std::string> hca_list;
     extern const var<bool> align_bw_with_rccl;
+    extern const var<bool> disable_pxn;
     extern const var<int> max_num_wgs_on_stream;
     extern const var<int> num_threads_on_stream;
 
