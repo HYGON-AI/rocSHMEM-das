@@ -69,7 +69,14 @@ mpi_timeout=$((20 * 60)) # 20 minutes in seconds
 function run_mpirun {
     local np=$1
     local gtest_filter=$2
-    cmd_str="ROCSHMEM_DEBUG_LEVEL=WARN mpirun -np $np --timeout $mpi_timeout $binary_name --gtest_filter=$gtest_filter >> $log_file 2>&1"
+    local allow_root=""
+
+    if [[ "${ROCSHMEM_TEST_ALLOW_ROOT:-0}" == "1" ]]; then
+        allow_root="--allow-run-as-root"
+    fi
+
+    cmd_str="ROCSHMEM_DEBUG_LEVEL=WARN mpirun${allow_root:+ $allow_root} -np $np --timeout $mpi_timeout $binary_name --gtest_filter=$gtest_filter >> $log_file 2>&1"
+
     echo $cmd_str
     eval $cmd_str
 

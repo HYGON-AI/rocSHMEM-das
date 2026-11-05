@@ -68,6 +68,9 @@ class TesterArguments {
    */
   void get_arguments();
 
+  // Effective stream count for environment-controlled on-stream tests.
+  int get_num_streams() const;
+
  private:
   /**
    * Output method which displays available command line options
@@ -112,6 +115,7 @@ public:
   int loop_large = 20;
   int batch = 0;
   bool verif = true;
+  bool single_instance = false;
   bool batch_quiet = true;
   int num_wf = 0;
   size_t large_message_size = 32768;
