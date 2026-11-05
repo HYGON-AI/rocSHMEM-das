@@ -524,6 +524,8 @@ class QueuePair {
       int64_t atomic_cmp, bool fetching, uint64_t *fetch_addr);
   __device__ uint64_t *shca_allocate_wave_fetching_atomic_buffer(
       uint64_t sq_counter, bool leader, uint64_t leader_lane);
+  __device__ __forceinline__ void shca_check_cqe_error(
+      const volatile shca_cqe64 *cqe, uint8_t opcode, uint64_t cq_index);
   __device__ void shca_quiet();
   __device__ void shca_quiet_single();
   __device__ void shca_quiet_dp_single_lane();

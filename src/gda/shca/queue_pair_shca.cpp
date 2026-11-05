@@ -2,11 +2,20 @@
 // SPDX-License-Identifier: MIT
 
 #include "gda/queue_pair.hpp"
+#include "log.hpp"
 #include "util.hpp"
 #include "containers/free_list_impl.hpp"
 #include "segment_builder_shca.hpp"
 
 namespace rocshmem {
+
+__device__ __forceinline__ void QueuePair::shca_check_cqe_error(const volatile shca_cqe64 *cqe, uint8_t opcode, uint64_t cq_index) {
+  if (opcode == SHCA_CQE_REQ_ERR || opcode == SHCA_CQE_RESP_ERR || opcode == SHCA_CQE_SIG_ERR) {
+    LOGD_ERROR_ABORT("SHCA CQE error qp=%u cq=%llu opcode=%u syndrome=%u wqe=%u sop_qpn=%x",
+                    qp_num, (unsigned long long)cq_index, (unsigned)opcode,
+                    (unsigned)cqe->syndrome, (unsigned)cqe->wqe_counter, (unsigned)cqe->sop_qpn);
+  }
+}
 
 #define dbrec shca_dbrec
 #define sq_buf shca_sq_buf
@@ -108,6 +117,7 @@ __device__ void QueuePair::shca_quiet() {
         uint64_t votes = __ballot(my_ownership_vote && my_opcode_vote);
         vote_failed = __popcll(votes) < quiet_amount;
         if (!vote_failed) {
+          shca_check_cqe_error(cqe_entry, own_se_op >> 4, my_cq_consumer);
           wqe_counter = *((volatile uint16_t*)&cqe_entry->wqe_counter);
         }
       }
@@ -364,6 +374,7 @@ __device__ void QueuePair::shca_quiet_single() {
     } while ((own_se_op & 1) == owner_bit ||
              (own_se_op >> 4) == SHCA_CQE_INVALID);
 
+    shca_check_cqe_error(cqe, own_se_op >> 4, completed);
     uint16_t wqe_counter = *((volatile uint16_t*)&cqe->wqe_counter);
     uint64_t wqe_id = outstanding_wqes[wqe_counter];
     *((volatile uint8_t*)&cqe->own_se_op) = static_cast<uint8_t>((SHCA_CQE_INVALID << 4) | owner_bit);
