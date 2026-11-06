@@ -251,6 +251,8 @@ gfx936/gfx938 的 wavefront 按 64 线程组织；参与 wavefront/workgroup col
 
 `driver.sh` 的完整命令行接口、套件列表、脚本默认值、日志格式、重试机制和退出码，参见 [`README-driver.md`](../scripts/functional_tests/README-driver.md)。本章只维护 Hygon HCU 环境下经过验证的测试配置、执行顺序和验收口径。
 
+测试前可在各待测节点单独运行 `collect_env_info.sh`，记录 HCU、网卡和拓扑等环境信息。`driver.sh` 默认只采集启动节点。独立采集、跳过采集及日志和 HTML 报告的说明见 [环境信息](../scripts/functional_tests/README-driver.md#82-环境信息)。
+
 ### 8.1 验收步骤与通过标准
 
 以下是每节点 8 HCU 验证环境的参考验收口径。PE 规模、运行时长和性能阈值应按目标部署及项目标准确定，并在报告中记录。

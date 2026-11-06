@@ -1,7 +1,12 @@
 # Copyright (c) 2026 Hygon Information Technology Co., Ltd.
 # SPDX-License-Identifier: MIT
 
+import base64
+import json
 import os
+import shutil
+import subprocess
+import tempfile
 import sys
 import re
 #from matplotlib import pyplot as plt
@@ -154,7 +159,12 @@ failed_format = workbook.add_format({
 })
 
 # 收集所有环境信息，最后统一写入
-env_data_list = []
+env_reports = [
+    (directory, name)
+    for directory, names in files_in_dir.items()
+    for name in sorted(names)
+    if name == "env_info.html" or (name.startswith("env_info_") and name.endswith(".html"))
+]
 env_sheet_name = "EnvInfo"
 used_sheet_names = set()
 
@@ -173,16 +183,11 @@ for dir, file_names in files_in_dir.items():
     worksheet.set_column(0, 200, 14)  # 足够宽
     all_data = []
     
-    # 收集环境信息（暂不写入）
-    env_log_path = os.path.join(dir, "env_info.log")
-    if os.path.isfile(env_log_path):
-        env_info_content = []
-        with open(env_log_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                env_info_content.append(line.strip('\n'))
-        env_data_list.append((dir, env_info_content))
-
     for file in file_names:
+        if file in ("env_info.log", "env_info.html") or (
+            file.startswith("env_info_") and file.endswith((".log", ".html"))
+        ):
+            continue
         mpirun_cmd = ""
         filename=f"{dir}/{file}"
 
@@ -305,7 +310,8 @@ for dir, file_names in files_in_dir.items():
     worksheet.merge_range(1, 4, 1, 15, f"{show_mode_info}", yellow_format)
     worksheet.merge_range(3, 2, 3, 15, f"Note: For OnStream operations, the actual values of w and z are automatically adjusted based on the message size.", yellow_format)
     # 在目录sheet第5行第3列添加跳转到对应环境信息工作表的链接
-    worksheet.write_url(4, 2, f"internal:'{env_sheet_name}'!A1", string="📎 环境信息")
+    if env_reports:
+        worksheet.write_url(4, 2, f"internal:'{env_sheet_name}'!A1", string="📎 环境信息")
 
     dataset_count = 0
     pre_pad_top = 0
@@ -413,20 +419,88 @@ for dir, file_names in files_in_dir.items():
         dataset_count_one_op += 1
 
 # 最后创建 EnvInfo 工作表（放在最后）
-if env_data_list:
-    env_sheet_name = "EnvInfo"
+if env_reports:
     env_sheet = workbook.add_worksheet(env_sheet_name)
-    global_env_row = 0
-    
-    for dir, env_content in env_data_list:
-        if global_env_row > 0:
-            global_env_row += 5
-        env_sheet.merge_range(global_env_row, 0, global_env_row, 13, f"********************************************** {dir} **********************************************", yellow_format)
-        global_env_row += 1
-        for line in env_content:
-            env_sheet.write_string(global_env_row, 0, line)
-            global_env_row += 1
+    env_sheet.write_row(0, 0, ["节点", "HTML 环境报告"], yellow_format)
+    env_sheet.set_column(0, 0, 20)
+    env_sheet.set_column(1, 1, 35)
+    for row, (directory, name) in enumerate(env_reports, 1):
+        node = name[len("env_info_"):-len(".html")] if name != "env_info.html" else get_innermost_dir_name(directory)
+        env_sheet.write_string(row, 0, node)
+        env_sheet.write_string(row, 1, name)
+
+def embed_environment_reports(workbook_path, reports):
+    """Embed files with Windows Excel, preserving the original workbook on failure."""
+    if os.name == "nt":
+        powershell = "powershell.exe"
+        windows_path = os.path.abspath
+    elif shutil.which("wslpath") and shutil.which("powershell.exe"):
+        powershell = "powershell.exe"
+
+        def windows_path(path):
+            return subprocess.check_output(
+                ["wslpath", "-w", os.path.abspath(path)], text=True
+            ).strip()
+    else:
+        raise RuntimeError("HTML attachments require Windows desktop Excel (Windows or WSL)")
+
+    script = r"""
+$ErrorActionPreference = 'Stop'
+$data = [Console]::In.ReadToEnd() | ConvertFrom-Json
+$excel = $null
+$book = $null
+try {
+    $excel = New-Object -ComObject Excel.Application
+    $excel.DisplayAlerts = $false
+    $excel.AutomationSecurity = 3
+    $book = $excel.Workbooks.Open($data.workbook, 0, $false)
+    $sheet = $book.Worksheets.Item('EnvInfo')
+    $missing = [Type]::Missing
+    foreach ($report in $data.reports) {
+        $cell = $sheet.Cells.Item([int]$report.row, 2)
+        $cell.EntireRow.RowHeight = 46
+        $object = $sheet.OLEObjects().Add(
+            $missing, $report.path, $false, $true, $missing, $missing,
+            $report.name, ($cell.Left + 4), ($cell.Top + 2), ($cell.Width - 8), 42)
+        if ($object.OLEType -ne 1) { throw "Report was not embedded: $($report.name)" }
+        $cell.ClearContents()
+    }
+    $book.Save()
+} finally {
+    if ($null -ne $book) { $book.Close($false) }
+    if ($null -ne $excel) { $excel.Quit() }
+}
+"""
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    workbook_dir = os.path.dirname(os.path.abspath(workbook_path))
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", dir=workbook_dir, delete=False) as temp:
+        temp_path = temp.name
+    try:
+        shutil.copyfile(workbook_path, temp_path)
+        payload = {
+            "workbook": windows_path(temp_path),
+            "reports": [
+                {"row": row, "path": windows_path(os.path.join(directory, name)), "name": name}
+                for row, (directory, name) in enumerate(reports, 2)
+            ],
+        }
+        subprocess.run(
+            [powershell, "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+            input=json.dumps(payload), text=True, check=True,
+        )
+        os.replace(temp_path, workbook_path)
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+
 
 workbook.close()
+if env_reports:
+    try:
+        embed_environment_reports(f"{out_file}.xlsx", env_reports)
+    except subprocess.CalledProcessError as exc:
+        sys.exit(f"HTML 附件嵌入失败，Excel 自动化退出码为 {exc.returncode}。")
+    except (OSError, RuntimeError) as exc:
+        sys.exit(f"HTML 附件嵌入失败：{exc}")
 print(f"\n✅ 生成成功：{out_file}.xlsx")
 print(f"✅ 输出模式：{'Message Size' if show_mode=='--s' else 'Volume Size'}, {'Latency' if mode=='--lat' else 'Bandwidth' if mode=='--bw' else 'Latency and Bandwidth'}")

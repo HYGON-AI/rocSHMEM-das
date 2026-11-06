@@ -40,6 +40,8 @@
 | `--show-cases` | 打印所有可用测试用例名后退出 |
 | `--artifact-dir DIR` | `heatmap`、`heatmaprma`、`heatmapcoll` 测试通过后，将可视化产物生成到 DIR；其他套件虽接受该参数，但不会生成产物 |
 | `--artifact-dir=DIR` | 与上述空格形式等价 |
+| `--no-env-info` | 跳过环境信息采集 |
+| `--hosts host1,host2` | 通过 SSH 额外采集指定节点的环境信息，与 MPI 节点配置独立 |
 
 ## 3. 测试套件
 
@@ -340,12 +342,38 @@ ROCSHMEM_TEST_MPI_PARAMS="$MPI_PARAMS" \
 
 ### 8.2 环境信息
 
-`<log_dir>/env_info.log` 记录：
+`driver.sh` 默认在测试前调用同目录的 `collect_env_info.sh` 进行基础信息采集。可单独运行采集脚本，也可用 `--no-env-info` 跳过采集。采集失败时，驱动会告警并继续测试。
 
-- rocSHMEM 构建信息（`rocshmem_info --env:all`）
-- DTK 版本
-- 系统/CPU/GPU 信息
-- 网络接口与 IB/RoCE 状态
+沿用第 7 节的 `$DRIVER` 和 `$APP`。构建目录和安装目录中的采集脚本均与驱动位于同一目录，可从 `$DRIVER` 定位。
+
+```bash
+ENV_COLLECTOR="$(dirname "$DRIVER")/collect_env_info.sh"
+
+# 只采集环境信息
+bash "$ENV_COLLECTOR" ./logs
+
+# 采集本机，并尝试采集远端节点
+bash "$ENV_COLLECTOR" ./logs --hosts host1,host2
+
+# 运行测试，并额外采集远端环境
+"$DRIVER" "$APP" all ./logs --hosts host1,host2
+
+# 跳过环境采集
+"$DRIVER" "$APP" all ./logs --no-env-info
+```
+
+采集结果写入 `<log_dir>/env_info_<hostname>.log`。节点上有 `python3` 时，同目录还会生成可离线打开的 `env_info_<hostname>.html`。HTML 生成失败时仍保留日志。
+
+- 基础环境包括操作系统、内核、BIOS、CPU/NUMA、内存、DTK 和编译器。
+- 设备信息包括 GPU 状态、频率、VBIOS、OAM ID、GPU–NIC 拓扑、PCIe 链路、ACS、IOMMU 和 XDP。
+- 网络信息包括网卡驱动和固件、链路状态、MTU、PFC、bond、RDMA 端口和 GID。
+- 原始日志还记录可取得的 rocSHMEM 构建信息、选定的环境变量、MPI 和 UCX 版本。
+
+HTML 按章节展示采集结果，查询命令和原始输出默认折叠。GPU–NIC 拓扑中的实线表示按 PCIe 路径直接归组，虚线表示按 OAM ID 配对规则补全。
+
+`driver.sh` 默认只采集启动节点。两个脚本都支持通过 `--hosts` 提供逗号分隔的 SSH 主机名，先采集本机，再采集指定的远端节点。同时传入时，驱动按 `--no-env-info` 跳过全部环境采集，MPI 节点仍由 hostfile 或 MPI 参数指定。远端需要支持非交互 SSH 和 Bash。报告按实际采集环境的主机名分别保存。远端连接或采集失败时，脚本会告警并继续处理其他节点。
+
+外部查询逐条限时 15 秒。缺少 `timeout` 时仍会采集本地文件。命令不可用或查询失败时，报告将相应信息标为未取得。
 
 ### 8.3 终端输出
 

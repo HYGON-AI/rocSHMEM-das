@@ -1379,7 +1379,7 @@ ValidateInput() {
   
   if [ $INPUT_COUNT -lt 3 ] ; then
     echo "This script must be run with at least 3 arguments."
-    echo "Usage: ${0} <executable> <test_suite | test_name | test_config> <log_dir> [hostfile] [--show-cases] [-single]"
+    echo "Usage: ${0} <executable> <test_suite | test_name | test_config> <log_dir> [hostfile] [--show-cases] [-single] [--no-env-info] [--hosts host1,host2]"
     echo
     echo "    <executable>  : path to the tester executable"
     echo "    <test_suite>  : test suite to run, e.g. 'all', 'rma', or 'put'"
@@ -1404,6 +1404,8 @@ ValidateInput() {
     echo
     echo "    <log_dir>     : path to output log directory"
     echo "    [hostfile]    : path to hostfile (MPI only, not supported with SLR)"
+    echo "    [--no-env-info] : skip environment collection"
+    echo "    [--hosts LIST]  : additional SSH hosts for environment collection, comma-separated (MPI hosts are configured separately)"
     echo "    [--show-cases] : show all available test case names"
     echo "    [-single] : create one tester per case, preferring float"
     echo
@@ -1422,9 +1424,9 @@ ValidateInput() {
 }
 
 ValidateLogDir() {
-  if [ ! -d $1 ]; then
+  if [ ! -d "$1" ]; then
     echo "LOG_DIR=$1 does not exist"
-    mkdir -p $1
+    mkdir -p -- "$1" || return 1
     echo "Created $1"
   fi
 }
@@ -1488,170 +1490,43 @@ RerunFailedTests() {
   echo ""
 }
 
-PrintfNetWorkInfo() {
-  has_ip_cmd=false; command -v ip &>/dev/null && has_ip_cmd=true
-  has_ifconfig_cmd=false; command -v ifconfig &>/dev/null && has_ifconfig_cmd=true
-  has_ibstat_cmd=false; command -v ibstat &>/dev/null && has_ibstat_cmd=true
-  has_ethtool_cmd=false; command -v ethtool &>/dev/null && has_ethtool_cmd=true
-
-  for nic_path in /sys/class/net/*; do
-    nic=$(basename "$nic_path")
-    [[ "$nic" == "lo" ]] && continue
-    ip_info="Unknown!"
-    if $has_ip_cmd; then
-      ip_info=$(ip -4 addr show $nic 2>/dev/null | grep -oP 'inet \K[\d.]+')
-    elif $has_ifconfig_cmd; then
-      ip_info=$(ifconfig $nic 2>/dev/null | grep -oP 'inet \K[\d.]+')
-    fi
-    [[ -z "$ip_info" ]] && ip_info="Unknown!"
-
-    driver_info="Unknown!"
-    if [ -f "/sys/class/net/$nic/device/uevent" ]; then
-      driver_info=$(grep "^DRIVER=" /sys/class/net/$nic/device/uevent 2>/dev/null | cut -d'=' -f2)
-      [[ -z "$driver_info" ]] && driver_info="Unknown!"
-    fi
-
-    speed_info="Unknown!"
-    port_info="Unknown!"
-    ib_info=""
-
-    # 检查是否为 IB/RoCE 设备
-    ib_device=""
-    if [ -d "/sys/class/net/$nic/device/infiniband" ]; then
-      ib_device=$(ls /sys/class/net/$nic/device/infiniband 2>/dev/null | head -n 1)
-    fi
-
-    # 缓存命令输出，避免重复执行
-    ibstat_out=""
-    ethtool_out=""
-    [[ -n "$ib_device" ]] && $has_ibstat_cmd && ibstat_out=$(ibstat $ib_device 2>/dev/null)
-    $has_ethtool_cmd && ethtool_out=$(ethtool $nic 2>/dev/null)
-
-    # 获取物理端口类型
-    if [[ -n "$ethtool_out" ]]; then
-      current_port=$(echo "$ethtool_out" | grep -i "Port:" | awk -F': ' '{print $2}' | tr -d '[:space:]')
-      supported_ports=$(echo "$ethtool_out" | grep -i "Supported ports:" | awk -F': ' '{print $2}' | tr -d '[:space:]')
-      if [[ -n "$current_port" ]]; then
-        port_info="$current_port"
-        [[ -n "$supported_ports" ]] && port_info+=" (Supported: $supported_ports)"
-      fi
-    fi
-
-    if [[ -n "$ibstat_out" ]]; then
-      # IB/RoCE设备处理
-      rate=$(echo "$ibstat_out" | grep "Rate:" | awk '{print $2}')
-      link_layer=$(echo "$ibstat_out" | grep "Link layer:" | awk -F': ' '{print $2}')
-      state=$(echo "$ibstat_out" | grep "State:" | head -1 | awk -F': ' '{print $2}')
-      phys_state=$(echo "$ibstat_out" | grep "Physical state:" | head -1 | awk -F': ' '{print $2}')
-      ca_type=$(echo "$ibstat_out" | grep "CA type:" | awk -F': ' '{print $2}')
-      fw_ver=$(echo "$ibstat_out" | grep "Firmware version:" | awk -F': ' '{print $2}')
-      node_guid=$(echo "$ibstat_out" | grep "Node GUID:" | awk -F': ' '{print $2}')
-      base_lid=$(echo "$ibstat_out" | grep "Base lid:" | awk -F': ' '{print $2}')
-
-      if [[ -n "$rate" ]]; then
-        if [[ "$link_layer" == "Ethernet" ]]; then
-          speed_info="${rate}Gbps (RoCE)"
-        else
-          speed_info="${rate}Gbps (IB)"
-        fi
-      fi
-
-      # 组装IB协议栈信息
-      ib_info="IB State($ib_device): ${state:-Unknown}, Phys: ${phys_state:-Unknown}, Link layer: ${link_layer:-Unknown}"
-      [[ -n "$ca_type" ]] && ib_info+=", CA: $ca_type"
-      [[ -n "$fw_ver" ]] && ib_info+=", FW: $fw_ver"
-      [[ -n "$node_guid" ]] && ib_info+=", GUID: $node_guid"
-      [[ -n "$base_lid" ]] && ib_info+=", LID: $base_lid"
-      
-    elif [[ -n "$ethtool_out" ]]; then
-      # 普通以太网设备处理
-      speed_info=$(echo "$ethtool_out" | grep -i "Speed:" | awk -F': ' '{print $2}' | tr -d '[:space:]')
-      [[ -z "$speed_info" ]] && speed_info="Unknown!"
-    fi
-
-    # 格式化打印
-    echo "$nic: IP: $ip_info, Speed: $speed_info"
-    echo "      Port: $port_info, Driver: $driver_info"
-    [[ -n "$ib_info" ]] && echo "      $ib_info"
-  done
-}
-
-PrintEnvInfo() {
-  local env_log="$LOG_DIR/env_info.log"
-  local timestamp
-  timestamp=$(date "+%Y-%m-%d %H:%M:%S")
-  
-  # 确保日志目录存在
-  mkdir -p "$LOG_DIR" || { echo "Error: Failed to create log directory $LOG_DIR"; return 1; }
-  
-  {
-    echo -e "================================================================================================"
-    echo -e "Environment info: $timestamp"
-    echo -e "================================================================================================"
-
-    # build information and environment variables
-    echo ""
-    echo -e "================================== Build Info and Env Vars ====================================="
-    [ -x "$ROCSHMEM_INFO" ] && "$ROCSHMEM_INFO" --env:all 2>&1
-
-    # DTK
-    echo ""
-    echo -e "============================================ DTK ==============================================="
-    cat /opt/dtk/.dtk_version 2>/dev/null
-
-    # System info
-    echo ""
-    echo -e "=========================================== System ============================================="
-    uname -a 2>/dev/null
-    cat /etc/os-release 2>/dev/null | grep -E "^(NAME|VERSION)="
-
-    # CPU info
-    echo ""
-    echo -e "=========================================== CPU ================================================"
-    lscpu 2>/dev/null | grep -v "Flags:"
-
-    # GPU info
-    echo ""
-    echo -e "============================================ GPU ==============================================="
-    hy-smi --showid --showproductname --showdriverversion 2>&1
-
-    # Network info
-    echo ""
-    echo -e "=========================================== Network ============================================"
-    PrintfNetWorkInfo
-
-    echo ""
-    echo -e "================================================================================================"
-    echo -e "Environment info collection completed: $timestamp"
-    echo -e "================================================================================================"
-  } > "$env_log" 2>&1
-  
-  if [ $? -eq 0 ]; then
-    echo "Environment info saved to: $env_log"
-  else
-    echo "Error: Failed to collect environment info"
-    return 1
-  fi
-}
-
 # Parse optional flags before positional arguments
 ARTIFACT_DIR=""
+ENV_INFO_ENABLED=1
+ENV_HOSTS=""
+_ARG_NEXT_IS_ENV_HOSTS=0
 SINGLE_INSTANCE=0
 _POSITIONAL=()
 for _arg in "$@"; do
-  if [[ "$_arg" == --artifact-dir=* ]]; then
+  if [[ "$_ARG_NEXT_IS_ENV_HOSTS" == 1 ]]; then
+    if [[ ! "$_arg" =~ ^[a-zA-Z0-9_.@:-]+(,[a-zA-Z0-9_.@:-]+)*$ || "$_arg" == -* ]]; then
+      echo "ERROR: --hosts requires a comma-separated SSH host list" >&2
+      exit 2
+    fi
+    ENV_HOSTS="$_arg"
+    _ARG_NEXT_IS_ENV_HOSTS=0
+  elif [[ "$_arg" == --artifact-dir=* ]]; then
     ARTIFACT_DIR="${_arg#--artifact-dir=}"
   elif [[ "$_ARG_NEXT_IS_ARTIFACT_DIR" == "1" ]]; then
     ARTIFACT_DIR="$_arg"
     _ARG_NEXT_IS_ARTIFACT_DIR=0
   elif [[ "$_arg" == "--artifact-dir" ]]; then
     _ARG_NEXT_IS_ARTIFACT_DIR=1
+  elif [[ "$_arg" == "--no-env-info" ]]; then
+    ENV_INFO_ENABLED=0
+  elif [[ "$_arg" == "--hosts" ]]; then
+    _ARG_NEXT_IS_ENV_HOSTS=1
   elif [[ "$_arg" == "-single" ]]; then
     SINGLE_INSTANCE=1
   else
     _POSITIONAL+=("$_arg")
   fi
 done
+
+if [[ "$_ARG_NEXT_IS_ENV_HOSTS" == 1 ]]; then
+  echo "ERROR: --hosts requires a comma-separated SSH host list" >&2
+  exit 2
+fi
 
 APP=${_POSITIONAL[0]:-}
 TEST=${_POSITIONAL[1]:-}
@@ -1663,7 +1538,7 @@ FAILED_TESTS=()  # Array to store failed test parameters
 RETRY_THRESHOLD=${RETRY_THRESHOLD:-5}  # Maximum number of failed tests to retry (can be overridden via env var)
 
 ValidateInput ${#_POSITIONAL[@]}
-ValidateLogDir $LOG_DIR
+ValidateLogDir "$LOG_DIR" || exit 1
 
 # Validate SLR and hostfile are not used together
 if [[ $USE_SLR -eq 1 && -n "$HOSTFILE" ]]; then
@@ -1684,7 +1559,16 @@ if [ -x "$ROCSHMEM_INFO" ]; then
   "$ROCSHMEM_INFO"
 fi
 
-PrintEnvInfo
+if [[ "$ENV_INFO_ENABLED" == 1 ]]; then
+  driver_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  env_args=("$LOG_DIR")
+  if [[ -n "$ENV_HOSTS" ]]; then
+    env_args+=(--hosts "$ENV_HOSTS")
+  fi
+  if ! ROCSHMEM_INFO="$ROCSHMEM_INFO" bash "$driver_dir/collect_env_info.sh" "${env_args[@]}"; then
+    echo "WARNING: Environment collection failed. Continuing with tests." >&2
+  fi
+fi
 
 case $TEST in
   "heatmaprma")

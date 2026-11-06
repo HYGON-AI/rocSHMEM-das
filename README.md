@@ -34,8 +34,12 @@ For information on how to install and use rocSHMEM,
 
 For deployment and testing on Hygon HCU, see the
 [rocSHMEM deployment and testing guide](docs/rocshmem_deployment_and_testing_guide.md).
+
 For functional test driver usage, see the
 [functional test driver guide](scripts/functional_tests/README-driver.md).
+
+For environment collection on Hygon systems with `collect_env_info.sh`, see the
+[environment collection guide](scripts/functional_tests/README-driver.md#82-环境信息).
 
 ## License
 
