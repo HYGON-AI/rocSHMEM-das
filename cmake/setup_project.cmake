@@ -40,15 +40,15 @@ set(EXPLICIT_ROCM_VERSION "" CACHE STRING "Explicit ROCM version to compile to (
 if(NOT DEFINED ROCM_PATH)
   if(DEFINED ENV{ROCM_PATH} AND NOT "$ENV{ROCM_PATH}" STREQUAL "")
     set(ROCM_PATH "$ENV{ROCM_PATH}")
-  elseif(DEFINED ENV{ROCM_HOME} AND NOT "$ENV{ROCM_HOME}" STREQUAL "")
-    set(ROCM_PATH "$ENV{ROCM_HOME}")
+    message(STATUS "ROCM_PATH found from Environment: ${ROCM_PATH}")
   else()
+    # Guess default location
     set(ROCM_PATH "/opt/dtk")
     message(STATUS "ROCM_PATH not specified, using default: ${ROCM_PATH}")
   endif()
+else()
+  message(STATUS "ROCM_PATH found from Cache: ${ROCM_PATH}")
 endif()
-set(ROCM_PATH "${ROCM_PATH}" CACHE PATH "Location of the DTK/ROCm SDK")
-message(STATUS "ROCM_PATH found: ${ROCM_PATH}")
 set(ENV{ROCM_PATH} "${ROCM_PATH}")
 
 if (NOT DEFINED CACHE{ROCM_MAJOR_VERSION})
@@ -105,8 +105,7 @@ list(PREPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 
 # Use hipcc from our rocm install
 if (NOT DEFINED CMAKE_CXX_COMPILER)
-  find_program(CMAKE_CXX_COMPILER NAMES hipcc
-    PATHS "${ROCM_PATH}/bin" NO_DEFAULT_PATH REQUIRED)
+  find_program(CMAKE_CXX_COMPILER hipcc)
 endif()
 
 ###############################################################################
