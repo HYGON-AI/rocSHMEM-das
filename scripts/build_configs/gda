@@ -25,7 +25,7 @@
 
 set -e
 
-src_path=$(dirname "$(realpath $0)")/../../
+src_path=$(dirname "$(realpath "$0")")/../../
 if [[ "${ASAN}" == true ]]; then
     export HSA_XNACK=1
 fi
@@ -33,7 +33,7 @@ fi
 cmake \
     -DBUILD_CODE_COVERAGE=${CODE_COV:-OFF} \
     -DCMAKE_BUILD_TYPE=${BUILD_TYPE:-Release} \
-    -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX:-/opt/rocshmem} \
+    -DCMAKE_INSTALL_PREFIX="${INSTALL_PREFIX:-/opt/rocshmem}" \
     -DCMAKE_VERBOSE_MAKEFILE=OFF \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
     -DBUILD_FUNCTIONAL_TESTS=ON \
@@ -51,6 +51,6 @@ cmake \
     -DMONOLITHIC_PACKAGE=ON \
     -DASAN=${ASAN:-OFF} \
     -DBUILD_SPLIT_LIBRARIES=ON \
-    $* $src_path
+    "$@" "$src_path"
 cmake --build . --parallel 16
 cmake --install .
