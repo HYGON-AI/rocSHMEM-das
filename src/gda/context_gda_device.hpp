@@ -702,8 +702,7 @@ class GDAContext : public Context {
   /**
    * @brief Get the Queue Pair index to use for a given PE
    */
-  __device__ __forceinline__ uint32_t get_qp_index(
-      int pe, ActiveWFInfo wf_info, bool force_single_qp = false);
+  __device__ __forceinline__ uint32_t get_qp_index(int pe, ActiveWFInfo wf_info);
 
   __device__ __forceinline__ uint32_t get_team_qp_index(
       const GDATeam *team_obj, int pe);
