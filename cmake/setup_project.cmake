@@ -44,12 +44,10 @@ if(NOT DEFINED ROCM_PATH)
     set(ROCM_PATH "$ENV{ROCM_HOME}")
   else()
     set(ROCM_PATH "/opt/dtk")
-    message(STATUS "ROCM_PATH not specified, using default: ${ROCM_PATH}")
   endif()
 endif()
 set(ROCM_PATH "${ROCM_PATH}" CACHE PATH "Location of the DTK/ROCm SDK")
-message(STATUS "ROCM_PATH found: ${ROCM_PATH}")
-set(ENV{ROCM_PATH} "${ROCM_PATH}")
+set(rocm_path "${ROCM_PATH}")
 
 if (NOT DEFINED CACHE{ROCM_MAJOR_VERSION})
   ## Check for ROCm version
@@ -77,14 +75,23 @@ if (NOT DEFINED CACHE{ROCM_MAJOR_VERSION})
     endif()
 
     if(NOT dtk_hip_version_found)
-      find_file(rocm_version_file "version" PATH_SUFFIXES ".info" "core/.info"
-        HINTS ${ROCM_PATH} ENV ROCM_PATH ${ROCM_ROOT} ENV ROCM_ROOT ${hip_ROOT} ENV hip_ROOT ${HIP_ROOT} ENV HIP_ROOT
-        PATHS ${ROCM_PATH}
-        REQUIRED)
-      cmake_path(GET rocm_version_file PARENT_PATH version_file_dir)
-      cmake_path(GET version_file_dir PARENT_PATH rocm_path)
+      # Find the SDK root for either layout, preferring the selected SDK.
+      unset(rocm_path)
+      unset(rocm_path CACHE)
+      find_path(rocm_path NAMES ".info/version" "core/.info/version"
+        PATHS "${ROCM_PATH}" NO_DEFAULT_PATH)
+      if(NOT rocm_path)
+        find_path(rocm_path NAMES ".info/version" "core/.info/version"
+          HINTS ${ROCM_PATH} ENV ROCM_PATH ${ROCM_ROOT} ENV ROCM_ROOT ${hip_ROOT} ENV hip_ROOT ${HIP_ROOT} ENV HIP_ROOT
+          REQUIRED)
+      endif()
+      if(EXISTS "${rocm_path}/.info/version")
+        set(rocm_version_file "${rocm_path}/.info/version")
+      else()
+        set(rocm_version_file "${rocm_path}/core/.info/version")
+      endif()
 
-      file(READ ${rocm_version_file} rocm_version_string)
+      file(READ "${rocm_version_file}" rocm_version_string)
     endif()
   endif()
   string(REGEX MATCH "([0-9]+)\\.([0-9]+)\\.([0-9]+)" rocm_version_matches ${rocm_version_string})
@@ -95,9 +102,11 @@ if (NOT DEFINED CACHE{ROCM_MAJOR_VERSION})
   else()
     message(FATAL_ERROR "Could not determine ROCm version (set EXPLICIT_ROCM_VERSION or set ROCM_PATH to a valid installation)")
   endif()
-
-  set(ROCM_PATH "${rocm_path}" CACHE PATH "Location of the ROCm SDK")
 endif()
+# Synchronize the detected path regardless of the CMP0126 policy.
+set(ROCM_PATH "${rocm_path}" CACHE PATH "Location of the DTK/ROCm SDK" FORCE)
+set(ROCM_PATH "${rocm_path}")
+set(ENV{ROCM_PATH} "${ROCM_PATH}")
 message(STATUS "ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION} from ${ROCM_PATH}")
 
 # Always prefer the ROCm we found
