@@ -351,6 +351,10 @@ ExecTest_SLR() {
     cmd+=("env" "${env_vars[@]}" "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap})
   fi
 
+  if (( SINGLE_INSTANCE )); then
+    cmd+=(-single)
+  fi
+
   if [[ "" != "$MAX_MSG_SIZE" ]]
   then
     # Check if in volume mode
@@ -487,6 +491,11 @@ ExecTest_MPI() {
     cmd=("$LAUNCHER" -n "$NUM_RANKS" "${mpi_params[@]}")
   fi
 
+  if [[ "${ROCSHMEM_TEST_ALLOW_ROOT:-0}" == "1" ]]; then
+    cmd+=(--allow-run-as-root)
+  fi
+
+
   # Construct Test Command
   if (( NUM_WF > 0 )); then
     TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_wf"$NUM_WF"
@@ -497,6 +506,10 @@ ExecTest_MPI() {
   fi
 
   cmd+=(-b "${ROCSHMEM_TEST_BATCH_SIZE:-1}")
+
+  if (( SINGLE_INSTANCE )); then
+    cmd+=(-single)
+  fi
 
   if [[ "" != "$MAX_MSG_SIZE" ]]
   then
@@ -1130,10 +1143,6 @@ TestHeatMapColl() {
 }
 
 TestPerfAMO() {
-  NOTIMEOUT=1
-  NOVERIF=1
-  ROCSHMEM_TEST_BATCH_SIZE=1
-
   ##############################################################################
   #       | Name                     | Ranks               |  Max Message Size #
   ##############################################################################
@@ -1154,10 +1163,6 @@ TestPerfAMO() {
 }
 
 TestPerfColl() {
-  NOTIMEOUT=1
-  NOVERIF=1
-  ROCSHMEM_TEST_BATCH_SIZE=1
-
   ##############################################################################
   #       | Name                     | Ranks               |  Max Message Size #
   ##############################################################################
@@ -1176,10 +1181,6 @@ TestPerfColl() {
 }
 
 TestPerfRMA() {
-  NOTIMEOUT=1
-  NOVERIF=1
-  ROCSHMEM_TEST_BATCH_SIZE=1
-
   ##############################################################################
   #       | Name                    | Ranks                 | Max Message Size #
   ##############################################################################
@@ -1225,7 +1226,10 @@ TestPerf() {
 
 ExecPerfTest() {
   NOTIMEOUT=1
+  TIMEOUT=$((20 * 60)) # Performance test timeout in seconds
   NOVERIF=1
+  ROCSHMEM_TEST_BATCH_SIZE=1
+  SINGLE_INSTANCE=1
   
   local test_name=$1
   local num_ranks=$2
@@ -1375,7 +1379,7 @@ ValidateInput() {
   
   if [ $INPUT_COUNT -lt 3 ] ; then
     echo "This script must be run with at least 3 arguments."
-    echo "Usage: ${0} <executable> <test_suite | test_name | test_config> <log_dir> [hostfile] [--show-cases]"
+    echo "Usage: ${0} <executable> <test_suite | test_name | test_config> <log_dir> [hostfile] [--show-cases] [-single]"
     echo
     echo "    <executable>  : path to the tester executable"
     echo "    <test_suite>  : test suite to run, e.g. 'all', 'rma', or 'put'"
@@ -1401,6 +1405,7 @@ ValidateInput() {
     echo "    <log_dir>     : path to output log directory"
     echo "    [hostfile]    : path to hostfile (MPI only, not supported with SLR)"
     echo "    [--show-cases] : show all available test case names"
+    echo "    [-single] : create one tester per case, preferring float"
     echo
     echo "Runtime Selection:"
     echo "  - Set ROCSHMEM_TEST_SLR=1 to use SLR (Simple Local Runtime) for single-node testing"
@@ -1411,6 +1416,7 @@ ValidateInput() {
     echo "     ROCSHMEM_TEST_MPI_PARAMS: MPI parameters(excluding -np/-n) to override default, e.g. '-x LD_LIBRARY_PATH -x ROCSHMEM_BACKEND=gda'"
     echo "     ROCSHMEM_TEST_WGS: workgroup options per PE in performance test, default '16'"
     echo "     ROCSHMEM_TEST_THDS: thread options per workgroup in performance test, default '128 256'"
+    echo "     ROCSHMEM_TEST_ALLOW_ROOT: allow running as root, default 0"
     exit 1
   fi
 }
@@ -1630,6 +1636,7 @@ PrintEnvInfo() {
 
 # Parse optional flags before positional arguments
 ARTIFACT_DIR=""
+SINGLE_INSTANCE=0
 _POSITIONAL=()
 for _arg in "$@"; do
   if [[ "$_arg" == --artifact-dir=* ]]; then
@@ -1639,6 +1646,8 @@ for _arg in "$@"; do
     _ARG_NEXT_IS_ARTIFACT_DIR=0
   elif [[ "$_arg" == "--artifact-dir" ]]; then
     _ARG_NEXT_IS_ARTIFACT_DIR=1
+  elif [[ "$_arg" == "-single" ]]; then
+    SINGLE_INSTANCE=1
   else
     _POSITIONAL+=("$_arg")
   fi

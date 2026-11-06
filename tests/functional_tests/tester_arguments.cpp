@@ -25,6 +25,8 @@
 #include "tester_arguments.hpp"
 
 #include <cstdlib>
+#include <cerrno>
+#include <limits>
 #include <iostream>
 #include <unordered_map>
 #include <algorithm>
@@ -86,8 +88,16 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
         algorithm = it->second;
       }
     } else if (arg == "-v") {
-      i++;
-      max_volume_size = atoi(argv[i]);
+      const char* value = ++i < argc ? argv[i] : "";
+      char* end;
+      errno = 0;
+      const auto parsed = std::strtoull(value, &end, 10);
+      if (*value < '0' || *value > '9' || *end || errno == ERANGE ||
+          parsed == 0 || parsed > std::numeric_limits<size_t>::max()) {
+        std::cerr << "-v requires a positive byte count that fits size_t\n";
+        exit(-1);
+      }
+      max_volume_size = static_cast<size_t>(parsed);
     } else if (arg == "-z") {
       i++;
       wg_size = atoi(argv[i]);
@@ -137,6 +147,8 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
         exit(-1);
       }
       batch_quiet = (value == "1");
+    } else if (arg == "-single") {
+      single_instance = true;
     } else if (arg == "-noverif" || arg == "-nocheck") {
       verif = false;
     } else if (arg == "--num-wf") {
@@ -255,6 +267,7 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     case BroadcastWaveTestType:
     case AllToAllWaveTestType:
     case ReduceWaveTestType:
+    case TeamReduceScatterWaveTestType:
       min_msg_size = 8;
       break;
     case TeamCtxInfraTestType:
@@ -310,6 +323,19 @@ void TesterArguments::show_usage(std::string executable_name) {
   std::cout << "\t-bq <0|1> enable batch-boundary quiet (default: 1; disabled by -noverif)\n";
   std::cout << "\t-noverif|-nocheck disable buffer verification\n";
   std::cout << "\t--num-wf <number of wave-fronts per workgroup> (detected at runtime via HIP, overwrites -z if used)\n";
+  std::cout << "\t-single create one tester per test, preferring float\n";
+}
+
+int TesterArguments::get_num_streams() const {
+  int count = 1;
+  if (const char* value = std::getenv("ROCSHMEM_TEST_NUM_STREAMS")) {
+    count = std::atoi(value);
+  }
+
+  if (const char* value = std::getenv("ROCSHMEM_TEST_USE_DEFAULT_STREAM")) {
+    if (std::atoi(value) != 0) count = 1;
+  }
+  return count;
 }
 
 void TesterArguments::get_arguments() {
@@ -317,6 +343,7 @@ void TesterArguments::get_arguments() {
   myid = rocshmem_my_pe();
 
   TestType type = (TestType)algorithm;
+
   // Check if test requires exactly 2 PEs
   // Tests that support arbitrary number of PEs are excluded
   bool requires_two_pes = true;

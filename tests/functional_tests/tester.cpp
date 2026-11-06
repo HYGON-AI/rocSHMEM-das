@@ -147,6 +147,11 @@ Tester::Tester(TesterArguments args) : args(args) {
 
   max_msg_size = args.max_msg_size;
   if (args.max_volume_size) {
+    if (args.num_wgs == 0 || args.wg_size == 0 || num_warps <= 0 || args.numprocs <= 0) {
+      if (args.myid == 0) std::cerr << "-v requires positive workgroup, thread, wave and PE counts\n";
+      exit(-1);
+    }
+    bool volume_applied = true;
     switch (_type) {
       case GetTestType:
       case GetNBITestType:
@@ -188,6 +193,8 @@ Tester::Tester(TesterArguments args) : args(args) {
       case SdmaPingPongTestType:
         if (args.op_type == 2) {
           max_msg_size = args.max_volume_size / args.num_wgs;
+        } else {
+          volume_applied = false;
         }
         break;
       case TeamBroadcastTestType:
@@ -196,6 +203,7 @@ Tester::Tester(TesterArguments args) : args(args) {
       case TeamReductionTestType:
       case ReduceOnStreamTestType:
         max_msg_size = args.max_volume_size / args.num_wgs;
+        if (_type == BroadcastWaveTestType) max_msg_size /= num_warps;
         break;
       case TeamReduceScatterTestType:
       case TeamReduceScatterOnStreamTestType:
@@ -206,6 +214,7 @@ Tester::Tester(TesterArguments args) : args(args) {
       case CollectTestType:
         max_msg_size = (!rocshmem::envvar::align_bw_with_rccl.get_value())  ? (args.max_volume_size / args.num_wgs)
                        : (args.max_volume_size / args.num_wgs / args.numprocs);
+        if (_type == TeamReduceScatterWaveTestType || _type == FcollectWaveTestType) max_msg_size /= num_warps;
         break;
       case TeamAllToAllTestType:
       case TeamAllToAllvTestType:
@@ -213,17 +222,57 @@ Tester::Tester(TesterArguments args) : args(args) {
       case TeamAlltoallvOnStreamTestType:
       case AllToAllWaveTestType:
         max_msg_size = args.max_volume_size / args.num_wgs / args.numprocs;
+        if (_type == AllToAllWaveTestType) max_msg_size /= num_warps;
         break;
+      case TeamCtxGetTestType:
+      case TeamCtxGetNBITestType:
+      case TeamCtxPutTestType:
+      case TeamCtxPutNBITestType:
+        max_msg_size = args.max_volume_size / args.num_wgs / args.wg_size;
+        break;
+      case FenceOrderPutWaveSignalTestType:
+      case FenceOrderPutLargeSmallTestType:
+      case FenceOrderFanoutTestType:
+      case FenceOrderPutWaveNbiChunksTestType:
+        max_msg_size = args.max_volume_size / args.num_wgs / num_warps;
+        break;
+      case HostPutmemTestType:
+      case HostGetmemTestType:
+      case HostCtxPutmemTestType:
+      case HostCtxGetmemTestType:
+        max_msg_size = args.max_volume_size;
+        break;
+      case GetmemOnStreamTestType:
+      case PutmemOnStreamTestType:
+      case PutmemSignalOnStreamTestType:
+      {
+        const int num_streams = args.get_num_streams();
+        if (num_streams <= 0) {
+          if (args.myid == 0) std::cerr << "ROCSHMEM_TEST_NUM_STREAMS must be positive\n";
+          exit(-1);
+        }
+        max_msg_size = args.max_volume_size / static_cast<size_t>(num_streams);
+        break;
+      }
       default:
+        volume_applied = false;
         break;
     }
-    if (max_msg_size == 0) {
+    if (!volume_applied) {
       if (args.myid == 0) {
-        std::cerr << "Requested communication volume is smaller than what is required to send at least 1 byte per operation, adjust -w, -z, and -v to match, or remove -v.";
+        std::cerr << "Test " << args.algorithm << " does not support -v; use -s instead.\n";
+      }
+      exit(-1);
+    } else if (max_msg_size < args.min_msg_size) {
+      if (args.myid == 0) {
+        std::cerr << "Requested communication volume is smaller than what is required to send "
+                  << "at least " << args.min_msg_size
+                  << " bytes per operation, adjust -w, -z, and -v to match, or remove -v.\n";
       }
       exit(-1);
     }
   }
+
 }
 
 Tester::~Tester() {
@@ -240,6 +289,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
   int rank = args.myid;
   std::vector<Tester*> testers;
   std::string test_name;
+
 
   BackendType backend_type = rocshmem_query_backend_type();
   TestType type = (TestType)args.algorithm;
@@ -416,6 +466,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       break;
     case TeamBroadcastTestType:
       test_name = "Team Broadcast Test";
+      if (args.single_instance) {
+        testers.push_back(new TeamBroadcastTester<float>(args));
+        break;
+      }
       testers.push_back(new TeamBroadcastTester<int64_t>(args));
       testers.push_back(new TeamBroadcastTester<int>(args));
       testers.push_back(new TeamBroadcastTester<long long>(args));
@@ -426,6 +480,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       break;
     case BroadcastWaveTestType:
       test_name = "Broadcast Wave Test";
+      if (args.single_instance) {
+        testers.push_back(new BroadcastWaveTester<float>(args));
+        break;
+      }
       testers.push_back(new BroadcastWaveTester<int>(args));
       testers.push_back(new BroadcastWaveTester<long long>(args));
       testers.push_back(new BroadcastWaveTester<float>(args));
@@ -458,6 +516,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case AllToAllWaveTestType:
       test_name = "AllToAll Wave Test";
       testers.push_back(new AlltoallWaveTester<float>(args));
+      if (args.single_instance) break;
       testers.push_back(new AlltoallWaveTester<char>(args));
       testers.push_back(new AlltoallWaveTester<int>(args));
       break;
@@ -605,6 +664,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       break;
     case TeamFCollectTestType:
       test_name = "Fcollect Test";
+      if (args.single_instance) {
+        testers.push_back(new TeamFcollectTester<float>(args));
+        break;
+      }
       testers.push_back(new TeamFcollectTester<int64_t>(args));
       testers.push_back(new TeamFcollectTester<int>(args));
       testers.push_back(new TeamFcollectTester<long long>(args));
@@ -615,6 +678,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       break;
     case FcollectWaveTestType:
       test_name = "Fcollect Wave Test";
+      if (args.single_instance) {
+        testers.push_back(new FcollectWaveTester<float>(args));
+        break;
+      }
       testers.push_back(new FcollectWaveTester<int64_t>(args));
       testers.push_back(new FcollectWaveTester<int>(args));
       testers.push_back(new FcollectWaveTester<long long>(args));
@@ -626,6 +693,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case AMO_FAddTestType:
       test_name = "AMO Fetch_Add";
       testers.push_back(new AMOStandardTester<long long>(args));
+      if (args.single_instance) break;
       testers.push_back(new AMOStandardTester<long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOStandardTester<int>(args));
@@ -633,6 +701,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case AMO_FIncTestType:
       test_name = "AMO Fetch_Inc";
       testers.push_back(new AMOStandardTester<long long>(args));
+      if (args.single_instance) break;
       testers.push_back(new AMOStandardTester<long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOStandardTester<int>(args));
@@ -640,6 +709,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case AMO_FetchTestType:
       test_name = "AMO Fetch";
       testers.push_back(new AMOExtendedTester<long long>(args));
+      if (args.single_instance) break;
       testers.push_back(new AMOExtendedTester<long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOExtendedTester<int>(args));
@@ -647,6 +717,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case AMO_FCswapTestType:
       test_name = "AMO Fetch_CSWAP";
       testers.push_back(new AMOStandardTester<long long>(args));
+      if (args.single_instance) break;
       testers.push_back(new AMOStandardTester<long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOStandardTester<int>(args));
@@ -654,6 +725,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case AMO_AddTestType:
       test_name = "AMO Add";
       testers.push_back(new AMOStandardTester<long long>(args));
+      if (args.single_instance) break;
       testers.push_back(new AMOStandardTester<long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOStandardTester<int>(args));
@@ -661,6 +733,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case AMO_SetTestType:
       test_name = "AMO Set";
       testers.push_back(new AMOExtendedTester<long long>(args));
+      if (args.single_instance) break;
       testers.push_back(new AMOExtendedTester<long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOExtendedTester<int>(args));
@@ -668,6 +741,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case AMO_SwapTestType:
       test_name = "AMO Swap";
       testers.push_back(new AMOExtendedTester<long long>(args));
+      if (args.single_instance) break;
       testers.push_back(new AMOExtendedTester<long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOExtendedTester<int>(args));
@@ -675,6 +749,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case AMO_FetchAndTestType:
       test_name = "AMO Fetch And";
       testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
+      if (args.single_instance) break;
       testers.push_back(new AMOBitwiseTester<unsigned long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOBitwiseTester<unsigned int>(args));
@@ -682,6 +757,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case AMO_AndTestType:
       test_name = "AMO And";
       testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
+      if (args.single_instance) break;
       testers.push_back(new AMOBitwiseTester<unsigned long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOBitwiseTester<unsigned int>(args));
@@ -689,6 +765,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case AMO_FetchOrTestType:
       test_name = "AMO Fetch Or";
       testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
+      if (args.single_instance) break;
       testers.push_back(new AMOBitwiseTester<unsigned long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOBitwiseTester<unsigned int>(args));
@@ -696,6 +773,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case AMO_OrTestType:
       test_name = "AMO Or";
       testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
+      if (args.single_instance) break;
       testers.push_back(new AMOBitwiseTester<unsigned long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOBitwiseTester<unsigned int>(args));
@@ -703,6 +781,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case AMO_FetchXorTestType:
       test_name = "AMO Fetch Xor";
       testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
+      if (args.single_instance) break;
       testers.push_back(new AMOBitwiseTester<unsigned long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOBitwiseTester<unsigned int>(args));
@@ -710,6 +789,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case AMO_XorTestType:
       test_name = "AMO Xor";
       testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
+      if (args.single_instance) break;
       testers.push_back(new AMOBitwiseTester<unsigned long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOBitwiseTester<unsigned int>(args));
@@ -717,6 +797,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case AMO_IncTestType:
       test_name = "AMO Inc";
       testers.push_back(new AMOStandardTester<long long>(args));
+      if (args.single_instance) break;
       testers.push_back(new AMOStandardTester<long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOStandardTester<int>(args));
@@ -821,31 +902,37 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case PutSignalTestType:
       test_name = "Putmem Signal";
       testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_SET));
+      if (args.single_instance) break;
       testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_ADD));
       break;
     case WGPutSignalTestType:
       test_name = "WG Putmem Signal";
       testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_SET));
+      if (args.single_instance) break;
       testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_ADD));
       break;
     case WAVEPutSignalTestType:
       test_name = "Wave Putmem Signal";
       testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_SET));
+      if (args.single_instance) break;
       testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_ADD));
       break;
     case PutSignalNBITestType:
       test_name = "Non-Blocking Putmem Signal";
       testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_SET));
+      if (args.single_instance) break;
       testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_ADD));
       break;
     case WGPutSignalNBITestType:
       test_name = "Non-Blocking WG Putmem Signal";
       testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_SET));
+      if (args.single_instance) break;
       testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_ADD));
       break;
     case WAVEPutSignalNBITestType:
       test_name = "Non-Blocking Wave Putmem Signal";
       testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_SET));
+      if (args.single_instance) break;
       testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_ADD));
       break;
     case SignalFetchTestType:
@@ -1298,17 +1385,21 @@ bool Tester::AlignBwWithRccl(TesterArguments args, uint64_t size, double time_us
   switch (type) {
     case TeamReductionTestType:     // ALLReduce
     case ReduceOnStreamTestType:    // ALLReduce
+    case ReduceWaveTestType:        // ALLReduce
       params.bus_factor = 2.0 * (args.numprocs - 1) / args.numprocs;
       break;
 
     case TeamBroadcastTestType:
     case TeamBroadcastmemOnStreamTestType:
+    case BroadcastWaveTestType:
       break;
 
     case TeamFCollectTestType:      // AllGather
     case TeamReduceScatterTestType:
     case TeamFCollectOnStreamTestType:
     case TeamReduceScatterOnStreamTestType:
+    case FcollectWaveTestType:
+    case TeamReduceScatterWaveTestType:
       params.size_factor = args.numprocs;
       params.volume_factor = args.numprocs;
       params.bus_factor = static_cast<double>(args.numprocs - 1) / args.numprocs;
@@ -1318,6 +1409,7 @@ bool Tester::AlignBwWithRccl(TesterArguments args, uint64_t size, double time_us
     case TeamAllToAllvTestType:
     case TeamAlltoallmemOnStreamTestType:
     case TeamAlltoallvOnStreamTestType:
+    case AllToAllWaveTestType:
       params.size_factor = args.numprocs;
       params.volume_factor = args.numprocs;
       params.bus_factor = static_cast<double>(args.numprocs - 1) / args.numprocs;
