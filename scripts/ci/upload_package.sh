@@ -24,30 +24,15 @@ validate_run_package() {
         grep -qxF "install_prefix=$destination" "$destination/.rocshmem-install"
 }
 
-extract_package_dtk() {
-    local archive="$1" parent="$2" root candidate
-    local candidates=()
-    root="$(mktemp -d "$parent/rocshmem-selected-dtk.XXXXXX")"
-    # Extract into a fresh directory: never mix files with an image-baked DTK.
-    tar -xzf "$archive" -C "$root" || return 1
-    for candidate in "$root"/dtk-*; do
-        [[ -f "$candidate/env.sh" ]] && candidates+=("$candidate")
-    done
-    [[ "${#candidates[@]}" -eq 1 ]] || {
-        echo 'ERROR: expected exactly one dtk-*/env.sh in the selected archive' >&2; return 1;
-    }
-    printf '%s\n' "${candidates[0]}"
-}
-
 package_image_id() {
     local image="$1" id
-    if id="$(docker image inspect --format '{{.Id}}' "$image" 2>/dev/null)"; then
-        echo "Using cached build image: $image" >&2
-    else
-        echo "Build image is not cached; pulling: $image" >&2
-        docker pull "$image" >&2 || return 1
-        id="$(docker image inspect --format '{{.Id}}' "$image")" || return 1
-    fi
+    # The DTK toolchain is baked into this image, so a locally cached tag is
+    # not trustworthy: any job with access to this Docker daemon could have
+    # re-tagged it. Always fetch from the registry before packaging and then
+    # build from the resolved image ID (content-addressed), never from the tag.
+    echo "Pulling build image: $image" >&2
+    docker pull "$image" >&2 || return 1
+    id="$(docker image inspect --format '{{.Id}}' "$image")" || return 1
     [[ -n "$id" ]] || return 1
     printf '%s\n' "$id"
 }
@@ -56,7 +41,7 @@ build_package() {
     # This entry point is ONLY for the disposable container created below.
     [[ -f /.dockerenv && "${ROCSHMEM_PACKAGE_CONTAINER:-}" == 1 ]]
     [[ "$(uname -m)" == x86_64 ]]
-    local dtk_dir dtk_backup dtk_version
+    local dtk_dir
     case "$ROCSHMEM_PACKAGE_VARIANT" in
         mlx5)
             # shellcheck source=/dev/null
@@ -94,31 +79,19 @@ build_package() {
             ;;
         *) echo 'ERROR: unknown package variant' >&2; return 1 ;;
     esac
-    if [[ ! "$ROCSHMEM_PACKAGE_DTK_SOURCE" =~ dtk([0-9]+)\.([0-9]+) ]]; then
-        echo 'ERROR: configured DTK path has an invalid version format' >&2; return 1;
+    dtk_dir="$(readlink -f /opt/dtk)"
+    if [[ -f /opt/dtk/.dtk_version ]]; then
+        grep -Eq "^DTK-${ROCSHMEM_PACKAGE_DTK_VERSION:0:2}\.${ROCSHMEM_PACKAGE_DTK_VERSION:2:2}([^0-9]|$)" /opt/dtk/.dtk_version || {
+            echo "ERROR: image DTK version does not match $ROCSHMEM_PACKAGE_DTK_VERSION" >&2; return 1;
+        }
     fi
-    dtk_version="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
-    dtk_dir="$(extract_package_dtk /tmp/rocshmem-dtk.tar.gz /opt)"
-    if [[ ! "$(basename "$dtk_dir")" =~ ^dtk-([0-9]+)\.([0-9]+) ]]; then
-        echo 'ERROR: archive DTK directory name has an invalid version format' >&2; return 1;
-    elif [[ "${BASH_REMATCH[1]}${BASH_REMATCH[2]}" != "$dtk_version" ]]; then
-        echo 'ERROR: archive DTK directory version does not match the configured path' >&2; return 1;
-    fi
-    if [[ -L /opt/dtk ]]; then
-        rm -- /opt/dtk
-    elif [[ -e /opt/dtk ]]; then
-        dtk_backup="$(mktemp -d /opt/rocshmem-image-dtk.XXXXXX)"
-        mv -- /opt/dtk "$dtk_backup/dtk"
-    fi
-    ln -s "$dtk_dir" /opt/dtk
-    [[ "$(readlink -f /opt/dtk)" == "$dtk_dir" ]]
     export USER=root
     set +u
     # shellcheck disable=SC1091
     source /opt/dtk/env.sh
     set -u
     [[ "$(readlink -f "$(command -v hipcc)")" == "$dtk_dir/"* ]] || {
-        echo 'ERROR: hipcc does not resolve to the selected DTK archive' >&2; return 1;
+        echo 'ERROR: hipcc does not resolve to the DTK in /opt/dtk' >&2; return 1;
     }
     export PATH="/opt/dtk/llvm/bin:/opt/dtk/bin:/opt/mpi/bin:${PATH}"
     command -v llvm-ar
@@ -184,8 +157,7 @@ build_package() {
         printf 'commit=%s\nrun_id=%s\nrun_attempt=%s\n' \
             "$ROCSHMEM_PACKAGE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
         printf 'package_format=run\npackage_filename=%s\nupstream_version=%s\n' "$expected_filename" "$upstream_version"
-        printf 'dtk_version=%s\ndtk_source=%s\ndtk_directory=%s\n' \
-            "$dtk_version" "$ROCSHMEM_PACKAGE_DTK_SOURCE" "$dtk_dir"
+        printf 'dtk_version=%s\ndtk_directory=%s\n' "$ROCSHMEM_PACKAGE_DTK_VERSION" "$dtk_dir"
         printf 'build_timezone=UTC+08:00\n'
         printf 'build_config=scripts/build_configs/gda_%s\nstrip=OFF\narchitecture=%s\n' \
             "$ROCSHMEM_PACKAGE_VARIANT" "$(uname -m)"
@@ -199,7 +171,6 @@ build_package() {
         else
             dpkg-query -W rdma-core libibverbs-dev ibverbs-utils
         fi
-        sha256sum /tmp/rocshmem-dtk.tar.gz
     } > /tmp/rocshmem-run-artifacts/build-info.txt
     cd /tmp/rocshmem-run-artifacts
     sha256sum ./*.run > SHA256SUMS
@@ -217,8 +188,7 @@ if [[ "${1:-}" == __build ]]; then
 fi
 
 for required in ROCSHMEM_CI_IMAGE PIP_INDEX_URL PIP_TRUSTED_HOST \
-    ROCSHMEM_PACKAGE_VARIANT \
-    ROCSHMEM_PACKAGE_DTK_URL ROCSHMEM_PACKAGE_SHA \
+    ROCSHMEM_PACKAGE_VARIANT ROCSHMEM_PACKAGE_DTK_VERSION ROCSHMEM_PACKAGE_SHA \
     ROCSHMEM_PACKAGE_ROOT ROCSHMEM_PACKAGE_HOST_DIR \
     GITHUB_RUN_ID GITHUB_RUN_ATTEMPT; do
     [[ -n "${!required:-}" ]] || { echo "ERROR: missing ${required}" >&2; exit 1; }
@@ -229,10 +199,9 @@ done
 }
 [[ "$ROCSHMEM_PACKAGE_SHA" =~ ^[0-9a-f]{40}$ ]]
 case "$ROCSHMEM_PACKAGE_VARIANT" in
-    mlx5|shca) ROCSHMEM_PACKAGE_DTK_SOURCE="$ROCSHMEM_PACKAGE_DTK_URL" ;;
+    mlx5|shca) ;;
     *) echo 'ERROR: unknown package variant' >&2; exit 1 ;;
 esac
-export ROCSHMEM_PACKAGE_DTK_SOURCE
 [[ "$(git rev-parse HEAD)" == "$ROCSHMEM_PACKAGE_SHA" ]]
 [[ "$(git rev-parse --is-shallow-repository)" == false ]]
 mkdir -p "$ROCSHMEM_PACKAGE_ROOT/logs"
@@ -259,7 +228,6 @@ cleanup() {
     fi
     # Only remove this invocation's known file and then its empty directory.
     rm -f -- "$task_dir/source.bundle" || true
-    rm -f -- "$task_dir/dtk.tar.gz" || true
     rmdir -- "$task_dir" || true
     echo "Packaging exit code: $rc"
     exit "$rc"
@@ -267,9 +235,6 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-dtk_archive="$task_dir/dtk.tar.gz"
-curl --fail --location --retry 3 -o "$dtk_archive" "$ROCSHMEM_PACKAGE_DTK_URL"
-test -s "$dtk_archive"
 git bundle create "$task_dir/source.bundle" HEAD
 image_id="$(package_image_id "$ROCSHMEM_CI_IMAGE")"
 docker image inspect --format '{{json .RepoDigests}}' "$image_id" > "$ROCSHMEM_PACKAGE_ROOT/logs/image-digests.json"
@@ -278,11 +243,9 @@ docker create --name "$container_name" --user root \
     --device=/dev/kfd --device=/dev/mkfd --device=/dev/dri/ \
     --network=host --ipc=host --group-add video \
     -v /opt/hyhal:/opt/hyhal:ro \
-    -v "$dtk_archive:/tmp/rocshmem-dtk.tar.gz:ro" \
-    -e ROCSHMEM_PACKAGE_VARIANT -e ROCSHMEM_PACKAGE_DTK_SOURCE -e RESOURCE_SERVER_URL \
+    -e ROCSHMEM_PACKAGE_VARIANT -e ROCSHMEM_PACKAGE_DTK_VERSION -e RESOURCE_SERVER_URL \
     -e ROCSHMEM_PACKAGE_CONTAINER=1 \
     -e ROCSHMEM_PACKAGE_SHA \
-    -e ROCSHMEM_PACKAGE_DTK_URL \
     -e GITHUB_RUN_ID -e GITHUB_RUN_ATTEMPT -e PIP_INDEX_URL -e PIP_TRUSTED_HOST \
     "$image_id" tail -f /dev/null
 container_created=true
@@ -293,7 +256,7 @@ timeout --signal=TERM --kill-after=30s 6000s \
     docker exec "$container_name" bash /tmp/upload_package.sh __build
 mkdir -p "$ROCSHMEM_PACKAGE_ROOT/packages"
 docker cp "$container_name:/tmp/rocshmem-run-artifacts/." "$ROCSHMEM_PACKAGE_ROOT/packages/"
-printf 'image_id=%s\n' "$image_id" >> "$ROCSHMEM_PACKAGE_ROOT/packages/build-info.txt"
+printf 'image=%s\nimage_id=%s\n' "$ROCSHMEM_CI_IMAGE" "$image_id" >> "$ROCSHMEM_PACKAGE_ROOT/packages/build-info.txt"
 cp "$ROCSHMEM_PACKAGE_ROOT/logs/image-digests.json" "$ROCSHMEM_PACKAGE_ROOT/packages/"
 (cd "$ROCSHMEM_PACKAGE_ROOT/packages"; sha256sum --check SHA256SUMS)
 

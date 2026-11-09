@@ -3,7 +3,7 @@ name: rocSHMEM CI
 on:
   pull_request_target:
     branches: [develop]
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
   schedule:
     - cron: "0 18 1 * *"
   workflow_dispatch:
@@ -18,22 +18,91 @@ on:
 permissions:
   contents: read
 
-
-concurrency:
-  group: rocshmem-hygon-github-nmz1-nmz2
-  # A new PR commit supersedes the old validation run. Scheduled/manual full
-  # runs remain serialized and are never cancelled by another invocation.
-  cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
-
 jobs:
+  authorize:
+    name: Authorize CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run_ci: ${{ steps.decide.outputs.run_ci }}
+    steps:
+      - name: Decide whether this event may run rocSHMEM CI
+        id: decide
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action || '' }}
+          EVENT_LABEL: ${{ github.event.label.name || '' }}
+          IS_SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+          HAS_CI_LABEL: ${{ github.event_name == 'pull_request_target' && contains(github.event.pull_request.labels.*.name, 'run-hygon-ci') || false }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          ACTOR: ${{ github.triggering_actor }}
+          INITIAL_ACTOR: ${{ github.actor }}
+        run: |
+          set -Eeuo pipefail
+          CI_LABEL="run-hygon-ci"
+          run_ci=false
+
+          is_maintainer() {
+            local permission
+            permission="$(gh api \
+              "repos/${REPO}/collaborators/${ACTOR}/permission" \
+              --jq .permission 2>/dev/null || true)"
+            # The REST `permission` field uses legacy base roles: the
+            # `maintain` role is reported as `write`.
+            case "${permission}" in
+              admin|write) return 0 ;;
+              *)
+                echo "::warning::${ACTOR} may not trigger rocSHMEM CI (repository permission: ${permission:-unknown})." >&2
+                return 1
+                ;;
+            esac
+          }
+
+          if [ "${EVENT_NAME}" != "pull_request_target" ]; then
+            # Scheduled and manual runs are trusted: the schedule is repository
+            # configuration and manual runs require Actions access.
+            run_ci=true
+          elif [ "${EVENT_ACTION}" = "labeled" ]; then
+            # Only the dedicated approval label starts a fork PR, and only a
+            # repository maintainer may apply it.
+            if [ "${EVENT_LABEL}" = "${CI_LABEL}" ] && is_maintainer; then
+              run_ci=true
+            fi
+          elif [ "${IS_SAME_REPO}" = "true" ]; then
+            # Same-repository PRs keep running automatically; only
+            # collaborators with write access can push to those branches.
+            run_ci=true
+          else
+            # A fork author pushing new commits must not start a self-hosted
+            # run; approval is bound to a maintainer action. Re-running the
+            # workflow from the UI is also a maintainer action (and lets a
+            # maintainer validate the newest synchronize run after the label
+            # has been consumed).
+            if { [ "${HAS_CI_LABEL}" = "true" ] || [ "${RUN_ATTEMPT}" -gt 1 ]; } && is_maintainer; then
+              run_ci=true
+            fi
+          fi
+
+          echo "rocSHMEM CI requested: ${run_ci} (event=${EVENT_NAME}, action=${EVENT_ACTION}, label=${EVENT_LABEL}, actor=${INITIAL_ACTOR}, triggering_actor=${ACTOR}, same_repo=${IS_SAME_REPO})"
+          echo "run_ci=${run_ci}" >> "${GITHUB_OUTPUT}"
+
   build-and-test:
     name: Test (${{ github.event_name == 'schedule' && 'full' || 'standard' }})
+    needs: authorize
+    if: needs.authorize.outputs.run_ci == 'true'
+    concurrency:
+      group: rocshmem-hygon-github-nmz1-nmz2-pr-${{ github.event.pull_request.number || 'maintenance' }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request_target' && github.event.action != 'labeled' }}
     runs-on: [self-hosted, Linux, X64, ci, nmz1, bw1100]
     timeout-minutes: 360
     env:
-      ROCSHMEM_CI_IMAGE: ${{ vars.IMAGE}}
-      PIP_INDEX_URL: ${{ vars.PIP_INDEX_URL}}
-      PIP_TRUSTED_HOST: ${{ vars.PIP_TRUSTED_HOST}}
+      HARBOR_SITE: ${{ vars.HARBOR_SITE }}
+      DEVPI_URL: ${{ vars.DEVPI_URL }}
+      DTK_VERSION: ${{ vars.DTK_VERSION }}
+      PIP_TRUSTED_HOST: ${{ vars.PIP_TRUSTED_HOST }}
       ROCSHMEM_CI_PRIMARY_HOST: github-nmz1
       ROCSHMEM_CI_SECONDARY_HOST: github-nmz2
       ROCSHMEM_CI_PRIMARY_IP: 10.17.1.1
@@ -49,37 +118,31 @@ jobs:
       ROCSHMEM_CI_LOCK_TIMEOUT: "900"
       ROCSHMEM_CI_PORT_RANGE_MIN: "20000"
       ROCSHMEM_CI_PORT_RANGE_MAX: "29999"
-      ROCSHMEM_CI_DTK_URL: http://10.16.1.201:8000/dtk-pkg/dtk26.04/DTK-26.04-rc4-ubuntu20.04-x86_64.tar.gz
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.4.0
         with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           ref: >-
             ${{ github.event_name == 'pull_request_target' &&
-                github.event.repository.default_branch || github.ref }}
-          persist-credentials: true
+                github.event.pull_request.head.sha || github.ref }}
+          allow-unsafe-pr-checkout: true
+          persist-credentials: false
           submodules: recursive
 
-      - name: Checkout PR merge ref
-        if: github.event_name == 'pull_request_target'
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          set -Eeuo pipefail
-          git fetch --no-tags --depth=1 origin "refs/pull/${PR_NUMBER}/merge"
-          git checkout --detach FETCH_HEAD
-
-      - name: Validate repository variables
+      - name: Configure DTK image and pip index
         shell: bash
         run: |
-          set -Eeuo pipefail
-          for variable_name in \
-              ROCSHMEM_CI_IMAGE PIP_INDEX_URL PIP_TRUSTED_HOST; do
-            if [[ -z "${!variable_name}" ]]; then
-              echo "::error::Required repository variable for ${variable_name} is empty."
-              exit 1
-            fi
-          done
+          set -euo pipefail
+          : "${HARBOR_SITE:?missing HARBOR_SITE}" "${DEVPI_URL:?missing DEVPI_URL}" "${PIP_TRUSTED_HOST:?missing PIP_TRUSTED_HOST}"
+          if [[ ! "$DTK_VERSION" =~ ^[0-9]{4}$ ]]; then
+            echo '::error::DTK_VERSION must contain four digits (for example, 2610).'
+            exit 1
+          fi
+          {
+            echo "ROCSHMEM_CI_IMAGE=${HARBOR_SITE%/}/hcu/base/dtk:${DTK_VERSION:0:2}.${DTK_VERSION:2:2}-ubuntu22.04-py3.10"
+            echo "PIP_INDEX_URL=${DEVPI_URL%/}/nightly/dtk${DTK_VERSION}/+simple/"
+          } >> "$GITHUB_ENV"
 
       - name: Select test suite
         shell: bash
@@ -108,3 +171,62 @@ jobs:
           path: ${{ runner.temp }}/rocshmem-logs
           if-no-files-found: warn
           retention-days: 14
+
+  ci-gate:
+    name: CI Gate
+    if: always()
+    needs: [authorize, build-and-test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report the CI result
+        shell: bash
+        env:
+          AUTHORIZE_RESULT: ${{ needs.authorize.result }}
+          RUN_CI: ${{ needs.authorize.outputs.run_ci }}
+          TEST_RESULT: ${{ needs.build-and-test.result }}
+          EVENT_LABEL: ${{ github.event.label.name || '' }}
+          ACTOR: ${{ github.triggering_actor }}
+        run: |
+          set -Eeuo pipefail
+          if [ "${AUTHORIZE_RESULT}" != "success" ]; then
+            echo "::error::CI authorization failed (${AUTHORIZE_RESULT})."
+            exit 1
+          fi
+          if [ "${RUN_CI}" != "true" ]; then
+            if [ "${EVENT_LABEL}" = "run-hygon-ci" ]; then
+              echo "::error::${ACTOR} applied the 'run-hygon-ci' label but does not have write access."
+              exit 1
+            fi
+            echo "rocSHMEM CI was not requested for this event."
+            echo "Same-repository PRs run automatically; a fork PR requires a maintainer to apply the 'run-hygon-ci' label or re-run the workflow."
+            exit 0
+          fi
+          if [ "${TEST_RESULT}" != "success" ]; then
+            echo "::error::rocSHMEM CI did not pass (${TEST_RESULT})."
+            exit 1
+          fi
+          echo "rocSHMEM CI passed."
+
+  cleanup-label:
+    name: Consume run-hygon-ci label
+    if: >-
+      always() &&
+      github.event.action == 'labeled' &&
+      github.event.label.name == 'run-hygon-ci'
+    needs: [ci-gate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Remove run-hygon-ci label
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -Eeuo pipefail
+          gh pr edit "${PR_NUMBER}" --remove-label "run-hygon-ci" 2>/dev/null || true
