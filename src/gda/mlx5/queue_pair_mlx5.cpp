@@ -181,10 +181,11 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
       continue;
     }
 
-#if defined(BUILD_DEBUG_DEVICE)
+    // An error CQE also carries a WQE counter. Reject it in release builds
+    // before using that counter to treat failed operations as completed.
+    // The detailed error handler stays out of the normal polling path.
     if (opcode != MLX5_CQE_REQ)
       mlx5_print_cqe_error(cqe, opcode);
-#endif
 
     /* sq_tail is an index to the next free WQE i.e. counts number of posted WQEs
      * sq_head is an index to the *last* completed WQE - need to add one to get *count* of completed WQEs */
