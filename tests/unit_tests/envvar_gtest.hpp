@@ -87,7 +87,8 @@ class EnvVarSetTestFixture : public EnvVarTestFixture
   protected:
     const envvar::var<T> var_{var_name_, var_doc_};
 
-    static void SetUpTestSuite() {
+    void SetUp() override {
+      // Set the environment before var_ performs its lazy initialization.
       using namespace envvar::parser::_type_traits;
       std::ostringstream oss{};
       // operator<<(std::ostream&, {un}signed char) prints output as a character
@@ -98,7 +99,7 @@ class EnvVarSetTestFixture : public EnvVarTestFixture
       } else {
         oss << T{};
       }
-      setenv(oss.str());
+      ASSERT_EQ(setenv(oss.str()), 0);
     }
 };
 } // namespace rocshmem

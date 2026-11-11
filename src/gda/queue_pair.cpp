@@ -28,6 +28,7 @@
 
 #include "backend_gda.hpp"
 #include "constmem.hpp"
+#include <cstring>
 #include "constants.hpp"
 #include "util.hpp"
 
@@ -43,17 +44,17 @@ QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider) {
     access |= IBV_ACCESS_RELAXED_ORDERING;
   }
   allocator.allocate((void**)&nonfetching_atomic, 8);
-  allocator.allocate((void**)&fetching_atomic, 8 * FETCHING_ATOMIC_CNT);
+  CHECK_HIP(hipHostMalloc((void**)&fetching_atomic, 8 * FETCHING_ATOMIC_CNT, hipHostMallocDefault));
   allocator.allocate((void**)&fetching_atomic_freelist, sizeof(FreeListT*));
   new (fetching_atomic_freelist) FreeListT(HIPAllocator());
 
   CHECK_HIP(hipMemset(nonfetching_atomic, 0, 8));
-  CHECK_HIP(hipMemset(fetching_atomic, 0, 8 * FETCHING_ATOMIC_CNT));
+  memset(fetching_atomic, 0, 8 * FETCHING_ATOMIC_CNT);
 
   mr_nonfetching_atomic = ibv.reg_mr(pd, nonfetching_atomic, 8, access, &allocator);
   CHECK_NNULL(mr_nonfetching_atomic, "ibv_reg_mr");
 
-  mr_fetching_atomic = ibv.reg_mr(pd, fetching_atomic, 8 * FETCHING_ATOMIC_CNT, access, &allocator);
+  mr_fetching_atomic = ibv.reg_mr(pd, fetching_atomic, 8 * FETCHING_ATOMIC_CNT, access);
   CHECK_NNULL(mr_fetching_atomic, "ibv_reg_mr");
 
   nonfetching_atomic_lkey = mr_nonfetching_atomic->lkey;
@@ -134,7 +135,7 @@ QueuePair::~QueuePair() {
   CHECK_ZERO(err, "ibv_dereg_mr (fetching_atomic)");
 
   allocator.deallocate((void*)nonfetching_atomic);
-  allocator.deallocate((void*)fetching_atomic);
+  hipHostFree(fetching_atomic);
 
   fetching_atomic_freelist->~FreeListT();
   allocator.deallocate((void*)fetching_atomic_freelist);

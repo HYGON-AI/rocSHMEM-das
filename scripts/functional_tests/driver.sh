@@ -474,6 +474,7 @@ ExecTest_MPI() {
         -n "$NUM_RANKS"
         -mca pml "${OMPI_MCA_pml:-ucx}"
         -mca osc "${OMPI_MCA_osc:-ucx}"
+        -x ROCM_PATH -x LD_LIBRARY_PATH -x PATH
         -x "ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS"
         -x "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384"
         -x "ROCSHMEM_HEAP_SIZE=${ROCSHMEM_HEAP_SIZE:-$HEAP_SIZE}"
@@ -999,7 +1000,7 @@ TestOther() {
   ExecTest  "flood_putnbi"     8       64           1024
   ExecTest  "flood_p"          8       64           1024
 
-  if [[ $TEST == gda-mlx5* ]]; then  
+  if [[ $TEST == gda-mlx5* ]]; then
   ExecTest  "defaultctx_waveputnbi_dp"    2       1            64        1048576
   ExecTest  "waveputnbi_dp"    2       1            64        1048576
   ExecTest  "defaultctx_amo_add_dp"   2       1            1
@@ -1187,15 +1188,15 @@ TestPerfRMA() {
   ExecPerfTest  "put"                     2         "$MAX_MESSAGE_SIZE"
   ExecPerfTest  "wgput"                   2         "$MAX_MESSAGE_SIZE"
   ExecPerfTest  "waveput"                 2         "$MAX_MESSAGE_SIZE"
-  
+
   ExecPerfTest  "putnbi"                  2         "$MAX_MESSAGE_SIZE"
   ExecPerfTest  "wgputnbi"                2         "$MAX_MESSAGE_SIZE"
   ExecPerfTest  "waveputnbi"              2         "$MAX_MESSAGE_SIZE"
-  
+
   ExecPerfTest  "get"                     2         "$MAX_MESSAGE_SIZE"
   ExecPerfTest  "wgget"                   2         "$MAX_MESSAGE_SIZE"
   ExecPerfTest  "waveget"                 2         "$MAX_MESSAGE_SIZE"
-  
+
   ExecPerfTest  "getnbi"                  2         "$MAX_MESSAGE_SIZE"
   ExecPerfTest  "wggetnbi"                2         "$MAX_MESSAGE_SIZE"
   ExecPerfTest  "wavegetnbi"              2         "$MAX_MESSAGE_SIZE"
@@ -1208,11 +1209,11 @@ TestPerfRMA() {
   ExecPerfTest  "teamctxget"              2         "$MAX_MESSAGE_SIZE"
   ExecPerfTest  "defaultctxgetnbi"        2         "$MAX_MESSAGE_SIZE"
   ExecPerfTest  "teamctxgetnbi"           2         "$MAX_MESSAGE_SIZE"
-  
+
   ExecPerfTest  "putmem_on_stream"        2         "$MAX_MESSAGE_SIZE"
   ExecPerfTest  "getmem_on_stream"        2         "$MAX_MESSAGE_SIZE"
-  
-  if [[ $TEST == perf-mlx5* ]]; then  
+
+  if [[ $TEST == perf-mlx5* ]]; then
   ExecPerfTest  "defaultctx_waveputnbi_dp"  2       "$MAX_MESSAGE_SIZE"
   ExecPerfTest  "waveputnbi_dp"             2       "$MAX_MESSAGE_SIZE"
   else echo "Skip:   *_dp (AIROCSHMEM: GDA *_dp not implemented)"; fi
@@ -1230,11 +1231,11 @@ ExecPerfTest() {
   NOVERIF=1
   ROCSHMEM_TEST_BATCH_SIZE=1
   SINGLE_INSTANCE=1
-  
+
   local test_name=$1
   local num_ranks=$2
   local max_msg_size=$3
-  
+
   local -a wg_options
   read -ra wg_options <<< "${ROCSHMEM_TEST_WGS:-16}"
   local -a thread_options
@@ -1247,35 +1248,35 @@ ExecPerfTest() {
     thread_options=(64)
     max_msg_size="v1073741824"
   fi
-  
+
   declare -A best_latency
   declare -A best_bandwidth
   declare -A best_alg_bw
   declare -A best_bus_bw
   declare -A best_latency_config
   declare -A best_bandwidth_config
-  
+
   echo "--------------------------------------------------------------------------------------"
   echo "Performance Test: $test_name"
   echo "Ranks: $num_ranks, Max Msg Size: $max_msg_size"
   echo "Workgroups: ${wg_options[*]}"
   echo "Threads: ${thread_options[*]}"
   echo "--------------------------------------------------------------------------------------"
-  
+
   for wg in "${wg_options[@]}"; do
     for threads in "${thread_options[@]}"; do
       if [ $((wg * threads)) -gt 65536 ]; then
         continue
       fi
-      
+
       ExecTest "$test_name" "$num_ranks" "$wg" "$threads" "$max_msg_size"
-      
+
       local log_file="$LOG_DIR/${test_name}_n${num_ranks}_w${wg}_z${threads}_${max_msg_size}B.log"
-      
+
       if [ ! -f "$log_file" ]; then
         continue
       fi
-      
+
       local results
       results=$(awk -v max="$max_msg_size" '
         BEGIN {
@@ -1294,7 +1295,7 @@ ExecPerfTest() {
           }
         }
       ' "$log_file")
-      
+
       while IFS= read -r line; do
         [ -z "$line" ] && continue
 
@@ -1316,7 +1317,7 @@ ExecPerfTest() {
       done <<< "$results"
     done
   done
-  
+
   local result_file="$LOG_DIR/${test_name}_n${num_ranks}_${max_msg_size}B_best.log"
 
   local has_extra_cols=0
@@ -1367,16 +1368,16 @@ ExecPerfTest() {
 }
 
 ValidateInput() {
-  INPUT_COUNT=$1 
+  INPUT_COUNT=$1
 
-  if [[ "$*" == *"--show-cases"* ]]; then
+  if [[ "$SHOW_CASES" == "1" ]]; then
     echo "Functional Test Cases:"
     for test_case in "${!TEST_NUMBERS[@]}"; do
       echo "$test_case"
     done
     exit 1
   fi
-  
+
   if [ $INPUT_COUNT -lt 3 ] ; then
     echo "This script must be run with at least 3 arguments."
     echo "Usage: ${0} <executable> <test_suite | test_name | test_config> <log_dir> [hostfile] [--show-cases] [-single] [--no-env-info] [--hosts host1,host2]"
@@ -1496,6 +1497,7 @@ ENV_INFO_ENABLED=1
 ENV_HOSTS=""
 _ARG_NEXT_IS_ENV_HOSTS=0
 SINGLE_INSTANCE=0
+SHOW_CASES=0
 _POSITIONAL=()
 for _arg in "$@"; do
   if [[ "$_ARG_NEXT_IS_ENV_HOSTS" == 1 ]]; then
@@ -1518,6 +1520,8 @@ for _arg in "$@"; do
     _ARG_NEXT_IS_ENV_HOSTS=1
   elif [[ "$_arg" == "-single" ]]; then
     SINGLE_INSTANCE=1
+  elif [[ "$_arg" == "--show-cases" ]]; then
+    SHOW_CASES=1
   else
     _POSITIONAL+=("$_arg")
   fi

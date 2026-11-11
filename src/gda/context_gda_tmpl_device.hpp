@@ -195,9 +195,7 @@ __device__ T GDAContext::amo_fetch_and(void *dst, T value, int pe) {
   }
   
   ActiveWFInfo wf_info(pe);
-  // CAS-loop bitwise AMOs must serialize on one QP per target PE to avoid
-  // cross-QP retry livelock under high wave concurrency.
-  int qp_index = get_qp_index(pe, wf_info, true);
+  int qp_index = get_qp_index(pe, wf_info);
   auto [raddr, rkey] = qps[qp_index].get_raddr_info(dst);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
@@ -235,7 +233,7 @@ __device__ T GDAContext::amo_fetch_or(void *dst, T value, int pe) {
   }
 
   ActiveWFInfo wf_info(pe);
-  int qp_index = get_qp_index(pe, wf_info, true);
+  int qp_index = get_qp_index(pe, wf_info);
   auto [raddr, rkey] = qps[qp_index].get_raddr_info(dst);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
@@ -273,7 +271,7 @@ __device__ T GDAContext::amo_fetch_xor(void *dst, T value, int pe) {
   }
   
   ActiveWFInfo wf_info(pe);
-  int qp_index = get_qp_index(pe, wf_info, true);
+  int qp_index = get_qp_index(pe, wf_info);
   auto [raddr, rkey] = qps[qp_index].get_raddr_info(dst);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
@@ -1535,13 +1533,7 @@ __device__ T GDAContext::internal_amo_swap(void *dst, T value, int pe,
  *    - QP[i,j]             →  i-th QP of PE j
  *    - **[ QP2,2 ]**       →  The 3rd QP (QP index 2) of PE2
  */
-__device__ __forceinline__ uint32_t GDAContext::get_qp_index(int pe,
-    ActiveWFInfo wf_info, bool force_single_qp) {
-
-#if defined(GDA_SHCA)
-  if (force_single_qp && constmem.gda_provider == GDAProvider::SHCA) return pe;
-#endif
-
+__device__ __forceinline__ uint32_t GDAContext::get_qp_index(int pe, ActiveWFInfo wf_info) {
   uint32_t qp_index   {0};
 
   if(wf_info.pe_group_logical_lane_id == 0) {

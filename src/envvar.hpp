@@ -348,6 +348,7 @@ namespace envvar {
           : name(_prefix + "_" + _name),
             doc(_doc),
             default_value(_default_value),
+            parse_(parse),
             value(_default_value),
             value_set(false),
             value_initialized_(false) { }
@@ -390,7 +391,7 @@ namespace envvar {
         const char* env_value = std::getenv(name.c_str());
         if (env_value) {
           std::istringstream iss{std::string(env_value)};
-          std::invoke(parser::parse<T>{}, iss, value);
+          std::invoke(parse_, iss, value);
           if (iss.fail()) {
             std::cerr << __func__ << ": invalid argument " << name << "='" << env_value << "'" << std::endl;
             value = default_value;
@@ -404,6 +405,7 @@ namespace envvar {
       const std::string name;
       const std::string doc;
       const value_type default_value;
+      const std::function<std::istream&(std::istream&, reference)> parse_;
       mutable value_type value;
       mutable bool value_set;
       mutable bool value_initialized_;
