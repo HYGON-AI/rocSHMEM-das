@@ -38,13 +38,18 @@ set(EXPLICIT_ROCM_VERSION "" CACHE STRING "Explicit ROCM version to compile to (
 # Try to establish ROCM_PATH (for find_package)
 #==================================================================================================
 if(NOT DEFINED ROCM_PATH)
-  # Guess default location
-  set(ROCM_PATH "/opt/dtk")
-  message(STATUS "ROCM_PATH not specified, using default: ${ROCM_PATH}")
+  if(DEFINED ENV{ROCM_PATH} AND NOT "$ENV{ROCM_PATH}" STREQUAL "")
+    set(ROCM_PATH "$ENV{ROCM_PATH}")
+    message(STATUS "ROCM_PATH found from Environment: ${ROCM_PATH}")
+  else()
+    # Guess default location
+    set(ROCM_PATH "/opt/dtk")
+    message(STATUS "ROCM_PATH not specified, using default: ${ROCM_PATH}")
+  endif()
 else()
-  message(STATUS "ROCM_PATH found: ${ROCM_PATH}")
+  message(STATUS "ROCM_PATH found from Cache: ${ROCM_PATH}")
 endif()
-set(ENV{ROCM_PATH} ${ROCM_PATH})
+set(ENV{ROCM_PATH} "${ROCM_PATH}")
 
 if (NOT DEFINED CACHE{ROCM_MAJOR_VERSION})
   ## Check for ROCm version
