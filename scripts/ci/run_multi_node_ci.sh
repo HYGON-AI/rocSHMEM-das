@@ -76,37 +76,6 @@ generate_topology() {
     cat /home/topo.config
 }
 
-install_dtk() {
-    local dtk_source="$1"
-    local tarball="$dtk_source"
-    local extracted root
-
-    # Always use the selected Ubuntu archive, including when the image contains DTK.
-        if [[ "$dtk_source" =~ ^https?:// ]]; then
-            tarball="/opt/$(basename "$dtk_source")"
-            curl --fail --location --retry 3 "$dtk_source" --output "$tarball"
-        else
-            [[ -f "$tarball" ]] || {
-                echo "ERROR: DTK archive is missing in the container: ${tarball}" >&2
-                exit 1
-            }
-        fi
-        root="$(mktemp -d /opt/rocshmem-ci-dtk.XXXXXX)"
-        tar -xzf "$tarball" -C "$root"
-        local candidates=()
-        for extracted in "$root"/dtk-*; do
-            [[ -f "$extracted/env.sh" ]] && candidates+=("$extracted")
-        done
-        [[ ${#candidates[@]} -eq 1 ]] || { echo 'ERROR: expected one DTK directory' >&2; exit 1; }
-        if [[ -L /opt/dtk ]]; then
-            rm -- /opt/dtk
-        elif [[ -e /opt/dtk ]]; then
-            mv -- /opt/dtk "$root/image-dtk"
-        fi
-        ln -s "${candidates[0]}" /opt/dtk
-    test -f /opt/dtk/env.sh
-}
-
 upgrade_rdma_core() {
     apt-get install -y --no-install-recommends \
         rdma-core libibverbs-dev ibverbs-utils libnuma-dev librdmacm-dev
@@ -115,14 +84,13 @@ upgrade_rdma_core() {
 
 prepare_container() {
     local source_tar="$1"
-    local dtk_source="$2"
-    local nic_name="$3"
-    local nic_index="$4"
-    local ssh_port="$5"
-    local primary_host="$6"
-    local secondary_host="$7"
-    local primary_ip="$8"
-    local secondary_ip="$9"
+    local nic_name="$2"
+    local nic_index="$3"
+    local ssh_port="$4"
+    local primary_host="$5"
+    local secondary_host="$6"
+    local primary_ip="$7"
+    local secondary_ip="$8"
 
     # shellcheck disable=SC1091
     source /etc/os-release
@@ -132,9 +100,8 @@ prepare_container() {
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
     apt-get install -y --no-install-recommends \
-        curl ca-certificates openssh-client openssh-server python3-pip iproute2 procps
+        ca-certificates openssh-client openssh-server python3-pip iproute2 procps
     upgrade_rdma_core
-    install_dtk "$dtk_source"
     activate_dtk
 
     python3 -m pip install pyyaml
@@ -238,7 +205,7 @@ case "${1:-}" in
 esac
 
 required=(
-    ROCSHMEM_CI_IMAGE ROCSHMEM_CI_SUITE
+    ROCSHMEM_CI_IMAGE ROCSHMEM_CI_SUITE PIP_INDEX_URL PIP_TRUSTED_HOST
     ROCSHMEM_CI_PRIMARY_HOST ROCSHMEM_CI_SECONDARY_HOST
 )
 for name in "${required[@]}"; do
@@ -253,7 +220,6 @@ PRIMARY_IP="${ROCSHMEM_CI_PRIMARY_IP:-10.17.1.1}"
 SECONDARY_IP="${ROCSHMEM_CI_SECONDARY_IP:-10.17.1.2}"
 PRIMARY_NIC="${ROCSHMEM_CI_PRIMARY_NIC:-mlx5_6}"
 SECONDARY_NIC="${ROCSHMEM_CI_SECONDARY_NIC:-mlx5_0}"
-DTK_SOURCE="${ROCSHMEM_CI_DTK_URL:-http://10.16.1.201:8000/dtk-pkg/dtk26.04/DTK-26.04-rc4-ubuntu20.04-x86_64.tar.gz}"
 PRIMARY_NIC_INDEX="${ROCSHMEM_CI_PRIMARY_NIC_INDEX:-6}"
 SECONDARY_NIC_INDEX="${ROCSHMEM_CI_SECONDARY_NIC_INDEX:-0}"
 SETUP_TIMEOUT="${ROCSHMEM_CI_SETUP_TIMEOUT:-3600}"
@@ -393,17 +359,35 @@ ssh "${SSH_OPTIONS[@]}" "$REMOTE" "mkdir -p '$REMOTE_ROOT/ssh' '$REMOTE_ROOT/log
 scp "${SSH_OPTIONS[@]}" "$SOURCE_TAR" "$SCRIPT_PATH" "$SSH_DIR/id_ed25519" "$SSH_DIR/id_ed25519.pub" "${REMOTE}:${REMOTE_ROOT}/"
 ssh "${SSH_OPTIONS[@]}" "$REMOTE" "mv '$REMOTE_ROOT/id_ed25519' '$REMOTE_ROOT/id_ed25519.pub' '$REMOTE_ROOT/ssh/'"
 
+echo "Pulling CI image on ${PRIMARY_HOST}: ${ROCSHMEM_CI_IMAGE}"
+docker pull "$ROCSHMEM_CI_IMAGE"
+echo "Pulling CI image on ${SECONDARY_HOST}: ${ROCSHMEM_CI_IMAGE}"
+ssh "${SSH_OPTIONS[@]}" "$REMOTE" "docker pull '$ROCSHMEM_CI_IMAGE'"
+CI_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$ROCSHMEM_CI_IMAGE")"
+SECONDARY_IMAGE_ID="$(ssh "${SSH_OPTIONS[@]}" "$REMOTE" \
+    "docker image inspect --format '{{.Id}}' '$ROCSHMEM_CI_IMAGE'")"
+[[ -n "$CI_IMAGE_ID" && -n "$SECONDARY_IMAGE_ID" ]] || {
+    echo 'ERROR: failed to resolve the pulled CI image ID' >&2
+    exit 1
+}
+[[ "$CI_IMAGE_ID" == "$SECONDARY_IMAGE_ID" ]] || {
+    echo "ERROR: ${PRIMARY_HOST} and ${SECONDARY_HOST} resolved different CI images" >&2
+    echo "  ${PRIMARY_HOST}: ${CI_IMAGE_ID}" >&2
+    echo "  ${SECONDARY_HOST}: ${SECONDARY_IMAGE_ID}" >&2
+    exit 1
+}
+
 docker run --name "$PRIMARY_CONTAINER" -u root \
     --ulimit memlock=-1:-1 --shm-size=32g --privileged \
     --device=/dev/kfd --device=/dev/mkfd --device=/dev/dri/ \
     -v /opt/hyhal:/opt/hyhal:ro --network=host --ipc=host \
-    --group-add video -d "$ROCSHMEM_CI_IMAGE" tail -f /dev/null
+    --group-add video -d "$CI_IMAGE_ID" tail -f /dev/null
 
 ssh "${SSH_OPTIONS[@]}" "$REMOTE" docker run --name "$SECONDARY_CONTAINER" -u root \
     --ulimit memlock=-1:-1 --shm-size=32g --privileged \
     --device=/dev/kfd --device=/dev/mkfd --device=/dev/dri/ \
     -v /opt/hyhal:/opt/hyhal:ro --network=host --ipc=host \
-    --group-add video -d "$ROCSHMEM_CI_IMAGE" tail -f /dev/null
+    --group-add video -d "$SECONDARY_IMAGE_ID" tail -f /dev/null
 
 docker exec "$PRIMARY_CONTAINER" mkdir -p /work /patch/test_log
 ssh "${SSH_OPTIONS[@]}" "$REMOTE" \
@@ -417,26 +401,21 @@ ssh "${SSH_OPTIONS[@]}" "$REMOTE" \
      docker cp '$REMOTE_ROOT/run_multi_node_ci.sh' '${SECONDARY_CONTAINER}:/work/run_multi_node_ci.sh' && \
      docker cp '$REMOTE_ROOT/ssh' '${SECONDARY_CONTAINER}:/work/ssh'"
 
-PREPARE_COMMON=(
-    "$DTK_SOURCE" "$SSH_PORT" "$PRIMARY_HOST" "$SECONDARY_HOST"
-    "$PRIMARY_IP" "$SECONDARY_IP"
-)
-
 timeout "$SETUP_TIMEOUT" docker exec \
-    -e "PIP_INDEX_URL=${PIP_INDEX_URL:-}" \
-    -e "PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST:-}" \
+    -e PIP_INDEX_URL -e PIP_TRUSTED_HOST \
     -e "ROCSHMEM_CI_GID_INDEX=${GID_INDEX}" \
     "$PRIMARY_CONTAINER" bash /work/run_multi_node_ci.sh __prepare \
-    /work/source.tar "${PREPARE_COMMON[0]}" "$PRIMARY_NIC" "$PRIMARY_NIC_INDEX" \
-    "${PREPARE_COMMON[@]:1}" >"$LOG_ROOT/build-${PRIMARY_HOST}.log" 2>&1 &
+    /work/source.tar "$PRIMARY_NIC" "$PRIMARY_NIC_INDEX" \
+    "$SSH_PORT" "$PRIMARY_HOST" "$SECONDARY_HOST" "$PRIMARY_IP" "$SECONDARY_IP" \
+    >"$LOG_ROOT/build-${PRIMARY_HOST}.log" 2>&1 &
 PRIMARY_PID=$!
 
 ssh "${SSH_OPTIONS[@]}" "$REMOTE" \
     "timeout '$SETUP_TIMEOUT' docker exec \
-       -e 'PIP_INDEX_URL=${PIP_INDEX_URL:-}' -e 'PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST:-}' \
+       -e 'PIP_INDEX_URL=$PIP_INDEX_URL' -e 'PIP_TRUSTED_HOST=$PIP_TRUSTED_HOST' \
        -e 'ROCSHMEM_CI_GID_INDEX=${GID_INDEX}' \
        '$SECONDARY_CONTAINER' bash /work/run_multi_node_ci.sh __prepare \
-       /work/source.tar '$DTK_SOURCE' '$SECONDARY_NIC' '$SECONDARY_NIC_INDEX' \
+       /work/source.tar '$SECONDARY_NIC' '$SECONDARY_NIC_INDEX' \
        '$SSH_PORT' '$PRIMARY_HOST' '$SECONDARY_HOST' '$PRIMARY_IP' '$SECONDARY_IP'" \
     >"$LOG_ROOT/build-${SECONDARY_HOST}.log" 2>&1 &
 SECONDARY_PID=$!
@@ -452,11 +431,6 @@ if [[ "$PRIMARY_RC" -ne 0 || "$SECONDARY_RC" -ne 0 ]]; then
     exit 1
 fi
 
-# The validated manual run used the same functional-test executable on both
-# nodes. Preserve that invariant even if separate builds contain timestamps or
-# other non-reproducible sections.
-# Resolve the installed location inside the container: upstream now installs to
-# CMAKE_INSTALL_BINDIR (bin/), older revisions used share/rocshmem.
 CANONICAL_BINARY="$(docker exec "$PRIMARY_CONTAINER" bash -c '
     for candidate in /opt/rocshmem/bin /opt/rocshmem/share/rocshmem; do
         if [ -x "$candidate/rocshmem_functional_tests" ]; then
