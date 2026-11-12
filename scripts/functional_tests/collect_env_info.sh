@@ -895,6 +895,8 @@ PrintEnvInfo() {
 
 CollectRemoteEnvInfo() {
   local host=$1 response=$2
+  # Expand variables in the remote shell, not in the local shell.
+  # shellcheck disable=SC2016
   if ! timeout 180s ssh -T -o BatchMode=yes -o ConnectTimeout=5 \
     -o ServerAliveInterval=5 -o ServerAliveCountMax=2 -- "$host" '
       dir=$(mktemp -d) || exit 1
@@ -921,21 +923,20 @@ CollectRemoteEnvInfo() {
 
 SaveRemoteEnvInfo() {
   local host=$1 response=$2 name
-  {
-    if ! IFS= read -r name || [[ ! $name =~ ^env_info_[a-zA-Z0-9._-]+\.log$ ]]; then
-      rm -f -- "$response"
-      return 1
-    fi
-    if [[ -n ${collected[$name]:-} ]]; then
-      rm -f -- "$response"
-      printf 'Skipping %s: %s already collected\n' "$host" "$name"
-      return 0
-    fi
-    if ! cat > "$response.log" || ! mv -fT -- "$response.log" "$LOG_DIR/$name"; then
-      rm -f -- "$response" "$response.log"
-      return 1
-    fi
-  } < "$response"
+  if ! IFS= read -r name < "$response" || [[ ! $name =~ ^env_info_[a-zA-Z0-9._-]+\.log$ ]]; then
+    rm -f -- "$response"
+    return 1
+  fi
+  if [[ -n ${collected[$name]:-} ]]; then
+    rm -f -- "$response"
+    printf 'Skipping %s: %s already collected\n' "$host" "$name"
+    return 0
+  fi
+  if ! tail -n +2 -- "$response" > "$response.log" ||
+      ! mv -fT -- "$response.log" "$LOG_DIR/$name"; then
+    rm -f -- "$response" "$response.log"
+    return 1
+  fi
   rm -f -- "$response"
   collected[$name]=1
   printf 'Environment info saved to: %s\n' "$LOG_DIR/$name"
@@ -967,6 +968,7 @@ if [[ $# -eq 3 ]]; then
   declare -A requested
   remote_hosts=()
   remote_pids=()
+  remote_status=()
   for host in "${hosts[@]}"; do
     [[ $host == "$local_host" || $host == localhost ]] && continue
     [[ -n ${requested[$host]:-} ]] && continue
@@ -975,13 +977,24 @@ if [[ $# -eq 3 ]]; then
     remote_hosts+=("$host")
     CollectRemoteEnvInfo "$host" "$remote_work/$index" &
     remote_pids+=("$!")
-    # Limit simultaneous SSH sessions to four.
+    # Limit simultaneous SSH sessions to four; save each child's status once.
     if (( index >= 3 )); then
-      wait "${remote_pids[index-3]}" || true
+      if wait "${remote_pids[index-3]}"; then
+        remote_status[index-3]=0
+      else
+        remote_status[index-3]=$?
+      fi
     fi
   done
   for index in "${!remote_hosts[@]}"; do
-    if wait "${remote_pids[index]}" && [[ -f "$remote_work/$index" ]]; then
+    if [[ -z ${remote_status[index]+set} ]]; then
+      if wait "${remote_pids[index]}"; then
+        remote_status[index]=0
+      else
+        remote_status[index]=$?
+      fi
+    fi
+    if (( remote_status[index] == 0 )) && [[ -f "$remote_work/$index" ]]; then
       SaveRemoteEnvInfo "${remote_hosts[index]}" "$remote_work/$index" ||
         printf 'WARNING: Failed to save environment information for %s\n' "${remote_hosts[index]}" >&2
     else
