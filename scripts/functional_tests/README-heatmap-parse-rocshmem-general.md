@@ -8,7 +8,7 @@
 - 支持按 **消息大小（msgsize）** 或 **Rank 级消息总大小（volume）** 两种维度展示
 - 支持 **仅延迟 / 仅带宽 / 同时显示延迟和带宽** 三种输出模式
 - 自动检测日志中的 `error`、`failed`、`segfault` 关键字，失败用例标记为 `Failed` 并附关键错误片段
-- 自动收集各目录下的 `env_info.log`，统一汇总到独立的 `EnvInfo` 工作表
+- 在 `EnvInfo` 工作表列出各节点的 HTML 环境报告附件
 - 失败用例与正常用例均按操作类型分组，便于对比
 
 ## 2. 环境依赖
@@ -79,13 +79,15 @@ Volume (B)  Msg Size (B)  # of timed Msgs  Latency (us)  Bandwidth (GB/s)  AlgBw
 > 提示：`volume < 8` 的记录会被过滤（由脚本顶部 `minmsgsize` 控制，可按需修改）。
 
 ### 4.3 环境信息文件（可选）
-在每个输入目录下放置 `env_info.log`，脚本会将其内容收集到 Excel 末尾的 `EnvInfo` 工作表，并在各目录工作表中放置跳转链接。
+将 `env_info_<hostname>.html` 放在输入目录中，脚本也兼容 `env_info.html`。
+
+在安装了 Windows 桌面 Excel 的 Windows 或 WSL 环境中，脚本会将报告作为 OLE 附件嵌入工作簿。在 `EnvInfo` 页双击附件图标即可打开。嵌入后可以单独移动 Excel 文件。WSL 的输入和输出文件需可由 Windows Excel 访问。
 
 ## 5. 输出结果
 ### 5.1 文件输出
 在执行目录下生成 `<out_file>.xlsx`（默认 `rocshmem_test.xlsx`），包含：
 - 每个输入目录对应一个工作表（工作表名取目录名前 31 个字符）
-- 末尾一个 `EnvInfo` 工作表（若存在 `env_info.log`）
+- 有 HTML 环境报告时，末尾会生成 `EnvInfo` 工作表
 
 ### 5.2 工作表结构
 - **第 2 行**：数据目录路径、单位说明（Lat: us / Bw: GB/s）、当前展示模式
@@ -120,5 +122,5 @@ pip3 install xlsxwriter
 4. **Excel 工作表名重复或被截断**
 Excel 工作表名最长 31 字符，脚本自动截断目录名。若多个目录名前 31 字符相同，可能导致工作表冲突，建议重命名输入目录。
 
-5. **OnStream 类操作显示的 `w` 与 `z` 与实际不一致**
-脚本顶部注明：For OnStream operations, the actual value of w is 1. The actual z varies with size. When it is greater than 256, use 256. 属正常现象。
+5. **OnStream 类操作的 `w` 和 `z`**
+Excel 工作表顶部会注明，OnStream 操作实际使用的 `w` 和 `z` 会根据消息大小自动调整。

@@ -138,7 +138,9 @@ foreach(_t IN LISTS FUNCTIONAL_TEST_TARGETS)
 endforeach()
 
 configure_file(../../scripts/functional_tests/driver.sh rocshmem_functional_driver.sh COPYONLY)
-rocm_install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/rocshmem_functional_driver.sh COMPONENT tests DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
+configure_file(../../scripts/functional_tests/collect_env_info.sh collect_env_info.sh COPYONLY)
+rocm_install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/rocshmem_functional_driver.sh
+                     ${CMAKE_CURRENT_BINARY_DIR}/collect_env_info.sh COMPONENT tests DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
 rocm_install(FILES ${CMAKE_SOURCE_DIR}/scripts/functional_tests/README-driver.md COMPONENT tests DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
 foreach(_t IN LISTS FUNCTIONAL_TEST_TARGETS)
   install(TARGETS ${_t} COMPONENT tests RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
