@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: MIT
 
 # Use one traceable filename identity for every release artifact:
-# rocshmem-<version>+dtk<major><minor>[patch].<YYMMDDHHMM>.g<sha>_<arch>.<ext>
 set(ROCSHMEM_PACKAGE_DTK_VERSION "" CACHE STRING
   "DTK filename version without separators (for example, 2604 or 26042)")
 if(NOT ROCSHMEM_PACKAGE_DTK_VERSION)
@@ -21,6 +20,29 @@ if(NOT ROCSHMEM_PACKAGE_DTK_VERSION MATCHES "^[0-9]+$")
     "Unable to determine the DTK package version. Set "
     "-DROCSHMEM_PACKAGE_DTK_VERSION=<major><minor>[patch] "
     "(for example, 2604 or 26042).")
+endif()
+
+set(ROCSHMEM_PACKAGE_PYTHON_VERSION "" CACHE STRING
+  "Python version in the package filename without separators (for example 312)")
+if(NOT ROCSHMEM_PACKAGE_PYTHON_VERSION)
+  if(DEFINED ENV{ROCSHMEM_PACKAGE_PYTHON_VERSION} AND
+     NOT "$ENV{ROCSHMEM_PACKAGE_PYTHON_VERSION}" STREQUAL "")
+    string(REPLACE "." "" ROCSHMEM_PACKAGE_PYTHON_VERSION
+      "$ENV{ROCSHMEM_PACKAGE_PYTHON_VERSION}")
+  else()
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+      set(ROCSHMEM_PACKAGE_PYTHON_VERSION
+        "${Python3_VERSION_MAJOR}${Python3_VERSION_MINOR}")
+    endif()
+  endif()
+endif()
+if(ROCSHMEM_PACKAGE_PYTHON_VERSION)
+  if(NOT ROCSHMEM_PACKAGE_PYTHON_VERSION MATCHES "^[0-9]+$")
+    message(FATAL_ERROR
+      "ROCSHMEM_PACKAGE_PYTHON_VERSION must contain digits only "
+      "(for example 312); got '${ROCSHMEM_PACKAGE_PYTHON_VERSION}'.")
+  endif()
 endif()
 
 string(TIMESTAMP ROCSHMEM_PACKAGE_TIMESTAMP "%y%m%d%H%M")
@@ -48,9 +70,16 @@ set(_rocshmem_package_name "rocshmem")
 if(GDA_SHCA)
   set(_rocshmem_package_name "rocshmem_shca")
 endif()
+
+set(_rocshmem_package_python "")
+if(ROCSHMEM_PACKAGE_PYTHON_VERSION)
+  set(_rocshmem_package_python
+    "-cp${ROCSHMEM_PACKAGE_PYTHON_VERSION}-cp${ROCSHMEM_PACKAGE_PYTHON_VERSION}")
+endif()
 string(CONCAT ROCSHMEM_PACKAGE_FILE_BASE
   "${_rocshmem_package_name}-${VERSION_STRING}+dtk${ROCSHMEM_PACKAGE_DTK_VERSION}."
-  "${ROCSHMEM_PACKAGE_TIMESTAMP}.g${ROCSHMEM_PACKAGE_GIT_SHORT}")
+  "${ROCSHMEM_PACKAGE_TIMESTAMP}.g${ROCSHMEM_PACKAGE_GIT_SHORT}"
+  "${_rocshmem_package_python}")
 set(CPACK_PACKAGE_FILE_NAME
   "${ROCSHMEM_PACKAGE_FILE_BASE}_${ROCSHMEM_PACKAGE_ARCH}")
 configure_file(
