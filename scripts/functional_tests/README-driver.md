@@ -390,6 +390,15 @@ HTML 按章节展示采集结果，查询命令和原始输出默认折叠。GPU
 - AlgBw / BusBw（若测试输出包含）
 - 最佳延迟（us）及对应 `wg:thread` 配置
 
+### 8.5 已有日志的离线性能对比
+
+测试完成后可选择以下工具，均不重新执行测试：
+
+- [`perf_compare_general.py`](README-perf_compare_general.md)：两组 rocSHMEM 或 rocSHMEM/RCCL 的 Excel 带宽对比，按 IPC/GDA 与 W/Z 分页，支持 COLL/RMA。
+- [`perf_compare.py`](README-perf_compare.md#generate-the-heatmap-from-existing-logs-no-rebuild-no-re-run)：多版本、多轮 rocSHMEM 日志的统计图表，包含延迟、峰值带宽和带宽曲线面积。
+
+命令、依赖、输入格式和计算口径见上述独立文档。
+
 ## 9. 失败重试机制
 
 1. 首次执行记录所有失败用例及其完整环境参数
