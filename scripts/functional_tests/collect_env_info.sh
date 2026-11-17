@@ -78,6 +78,8 @@ EnvPciSnapshot() {
     device=$(readlink -f "$link") || continue
     selected+="${device##*/}|"
   done
+  # $1 belongs to awk and must not be expanded by the shell.
+  # shellcheck disable=SC2016
   program='BEGIN { selected="'"$selected"'" } /^[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]:/ { keep=index(selected,"|" $1 "|")>0 } keep || /^\$/ || /^\[output awk\]/ || /^[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]:/ || /Access Control Services|ACSCap:|ACSCtl:|access denied/ || /^\[(unavailable|incomplete)\]/ { print }'
   EnvCommand lspci -D -vvv | awk -v program="$program" '
     /^\$/ { print; print "[output awk] " program; next }
@@ -402,7 +404,7 @@ def evidence(predicate, wrap=True):
         elif body.startswith('[output awk] '):
             program, separator, body = body[len('[output awk] '):].partition('\n')
             cmd += ' 2>&1 | awk ' + shlex.quote(program)
-            labels[cmd] = label
+        labels[cmd] = label
         if body.startswith('[stdin Python source]\n'):
             code, separator, result = body[len('[stdin Python source]\n'):].partition('\n[end stdin Python source]\n')
             if separator:
