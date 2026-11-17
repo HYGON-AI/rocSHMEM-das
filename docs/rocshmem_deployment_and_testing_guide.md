@@ -392,6 +392,13 @@ ROCSHMEM_TEST_MPI_PARAMS="$GDA_RMA_AMO_MPI_PARAMS" \
 
 将 `driver.sh` 的测试日志解析为 Excel 热力图报告时，参见 [`README-heatmap-parse-rocshmem-general.md`](../scripts/functional_tests/README-heatmap-parse-rocshmem-general.md)；解析脚本的参数、输入格式和工作表结构以该文档及脚本源码为准。
 
+已有日志的性能对比可选择：
+
+- [`perf_compare_general.py`](../scripts/functional_tests/README-perf_compare_general.md)：两组 rocSHMEM 或与 RCCL 的 Excel 带宽报告，支持 COLL/RMA 和 W/Z 分页。
+- [`perf_compare.py`](../scripts/functional_tests/README-perf_compare.md#generate-the-heatmap-from-existing-logs-no-rebuild-no-re-run)：多版本或多轮 rocSHMEM 的延迟、峰值带宽、曲线面积统计与绘图。
+
+两者都只分析已有日志，不构建或执行测试。可先按待测接口、后端和配置，通过 `driver.sh` 或手动执行用例采集日志，再独立运行比较工具；输入格式以各工具文档为准。
+
 ## 9. 故障排查
 
 本表只列部署用户可通过环境、启动参数或构建配置处理的问题。若按表排查后仍可复现，应记录日志、版本和复现步骤，提交给维护人员定位。

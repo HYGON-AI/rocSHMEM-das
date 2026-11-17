@@ -47,6 +47,8 @@ _FNAME_RE = re.compile(r"^(.+?)_n(\d+)_w(\d+)_z(\d+)")
 def parse_log(filepath: Path) -> pd.DataFrame | None:
     """Parse a single driver log file into a DataFrame.
 
+    Supports six- and eight-column logs; aligned bandwidth fields are ignored,
+    including N/A values.
     Returns None if the file contains no usable data rows.
     """
     rows = []
@@ -61,8 +63,11 @@ def parse_log(filepath: Path) -> pd.DataFrame | None:
             if _ANSI_RE.search(line):
                 continue
             parts = line.split()
-            if len(parts) < 6:
+            if len(parts) not in (6, 8):
                 continue
+            # Six columns: Volume Size Count Latency Bandwidth MsgRate.
+            # Eight columns insert AlgBwAlignRccl/BusBwAlignRccl before MsgRate.
+            msg_rate_index = 7 if len(parts) == 8 else 5
             try:
                 row = {
                     "volume": int(parts[0]),
@@ -70,7 +75,7 @@ def parse_log(filepath: Path) -> pd.DataFrame | None:
                     "num_msgs": int(parts[2]),
                     "latency_us": float(parts[3]),
                     "bandwidth_gbs": float(parts[4]),
-                    "msg_rate": float(parts[5]),
+                    "msg_rate": float(parts[msg_rate_index]),
                 }
                 rows.append(row)
             except (ValueError, IndexError):

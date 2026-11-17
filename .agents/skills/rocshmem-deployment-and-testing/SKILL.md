@@ -9,7 +9,7 @@ description: 用于部署、配置、验证、性能测试和排查面向 Hygon 
 
 ## 事实来源
 
-在给出版本、配置、命令、性能测试、验收或故障排查建议前，先定位并阅读 [`docs/rocshmem_deployment_and_testing_guide.md`](../../../docs/rocshmem_deployment_and_testing_guide.md) 的相关章节。查询 `driver.sh` 的命令行接口、套件、默认值、日志、重试或退出码时，读取 [`scripts/functional_tests/README-driver.md`](../../../scripts/functional_tests/README-driver.md)。解析测试日志或导出 Excel 报告时，读取 [`scripts/functional_tests/README-heatmap-parse-rocshmem-general.md`](../../../scripts/functional_tests/README-heatmap-parse-rocshmem-general.md)，并以配套脚本源码为准。不要在本 Skill 中复制这些文档的参数表。
+在给出版本、配置、命令、性能测试、验收或故障排查建议前，先定位并阅读 [`docs/rocshmem_deployment_and_testing_guide.md`](../../../docs/rocshmem_deployment_and_testing_guide.md) 的相关章节。查询 `driver.sh` 的命令行接口、套件、默认值、日志、重试或退出码时，读取 [`scripts/functional_tests/README-driver.md`](../../../scripts/functional_tests/README-driver.md)。解析测试日志或导出 Excel 报告时，读取 [`scripts/functional_tests/README-heatmap-parse-rocshmem-general.md`](../../../scripts/functional_tests/README-heatmap-parse-rocshmem-general.md)，并以配套脚本源码为准。已有日志的性能对比：Excel 带宽报告读取 [`README-perf_compare_general.md`](../../../scripts/functional_tests/README-perf_compare_general.md)，多版本统计与绘图读取 [`README-perf_compare.md`](../../../scripts/functional_tests/README-perf_compare.md)。本 Skill 提供任务指引，具体参数和用法参见对应文档。
 
 按以下顺序判定信息权威性：
 
@@ -25,6 +25,7 @@ description: 用于部署、配置、验证、性能测试和排查面向 Hygon 
 - `driver.sh` 的命令语法、套件名、默认行为、日志和退出码：阅读 `README-driver.md`，必要时对照脚本源码。
 - 节点环境采集与 HTML 报告：使用 `collect_env_info.sh`，独立执行及驱动调用方式见 [环境信息](../../../scripts/functional_tests/README-driver.md#82-环境信息)。
 - 测试日志解析、Excel 热力图导出：阅读 `README-heatmap-parse-rocshmem-general.md`，核对输入日志格式和解析脚本；不必为单纯导出报告重读部署配置章节。
+- 已有日志对比：`perf_compare_general.py` 用于 rocSHMEM/rocSHMEM 或 rocSHMEM/RCCL 的 Excel 带宽报告，见 `README-perf_compare_general.md`；`perf_compare.py` 用于多版本、多轮 rocSHMEM 统计与绘图，见 `README-perf_compare.md`。两者只分析已有日志，不构建或执行测试；日志可由 `driver.sh` 或手动执行用例采集，输入格式以各工具文档和脚本源码为准。
 - 部署或运行故障：阅读“故障排查”，优先返回用户可执行的检查和处理方式；源码缺陷交由维护人员定位。
 - 发布或生产上线准备：阅读“生产部署清单”。
 - 全文评审或文档更新：阅读完整指南，并与当前源码树核对。

@@ -62,19 +62,34 @@ EnvPciDevice() {
   if [[ -L "$device/iommu_group" ]]; then
     echo "IOMMU group: $(readlink -f "$device/iommu_group")"
     EnvFiles "$device/iommu_group/type"
+  elif [[ -d "$device" && -r "$device" && -x "$device" && ! -e "$device/iommu_group" ]]; then
+    echo "IOMMU group state: no-group"
   else
-    echo "IOMMU group: unavailable (does not establish IOMMU state)"
+    echo "IOMMU group state: unknown"
   fi
-  EnvCommand lspci -D -s "${device##*/}" -vv
 
 }
 
+# Keep full GPU/NIC blocks and ACS evidence from the same PCI query.
+EnvPciSnapshot() {
+  local link device selected="|" program
+  for link in /sys/class/drm/card[0-9]*/device /sys/class/net/*/device /sys/class/infiniband/*/device; do
+    [[ -e "$link" ]] || continue
+    device=$(readlink -f "$link") || continue
+    selected+="${device##*/}|"
+  done
+  # $1 belongs to awk and must not be expanded by the shell.
+  # shellcheck disable=SC2016
+  program='BEGIN { selected="'"$selected"'" } /^[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]:/ { keep=index(selected,"|" $1 "|")>0 } keep || /^\$/ || /^\[output awk\]/ || /^[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]]:/ || /Access Control Services|ACSCap:|ACSCtl:|access denied/ || /^\[(unavailable|incomplete)\]/ { print }'
+  EnvCommand lspci -D -vvv | awk -v program="$program" '
+    /^\$/ { print; print "[output awk] " program; next }
+    { print }
+  ' | awk "$program"
+}
+
 PrintfNetWorkInfo() {
-  local nic_path nic ib_path port gid gid_value rdma_driver
-  local has_dcb=0
-  if command -v dcb >/dev/null 2>&1; then
-    has_dcb=1
-  fi
+  local nic_path nic ib_path port gid gid_value rdma_driver net_type link_layer
+  local gid_output="" have_gids=0 qos_output
   if command -v ip >/dev/null 2>&1; then
     EnvCommand ip -details address show
   elif command -v ifconfig >/dev/null 2>&1; then
@@ -88,27 +103,51 @@ PrintfNetWorkInfo() {
     nic=${nic_path##*/}
     [[ "$nic" == lo ]] && continue
     printf '\n--- Network interface: %s ---\n' "$nic"
-    EnvFiles "$nic_path/operstate" "$nic_path/carrier" "$nic_path/mtu" \
-      "$nic_path/speed" "$nic_path/duplex" "$nic_path/address"
+    EnvFiles "$nic_path/operstate" "$nic_path/carrier" "$nic_path/mtu" "$nic_path/address"
+    net_type=$(cat "$nic_path/type" 2>/dev/null)
+    if [[ "$net_type" == 1 ]]; then
+      EnvFiles "$nic_path/speed" "$nic_path/duplex"
+    fi
     if [[ -e "$nic_path/device" ]]; then
       EnvPciDevice "$nic_path/device"
       EnvCommand ethtool -i "$nic"
       EnvCommand ethtool "$nic"
-      EnvCommand ethtool -a "$nic"
-      if [[ -d "$nic_path/device/infiniband" ]]; then
+      if [[ "$net_type" == 1 ]]; then
+        EnvCommand ethtool -a "$nic"
+      fi
+      if [[ "$net_type" == 1 && -d "$nic_path/device/infiniband" ]]; then
+        qos_output=""
         if command -v mlnx_qos >/dev/null 2>&1 &&
            [[ $(readlink "$nic_path/device/driver") == */mlx5_core ]]; then
-          EnvCommand mlnx_qos -i "$nic"
-        elif [[ "$has_dcb" == 0 ]]; then
-          EnvCommand dcb pfc show dev "$nic"
+          qos_output=$(EnvCommand mlnx_qos -i "$nic")
+          printf '%s\n' "$qos_output"
         fi
-        if [[ "$has_dcb" == 1 ]]; then
+        # Fall back only when the complete eight-priority PFC setting is unavailable.
+        if [[ "$qos_output" == *'[unavailable]'* || "$qos_output" == *'[incomplete]'* ]] ||
+           ! printf '%s\n' "$qos_output" | awk '
+             tolower($0) ~ /^pfc configuration:/ { pfc=1; next }
+             pfc && $1 == "priority" { priorities=($0 ~ /0 +1 +2 +3 +4 +5 +6 +7[[:space:]]*$/); next }
+             pfc && $1 == "enabled" && priorities && NF == 9 {
+               valid=1
+               for (i=2; i<=9; i++) if ($i !~ /^[01]$/) valid=0
+               if (valid) found=1
+             }
+             END { exit !found }
+           '; then
           EnvCommand dcb pfc show dev "$nic"
         fi
       fi
     fi
   done
   EnvFiles /proc/net/bonding/*
+  if command -v show_gids >/dev/null 2>&1; then
+    gid_output=$(EnvCommand show_gids)
+    printf '%s\n' "$gid_output"
+    if [[ "$gid_output" != *'[unavailable]'* && "$gid_output" != *'[incomplete]'* ]] &&
+       [[ "$gid_output" =~ [[:space:]][0-9]+[[:space:]]+[0-9]+[[:space:]]+[[:xdigit:]:]+ ]]; then
+      have_gids=1
+    fi
+  fi
   for ib_path in /sys/class/infiniband/*; do
     [[ -e "$ib_path" ]] || continue
     printf '\n--- RDMA device: %s ---\n' "${ib_path##*/}"
@@ -121,17 +160,26 @@ PrintfNetWorkInfo() {
       [[ -d "$port" ]] || continue
       EnvFiles "$port/state" "$port/phys_state" "$port/rate" \
         "$port/link_layer" "$port/active_mtu"
+      [[ "$have_gids" == 1 ]] && continue
+      link_layer=$(cat "$port/link_layer" 2>/dev/null)
       for gid in "$port"/gids/*; do
         [[ -e "$gid" ]] || continue
         IFS= read -r gid_value < "$gid" 2>/dev/null || { echo "[unavailable] cannot read $gid"; continue; }
         # Empty GID slots can number in the hundreds; retain only assigned slots.
         [[ -n "${gid_value//[0:]/}" ]] || continue
-        EnvFiles "$gid" "$port/gid_attrs/types/${gid##*/}" \
-          "$port/gid_attrs/ndevs/${gid##*/}"
+        # IB drivers may expose unassigned slots as fe80:: with a zero interface ID.
+        [[ "$gid_value" == fe80:0000:0000:0000:0000:0000:0000:0000 ]] && continue
+        EnvFiles "$gid" "$port/gid_attrs/types/${gid##*/}"
+        if [[ "$link_layer" != InfiniBand ]]; then
+          EnvFiles "$port/gid_attrs/ndevs/${gid##*/}"
+        fi
       done
     done
   done
   EnvCommand ibv_devinfo
+  if command -v ibstat >/dev/null 2>&1; then
+    EnvCommand ibstat
+  fi
 }
 
 PrintHardwareEnvInfo() {
@@ -253,7 +301,7 @@ PY_ENV_OAM
   done
   echo "=== PCIe tree / ACS evidence / IOMMU / peer-memory modules ==="
   EnvCommand lspci -D -tv
-  EnvCommandFiltered '^[[:xdigit:]]{4}:|Access Control Services|ACSCap:|ACSCtl:|access denied' lspci -D -vvv
+  EnvPciSnapshot
   EnvCommandFiltered '^(Module|amdgpu|hycu|hydcu|hygon|ib_|rdma_|mlx|bnxt|ionic|shca|hns|nvidia_peermem)' lsmod
   EnvFiles /sys/module/amdgpu/parameters/xdp_size \
     /sys/module/hycu/parameters/xdp_size
@@ -353,7 +401,10 @@ def evidence(predicate, wrap=True):
         if body.startswith('[output filter] '):
             pattern, separator, body = body[len('[output filter] '):].partition('\n')
             cmd += ' 2>&1 | grep -E ' + shlex.quote(pattern)
-            labels[cmd] = label
+        elif body.startswith('[output awk] '):
+            program, separator, body = body[len('[output awk] '):].partition('\n')
+            cmd += ' 2>&1 | awk ' + shlex.quote(program)
+        labels[cmd] = label
         if body.startswith('[stdin Python source]\n'):
             code, separator, result = body[len('[stdin Python source]\n'):].partition('\n[end stdin Python source]\n')
             if separator:
@@ -431,8 +482,66 @@ if root==UNKNOWN:
 cmdline=files.get('/proc/cmdline','')
 iommu_params=' '.join(word for word in cmdline.split() if re.match(r'(?:iommu|amd_iommu|intel_iommu|iommu\.[\w]+)=',word))
 iommu_summary=iommu_params or ('未发现 IOMMU 启动参数' if cmdline else UNKNOWN)
-domains=[value for path,value in files.items() if path.endswith('/iommu_group/type')]
-domain_summary=('已读取 {0} 个设备: {1}'.format(len(domains),', '.join(sorted(set(domains))))) if domains else '未取得设备默认域类型'
+acs_output = next((body for _, cmd, body in commands if cmd == 'lspci -D -vvv'), '')
+# Share the global PCI snapshot without mixing other devices into a device block.
+pci_blocks = {}
+for block in re.split(r'(?m)(?=^[0-9a-fA-F]{4}:)', acs_output):
+    match = re.match(r'^([0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7])\s', block)
+    if match:
+        pci_blocks[match[1].lower()] = block
+
+# Device blocks retain the association between sysfs path, PCI evidence and NIC.
+blocks = re.split(r'^--- (GPU |Network interface: |RDMA device: )([^\n]+?) ---\s*$', raw, flags=re.M)
+devices = {'GPU ': [], 'Network interface: ': [], 'RDMA device: ': []}
+for i in range(1, len(blocks), 3):
+    kind, name, text = blocks[i:i+3]
+    text = re.split(r'^=== .+ ===$', text, maxsplit=1, flags=re.M)[0]
+    path = field(text, r'^PCI path: (.+)$')
+    bdf = field(path, r'([0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7])$')
+    def attr(suffix):
+        return field(text, r'^/[^\n:]+/' + re.escape(suffix) + r':\s*([^\n]+)$')
+    devices[kind].append({'name': name, 'text': text, 'path': path, 'bdf': bdf,
+                         'numa': attr('numa_node'), 'speed': attr('current_link_speed'),
+                         'width': attr('current_link_width'), 'max_speed': attr('max_link_speed'),
+                         'max_width': attr('max_link_width')})
+# Read attributes globally as repeated PCI blocks may reference earlier evidence.
+def pci_value(device, suffix):
+    if device['path'] != UNKNOWN:
+        return files.get(device['path']+'/'+suffix, UNKNOWN)
+    return UNKNOWN
+
+gpus = [d for d in devices['GPU '] if not re.search(
+    r'VGA compatible controller:.*(?:ASPEED|Matrox)',
+    pci_blocks.get(d['bdf'].lower(), d['text']), re.I)]
+nics = devices['RDMA device: ']
+# Count only identified GPUs and RDMA NICs, once per PCI BDF.
+domain_targets = {}
+for device in gpus + nics:
+    key = device['bdf'].lower() if device['bdf'] != UNKNOWN else device['name']
+    domain_targets.setdefault(key, device)
+domain_counts = dict.fromkeys(('identity', 'translated', 'no-group', 'unknown'), 0)
+for device in domain_targets.values():
+    value = pci_value(device, 'iommu_group/type').strip()
+    if value == 'identity':
+        state = 'identity'
+    elif value in ('DMA', 'DMA-FQ'):
+        state = 'translated'
+    else:
+        # A repeated PCI block may refer to an earlier network-interface block.
+        evidence_text = '\n'.join(d['text'] for inventory in devices.values() for d in inventory
+                                  if d['path'] == device['path'] and device['path'] != UNKNOWN)
+        state = 'no-group' if 'IOMMU group state: no-group' in evidence_text else 'unknown'
+    domain_counts[state] += 1
+if not domain_targets:
+    domain_summary = '设备默认域未确认；无受检设备'
+elif domain_counts['identity'] == len(domain_targets):
+    domain_summary = '受检设备均为直通（identity）'
+else:
+    domain_summary = '；'.join(str(domain_counts[state])+' 个设备'+label
+                              for state, label in (('identity','为直通（identity）'),
+                                                   ('translated','为地址转换默认域'),
+                                                   ('no-group','未发现 IOMMU 分组'),
+                                                   ('unknown','默认域未确认')) if domain_counts[state])
 acs_output = next((body for _, cmd, body in commands if cmd == 'lspci -D -vvv'), '')
 acs_blocks = re.split(r'(?m)(?=^[0-9a-fA-F]{4}:|^[ \t]+Capabilities:[^\n]*Access Control Services)', acs_output)
 acs_rows=[]
@@ -442,7 +551,8 @@ for body in acs_blocks:
         acs_rows.append((field(body,r'^([0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7])'),control))
 acs_enabled=any(re.search(r'\w+\+',control) for _,control in acs_rows)
 acs_summary=('部分控制位开启' if acs_enabled else '已读取的控制位均未开启') if acs_rows else '未取得可读取的 ACS 控制信息'
-xdp=next(iter(files.get('/sys/module/hycu/parameters/xdp_size',UNKNOWN).splitlines()),UNKNOWN)
+xdp=next((files[path].strip() for path in ('/sys/module/hycu/parameters/xdp_size',
+          '/sys/module/amdgpu/parameters/xdp_size') if path in files),UNKNOWN)
 xdp_state=('ON' if int(xdp)>0 else 'OFF') if xdp.isdigit() else UNKNOWN
 vbios=sorted(set(re.findall(r'(?:HCU|GPU)\[\d+\]\s*:\s*VBIOS version:\s*(\S+)',query('hy-smi','--showvbios'))))
 environment=field(raw,r'^Execution environment:\s*(.+)$')
@@ -483,27 +593,6 @@ acs_row+=''.join('<tr><td>'+esc(label)+'</td><td>'+esc(value)+'</td></tr>' for l
 basic_table=basic_table.replace('</tbody></table>',acs_row+'</tbody></table>',1)
 panel('basic','基础环境信息',basic_table+'<details><summary>基础环境查询命令</summary><h3>'+esc(host)+'</h3>'+basic_queries+file_queries+'</details>')
 
-# Device blocks retain the association between sysfs path, PCI evidence and NIC.
-blocks = re.split(r'^--- (GPU |Network interface: |RDMA device: )([^\n]+?) ---\s*$', raw, flags=re.M)
-devices = {'GPU ': [], 'Network interface: ': [], 'RDMA device: ': []}
-for i in range(1, len(blocks), 3):
-    kind, name, text = blocks[i:i+3]
-    path = field(text, r'^PCI path: (.+)$')
-    bdf = field(path, r'([0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7])$')
-    def attr(suffix):
-        return field(text, r'^/[^\n:]+/' + re.escape(suffix) + r':\s*([^\n]+)$')
-    devices[kind].append({'name': name, 'text': text, 'path': path, 'bdf': bdf,
-                         'numa': attr('numa_node'), 'speed': attr('current_link_speed'),
-                         'width': attr('current_link_width'), 'max_speed': attr('max_link_speed'),
-                         'max_width': attr('max_link_width')})
-# Read attributes globally as repeated PCI blocks may reference earlier evidence.
-def pci_value(device, suffix):
-    if device['path'] != UNKNOWN:
-        return files.get(device['path']+'/'+suffix, UNKNOWN)
-    return UNKNOWN
-
-gpus = [d for d in devices['GPU '] if not re.search(r'VGA compatible controller:.*(?:ASPEED|Matrox)', d['text'], re.I)]
-nics = devices['RDMA device: ']
 clocks = query('hy-smi', '--showclocks')
 clock_data = {}
 for line in clocks.splitlines():
@@ -559,6 +648,12 @@ network_rows=[]
 for d in devices['Network interface: ']:
     text = d['text']
     network_rows.append((d['name'], d['bdf'], pci_value(d,'numa_node'), field(text,r'^driver:\s*(.+)$'), field(text,r'^version:\s*(.+)$'), field(text,r'^firmware-version:\s*(.+)$'),field(text,r'/operstate:\s*(\S+)'),field(text,r'/mtu:\s*(\S+)')))
+ibstat_models={}
+for block in re.split(r"(?m)(?=^CA\s+')",query('ibstat')):
+    hca=field(block,r"^CA\s+'([^']+)'")
+    model=field(block,r'^\s*CA type:\s*(.+)$')
+    if hca!=UNKNOWN and model!=UNKNOWN:
+        ibstat_models[hca]=model
 hca_rows=[]
 for d in nics:
     interface=next((row for row in network_rows if row[1]==d['bdf'] and d['bdf']!=UNKNOWN),None)
@@ -567,7 +662,9 @@ for d in nics:
     module_version=files.get('/sys/module/'+driver+'/version',UNKNOWN)
     if module_version==UNKNOWN and interface:module_version=interface[4]
     pci_text='\n'.join(body for _,cmd,body in commands if cmd.startswith('lspci ') and d['bdf'] in cmd)
-    model=field(pci_text,r'\b(MT\d+)\b')
+    if not pci_text:
+        pci_text=pci_blocks.get(d['bdf'].lower(), '')
+    model=ibstat_models.get(d['name'],field(pci_text,r'\b(MT\d+)\b'))
     hca_rows.append((d['name'],d['bdf'],model,pci_value(d,'numa_node'),driver,module_version,field(d['text'],r'/fw_ver:\s*(.+)$')))
 physical_interfaces=[row for row in network_rows if row[1]!=UNKNOWN]
 virtual_interfaces=[row for row in network_rows if row[1]==UNKNOWN]
@@ -582,7 +679,7 @@ if interfaces:nic_queries+=recipe('接口驱动与固件版本',batch_query(inte
 if modules:nic_queries+=recipe('已加载驱动版本',batch_query(modules,'module','cat "/sys/module/$module/version"'))
 if nics:nic_queries+=recipe('RDMA 固件版本',batch_query([d['name'] for d in nics],'hca','cat "/sys/class/infiniband/$hca/fw_ver"'))
 panel('nic','网卡信息','')
-nic_queries+=evidence(lambda sec,cmd:'Network / RDMA' in sec and ('ethtool -i' in cmd or 'ibv_devinfo' in cmd or cmd.startswith('lspci ')), wrap=False)
+nic_queries+=evidence(lambda sec,cmd:'Network / RDMA' in sec and ('ethtool -i' in cmd or 'ibv_devinfo' in cmd or Path(shlex.split(cmd)[0]).name=='ibstat' or cmd.startswith('lspci ')), wrap=False)
 panel('nic-version','设备与版本',table(['HCA','PCI 地址','型号','NUMA','驱动模块','模块版本','网卡固件版本'],hca_rows)+'<details><summary>查询命令与原始输出</summary>'+nic_queries+'</details>', child=True)
 port_rows=[]
 gid_rows=[]
@@ -599,8 +696,33 @@ for path, value in files.items():
         if gid_type == 'IB/RoCE v1':
             gid_type = {'ethernet': 'RoCE v1', 'infiniband': 'IB'}.get(link_layer, gid_type)
         gid_rows.append((hca,port,index,value,gid_type,files.get(parent+'/gid_attrs/ndevs/'+index,UNKNOWN)))
+show_gid_rows=[]
+gid_output=query('show_gids')
+if '[unavailable]' not in gid_output and '[incomplete]' not in gid_output:
+    for line in gid_output.splitlines():
+        values=line.split()
+        if len(values)<5 or not values[1].isdigit() or not values[2].isdigit() or ':' not in values[3]:
+            continue
+        version=next((i for i in range(4,len(values)) if values[i].lower() in ('v1','v2')),None)
+        if version is None:
+            continue
+        hca,port,index,gid=values[:4]
+        link=files.get('/sys/class/infiniband/'+hca+'/ports/'+port+'/link_layer','').lower()
+        kind='IB' if link=='infiniband' else 'RoCE '+values[version].lower() if link=='ethernet' else UNKNOWN
+        netdev=values[version+1] if len(values)>version+1 else UNKNOWN
+        show_gid_rows.append((hca,port,index,gid,kind,netdev))
+if show_gid_rows:
+    gid_rows=show_gid_rows
+# A single-port HCA with one physical netdev has an unambiguous association.
+for i,row in enumerate(gid_rows):
+    if row[5]!=UNKNOWN:
+        continue
+    device=next((d for d in nics if d['name']==row[0]),None)
+    interfaces=[r[0] for r in physical_interfaces if device and r[1]==device['bdf']]
+    if sum(p[0]==row[0] for p in port_rows)==1 and len(interfaces)==1:
+        gid_rows[i]=row[:5]+(interfaces[0],)
 address_details = evidence(lambda sec, cmd: cmd in ('ip -details address show', 'ifconfig -a'))
-panel('ports','网卡状态','<h3>RDMA 端口</h3>'+table(['HCA','端口','逻辑状态','物理状态','速率','链路类型'],port_rows)+'<h3>物理网卡接口</h3>'+table(['接口','PCI 地址','状态','MTU'],[(r[0],r[1],r[6],r[7]) for r in physical_interfaces])+'<details><summary>虚拟接口及未取得 PCI 关联的接口</summary>'+table(['接口','状态','MTU'],[(r[0],r[6],r[7]) for r in virtual_interfaces])+'</details>' + address_details, child=True)
+panel('ports','网卡状态','<h3>RDMA 端口</h3>'+table(['HCA','端口','逻辑状态','物理状态','速率','链路类型'],port_rows)+'<h3>物理网卡接口</h3>'+table(['接口','HCA','PCI 地址','状态','MTU'],[(r[0], ', '.join(d['name'] for d in nics if d['bdf']!=UNKNOWN and d['bdf'].lower()==r[1].lower()) or '—',r[1],r[6],r[7]) for r in physical_interfaces])+'<details><summary>虚拟接口及未取得 PCI 关联的接口</summary>'+table(['接口','状态','MTU'],[(r[0],r[6],r[7]) for r in virtual_interfaces])+'</details>' + address_details, child=True)
 def parse_pfc(tool, body):
     if '[unavailable]' in body or '[incomplete]' in body:
         return None
@@ -631,6 +753,9 @@ for hca, port, _, _, _, link in port_rows:
     device = next((d for d in nics if d['name'] == hca), None)
     physical = [row[0] for row in physical_interfaces if device and row[1] == device['bdf']]
     candidates = logical or (physical if sum(row[0] == hca for row in port_rows) == 1 and len(physical) == 1 else [])
+    if link.lower() == 'infiniband':
+        pfc_rows.append((hca+'/'+port, ', '.join(logical or candidates) or UNKNOWN, '不适用', '不适用（InfiniBand 链路）'))
+        continue
     queried, statuses = [], []
     for iface in candidates:
         targets = [iface] if iface in pfc_results else physical if len(physical) == 1 else []
@@ -647,11 +772,11 @@ for hca, port, _, _, _, link in port_rows:
                 statuses.append(query_iface+'：'+('开启优先级 '+', '.join(map(str,enabled)) if enabled else '全部关闭（0～7 均 off）'))
             else:
                 statuses.append(query_iface+'：未取得完整优先级配置')
-    state = '不适用（InfiniBand 链路）' if link.lower() == 'infiniband' else '\n'.join(statuses) or '未取得可查询接口'
+    state = '\n'.join(statuses) or '未取得可查询接口'
     pfc_rows.append((hca+'/'+port, ', '.join(logical or candidates) or UNKNOWN, ', '.join(queried) or UNKNOWN, state))
 panel('pfc','PFC 配置',table(['HCA/端口','逻辑接口','查询接口','PFC 状态/优先级'],pfc_rows)+evidence(lambda sec,cmd: cmd.startswith(('mlnx_qos -i ', 'dcb pfc show dev '))), child=True)
 panel('nic-pcie','网卡 PCIe 链路',table(['HCA','PCI 地址','NUMA','当前速率','当前宽度','最大速率','最大宽度'],[(d['name'],d['bdf'],pci_value(d,'numa_node'),pci_value(d,'current_link_speed'),pci_value(d,'current_link_width'),pci_value(d,'max_link_speed'),pci_value(d,'max_link_width')) for d in nics]), child=True)
-panel('gid','GID 信息',table(['HCA','端口','索引','GID','类型','关联网卡'],gid_rows), child=True)
+panel('gid','GID 信息',table(['HCA','端口','索引','GID','类型','关联网卡'],gid_rows)+evidence(lambda sec,cmd:Path(shlex.split(cmd)[0]).name=='show_gids'), child=True)
 bond_rows=[(path,value) for path,value in files.items() if path.startswith('/proc/net/bonding/')]
 panel('bond','bond 状态',table(['配置文件','记录'],bond_rows) + '<p class="muted">完整 bond 参数见原始记录。</p>', child=True)
 
@@ -672,15 +797,27 @@ for command, reason in issues:
     key = (label, item[0], item[1], reason)
     issue_groups[key] = issue_groups.get(key, 0) + 1
 issue_rows = [(*key, count) for key, count in issue_groups.items()]
+config_notices=[]
+if xdp_state=='OFF':
+    config_notices.append(('XDP · 需要注意','XDP 未开启，xdp_size='+xdp+'。'))
+if acs_enabled:
+    enabled_fields=sorted({name for _,control in acs_rows for name in re.findall(r'\b(\w+)\+',control)})
+    config_notices.append(('ACS · 需要注意','存在已开启的 ACS 控制位：'+', '.join(enabled_fields)+'。详见基础环境信息中的 ACS 分项状态。'))
+notice_html=''.join('<div class="notice"><strong>'+esc(title)+'</strong><p>'+esc(message)+'</p></div>' for title,message in config_notices)
 panels[1] = (
     '<section id="issues"><h2>需要关注的事项</h2>'
+    + notice_html
     + (table(['查询命令', '查询内容', '影响或替代来源', '采集提示', '次数'], issue_rows)
-       if issue_rows else '<p>未发现当前检查范围内的问题</p>')
+       if issue_rows else '' if config_notices else '<p>未发现当前检查范围内的问题</p>')
     + '</section>'
 )
 
 overview_note = ('<p>有 {0} 条查询未完成或不可用，见<a href="#issues">需要关注的事项</a>。</p>'.format(len(issues))
-                 if issues else '<p>未发现当前检查范围内的问题</p>')
+                 if issues else '')
+if config_notices:
+    overview_note+='<p>有 '+str(len(config_notices))+' 项环境配置需要关注，见<a href="#issues">需要关注的事项</a>。</p>'
+if not overview_note:
+    overview_note='<p>未发现当前检查范围内的问题</p>'
 panels[0] = (
     '<section id="overview"><h2>采集概览</h2>'
     '<p><span class="badge">环境信息快照</span> 共记录 {0} 次查询。</p>'.format(len(commands))
@@ -762,6 +899,7 @@ page = """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta na
 @media(max-width:900px){.layout{display:block;padding:0 12px}nav{position:static;max-height:none;margin-bottom:20px}.topo{grid-template-columns:1fr;gap:8px}section{padding:16px}header{padding:24px}h1{font-size:24px}}@media print{nav{display:none}.layout{display:block}pre{max-height:none;white-space:pre-wrap}details:not([open]){display:none}}
 
 .topo-row{position:relative}.topo-links{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}.topo-links path{fill:none;stroke:#92acc0;stroke-width:2;stroke-linejoin:round}.topo-links path.inferred{stroke:#c19136;stroke-dasharray:5 4}.topo-row .device.inferred{border-style:dashed;border-color:#c19136}.switch-node small{display:block}.topo-unassigned{display:flex;gap:12px;flex-wrap:wrap}
+.notice{background:#fff8ec;border-left:4px solid #d6a047;padding:14px 18px;margin:12px 0}.notice p{margin:6px 0 0}
 nav a[aria-current="location"]{background:#e7f1fa;border-left-color:#165f9c;color:#165f9c;font-weight:650}
 </style></head><body><header><h1>rocSHMEM 环境信息报告</h1><p>节点：__HOST__　·　采集时间：__STAMP__　·　仅环境采集</p></header><div class="layout"><nav aria-label="报告目录">__NAV__</nav><main>__PANELS__</main></div><script>
 const reportNav=document.querySelector('nav');
