@@ -419,7 +419,7 @@ __device__ void GDAContext::internal_get_broadcastmem_wg_nopxn(void *dst, const 
 
 __device__ void GDAContext::internal_broadcastmem_wg_nopxn(void *dst, const void *src, int nelems, int pe_root,
                                                            int pe_start, int stride, int pe_size,
-                                                           long *p_sync) {  // NOLINT(runtime/int)
+                                                           long *p_sync, GDATeam *ready_team) {  // NOLINT(runtime/int)
   ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
   if (constmem.num_pes < 4) {
     internal_put_broadcastmem_wg(dst, src, nelems, pe_root, pe_start, stride, pe_size, wf_info);
@@ -428,7 +428,8 @@ __device__ void GDAContext::internal_broadcastmem_wg_nopxn(void *dst, const void
   }
 
   // Attempt multi-proxy broadcast for large messages with multiple nodes
-  if (internal_broadcastmem_wg_proxy_nopxn(dst, src, nelems, pe_root, pe_start, stride, pe_size, p_sync, wf_info)) {
+  if (internal_broadcastmem_wg_proxy_nopxn(dst, src, nelems, pe_root, pe_start, stride, pe_size,
+                                         p_sync, wf_info, ready_team)) {
     return;  // Proxy broadcast handled the operation
   }
 
@@ -466,7 +467,7 @@ __device__ void GDAContext::internal_broadcastmem_wg_nopxn(void *dst, const void
 
 __device__ bool GDAContext::internal_broadcastmem_wg_proxy_nopxn(void *dst, const void *src, int nelems, int pe_root,
                                                               int pe_start, int stride, int pe_size, long *p_sync,
-                                                              ActiveWFInfo &wf_info) {  // NOLINT(runtime/int)
+                                                              ActiveWFInfo &wf_info, GDATeam *ready_team) {  // NOLINT(runtime/int)
 
   constexpr size_t MIN_BYTES_PER_PROXY = 64 * 1024;
   const size_t nbytes = static_cast<size_t>(nelems);
@@ -477,6 +478,7 @@ __device__ bool GDAContext::internal_broadcastmem_wg_proxy_nopxn(void *dst, cons
   // out locally.  Restrict this path to complete, contiguous node groups so
   // proxy slot N names the same local GPU/NIC on every node.
   const bool use_proxy_bcast = nbytes >= kHierarchicalMinBytes && stride == 1 && local_shm_size > 1 &&
+                               (!ready_team || local_shm_size <= ROCSHMEM_BARRIER_SYNC_SIZE) &&
                                constmem.ipc_stride == 1 && pe_start % local_shm_size == 0 &&
                                pe_size % local_shm_size == 0 && pe_size > local_shm_size;
   if (!use_proxy_bcast) {
@@ -523,21 +525,123 @@ __device__ bool GDAContext::internal_broadcastmem_wg_proxy_nopxn(void *dst, cons
     }
   }
 
-  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync, wf_info);
-
-  // Assemble the complete result from this node's local proxy buffers.
-  for (int slot = 0; slot < proxies; slot++) {
-    if (slot == local_slot) continue;
-    const size_t begin = static_cast<size_t>(slot) * chunk;
-    if (begin >= nbytes) break;
-    const size_t length = min(chunk, nbytes - begin);
-    const int local_proxy = constmem.ipc_first_pe + slot;
-    internal_getmem_wg(dst_bytes + begin, dst_bytes + begin, length, local_proxy, local_proxy, wf_info);
+  const BroadcastFanout fanout{dst_bytes, nbytes, chunk, proxies, local_slot};
+  const bool used_ready = try_broadcast_ready_fanout_wg_nopxn(fanout, ready_team, pe_size, wf_info);
+  if (!used_ready) {
+    // Internal collectives keep their caller-owned pSync and original fan-out.
+    internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync, wf_info);
+    for (int slot = 0; slot < proxies; slot++) {
+      if (slot == local_slot) continue;
+      const size_t begin = static_cast<size_t>(slot) * chunk;
+      if (begin >= nbytes) break;
+      const size_t length = min(chunk, nbytes - begin);
+      const int local_proxy = constmem.ipc_first_pe + slot;
+      internal_getmem_wg(dst_bytes + begin, dst_bytes + begin, length, local_proxy, local_proxy, wf_info);
+    }
   }
 
   internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync, wf_info);
+  if (used_ready) {
+    if (is_thread_zero_in_block()) ++ready_team->bcast_sequence_number;
+    __syncthreads();
+  }
 
   return true;  // Proxy broadcast completed successfully
+}
+
+__device__ bool GDAContext::try_broadcast_ready_fanout_wg_nopxn(const BroadcastFanout &fanout,
+    GDATeam *ready_team, int pe_size, ActiveWFInfo &wf_info) {
+  if (constmem.pxn_enabled || !ready_team || !ready_team->bcast_ready) return false;
+
+  long *ready = ready_team->bcast_ready;
+  const long epoch = static_cast<long>(ready_team->bcast_sequence_number % INT64_MAX) + 1;
+  if (fanout.local_slot < fanout.proxies) {
+    // All staging writers and the thread waiting on GET completion precede publication.
+    __syncthreads();
+    if (is_thread_zero_in_block()) {
+      __threadfence_system();
+      __hip_atomic_store(&ready[fanout.local_slot], epoch, __ATOMIC_RELEASE,
+                         __HIP_MEMORY_SCOPE_SYSTEM);
+    }
+    __syncthreads();
+  }
+
+  constexpr size_t wave_fanout_min_bytes = 512 * 1024;
+  if (fanout.nbytes < wave_fanout_min_bytes && fanout.proxies <= 64 &&
+      pe_size < ROCSHMEM_BCAST_SYNC_SIZE) {
+    broadcast_gather_ready_segments_wg_nopxn(fanout, ready, epoch, wf_info);
+  } else {
+    broadcast_gather_ready_segments_wave_nopxn(fanout, ready, epoch);
+  }
+  return true;
+}
+
+__device__ void GDAContext::broadcast_gather_ready_segments_wg_nopxn(const BroadcastFanout &fanout,
+    long *ready, long epoch, ActiveWFInfo &wf_info) {
+  // This control value belongs to the WG, never to any collective's pSync.
+  __shared__ int selected_slot;
+  uint64_t pending = fanout.proxies == 64 ? ~uint64_t{0} : (uint64_t{1} << fanout.proxies) - 1;
+  if (fanout.local_slot < fanout.proxies) pending &= ~(uint64_t{1} << fanout.local_slot);
+
+  int scan_start = 0;
+  while (pending) {
+    if (is_thread_zero_in_block()) {
+      int slot = scan_start;
+      for (;;) {
+        if (pending & (uint64_t{1} << slot)) {
+          // Proxy admission guarantees that contiguous IPC slots name these owners.
+          auto *flag = reinterpret_cast<long *>(get_local_ptr(&ready[slot], slot));
+          if (__hip_atomic_load(flag, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM) == epoch) break;
+        }
+        if (++slot == fanout.proxies) slot = 0;
+      }
+      selected_slot = slot;
+    }
+    __syncthreads();
+    const int slot = selected_slot;
+    const size_t begin = static_cast<size_t>(slot) * fanout.chunk;
+    char *segment = fanout.dst + begin;
+    const int peer = constmem.ipc_first_pe + slot;
+    internal_getmem_wg(segment, segment, min(fanout.chunk, fanout.nbytes - begin), peer, peer, wf_info);
+    pending &= ~(uint64_t{1} << slot);
+    scan_start = (slot + 1 == fanout.proxies) ? 0 : slot + 1;
+    __syncthreads();
+  }
+}
+
+__device__ void GDAContext::broadcast_gather_ready_segments_wave_nopxn(const BroadcastFanout &fanout,
+    long *ready, long epoch) {
+  constexpr int max_ipc_waves = 8;
+  const int tid = get_flat_block_id();
+  const int lane = tid % warpSize;
+  // ipcCopy_wave indexes lanes using WF_SIZE; mismatches use a uniform WG copy.
+  const bool wave_copy = warpSize == WF_SIZE;
+  const int group = wave_copy ? tid / WF_SIZE : 0;
+  const int available_waves = (get_flat_block_size() + WF_SIZE - 1) / WF_SIZE;
+  const int groups = wave_copy ? min(max_ipc_waves, available_waves) : 1;
+  if (group < groups) {
+    for (int slot = group; slot < fanout.proxies; slot += groups) {
+      if (slot == fanout.local_slot) continue;
+      auto *flag = reinterpret_cast<long *>(get_local_ptr(&ready[slot], slot));
+      int arrived = 0;
+      do {
+        if (lane == 0) {
+          arrived = __hip_atomic_load(flag, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM) == epoch;
+        }
+      } while (!__shfl(arrived, 0));
+
+      const size_t begin = static_cast<size_t>(slot) * fanout.chunk;
+      char *segment = fanout.dst + begin;
+      char *source = get_local_ptr(segment, slot);
+      const size_t length = min(fanout.chunk, fanout.nbytes - begin);
+      if (wave_copy) {
+        ipcImpl_.ipcCopy_wave<MemcpyKind::GetBlocking>(segment, source, length, slot);
+      } else {
+        ipcImpl_.ipcCopy_wg<MemcpyKind::GetBlocking>(segment, source, length, slot);
+      }
+    }
+  }
+  __syncthreads();
 }
 
 __device__ void GDAContext::broadcastmem_wg_das(rocshmem_team_t team, void *dst, const void *src, int nelems,
@@ -577,7 +681,8 @@ __device__ void GDAContext::broadcastmem_wg_das(rocshmem_team_t team, void *dst,
     return;
   }
 
-  internal_broadcastmem_wg_nopxn(dst, src, nelems, root, info->pe_start, info->stride, team_obj->num_pes, p_sync);
+  internal_broadcastmem_wg_nopxn(dst, src, nelems, root, info->pe_start, info->stride,
+                                team_obj->num_pes, p_sync, team_obj);
 }
 
 __device__ void GDAContext::internal_broadcastmem_wg_das(void *dst, const void *src, int nelems, int pe_root,

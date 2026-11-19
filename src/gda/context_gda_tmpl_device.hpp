@@ -1107,10 +1107,8 @@ template <typename T>
 __device__ void GDAContext::broadcast_wg(rocshmem_team_t team, T *dst,
     const T *src, int nelems, int pe_root) {
 #if defined(USE_DAS)
-  if (constmem.pxn_enabled) {
-    // Typed and byte APIs must share the same team route and epoch handling.
-    return broadcastmem_wg_das(team, dst, src, nelems * sizeof(T), pe_root);
-  }
+  // Ordinary typed and byte broadcasts share routing and non-PXN ready state.
+  return broadcastmem_wg_das(team, dst, src, nelems * sizeof(T), pe_root);
 #endif
 
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);

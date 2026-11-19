@@ -63,6 +63,11 @@ class GDATeam : public Team {
   // epochs have algorithm-dependent strides and must not drive round-robin turns.
   // Concurrent operations must use distinct teams, as required by pWrk/pSync.
   uint64_t proxy_data_route_sequence = 0;
+#if defined(USE_DAS)
+  // Only ordinary non-PXN WG broadcasts consume this ready state.
+  long *bcast_ready{nullptr};
+  uint64_t bcast_sequence_number = 0;
+#endif
 };
 
 }  // namespace rocshmem
