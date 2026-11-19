@@ -148,7 +148,8 @@ __device__ void GDAContext::fcollect_wg_das(rocshmem_team_t team, T *dst, const 
     // sending the same source segment independently to every remote PE.
     for (int rank = 0; rank < pe_size; rank++) {
       const int root = team_obj->get_pe_in_world(rank);
-      internal_broadcastmem_wg_das(dst + rank * nelems + elem_offset, src + elem_offset, elem_count * sizeof(T),
+      internal_broadcastmem_wg_das(dst + static_cast<size_t>(rank) * nelems + elem_offset, src + elem_offset,
+                                   elem_count * sizeof(T),
                                    root, pe_start, stride, pe_size, pSync, team_obj);
     }
     return;
