@@ -176,7 +176,7 @@ namespace envvar {
     const var<int> num_threads_on_stream("NUM_THREADS_ON_STREAM",
       "Thread limit for single-workgroup on-stream collectives and block size "
       "for multi-workgroup collectives. Must be positive, wavefront-aligned and within kernel/device limits",
-      256);
+      512);
     const var<size_t> max_symm_regions("MAX_SYMM_REGIONS",
       "Maximum number of symmetric user buffers an application can register "
       "with rocshmem_buffer_register_symmetric. The default value is 4",

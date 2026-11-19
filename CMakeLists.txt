@@ -132,6 +132,15 @@ if (ASAN)
   message(STATUS "ASAN runtime directory: ${ASAN_RUNTIME_DIR}")
 endif()
 
+set(ROCSHMEM_MAX_BLOCK_THREADS "512" CACHE STRING
+    "Default HIP kernel launch bound in threads per block (empty uses the compiler default)")
+
+if(NOT ROCSHMEM_MAX_BLOCK_THREADS STREQUAL "")
+  add_compile_options(
+    "--gpu-max-threads-per-block=${ROCSHMEM_MAX_BLOCK_THREADS}"
+  )
+endif()
+
 find_package(ROCM PATHS ${ROCM_PATH})
 set(ROCMCHECKS_WARN_TOOLCHAIN_VAR OFF)
 # QUIET: DTK merges ROCmCMakeBuildTools modules into the ROCm package itself,
