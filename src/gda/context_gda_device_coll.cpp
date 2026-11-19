@@ -151,6 +151,12 @@ __device__ void GDAContext::internal_atomic_barrier(int pe, int PE_start,
 
 __device__ void GDAContext::internal_sync(int pe, int PE_start, int stride,
     int PE_size, int64_t *pSync, ActiveWFInfo &wf_info) {
+#if defined(USE_DAS)
+  if (internal_try_sync_range_pxn(PE_start, stride, PE_size, pSync, ThreadScope::thread)) {
+    return;
+  }
+#endif
+
   if (PE_size < 64) {
     internal_direct_barrier(pe, PE_start, stride, PE_size, pSync, wf_info);
   } else {
@@ -160,6 +166,12 @@ __device__ void GDAContext::internal_sync(int pe, int PE_start, int stride,
 
 __device__ void GDAContext::internal_sync_wave(int pe, int PE_start,
     int stride, int PE_size, int64_t *pSync, ActiveWFInfo &wf_info) {
+#if defined(USE_DAS)
+  if (internal_try_sync_range_pxn(PE_start, stride, PE_size, pSync, ThreadScope::wave)) {
+    return;
+  }
+#endif
+
   if (is_thread_zero_in_wave()) {
     if (PE_size < 64) {
       internal_direct_barrier(pe, PE_start, stride, PE_size, pSync, wf_info);
@@ -171,6 +183,12 @@ __device__ void GDAContext::internal_sync_wave(int pe, int PE_start,
 
 __device__ void GDAContext::internal_sync_wg(int pe, int PE_start, int stride,
     int PE_size, int64_t *pSync, ActiveWFInfo &wf_info) {
+#if defined(USE_DAS)
+  if (internal_try_sync_range_pxn(PE_start, stride, PE_size, pSync, ThreadScope::wg)) {
+    return;
+  }
+#endif
+
   __syncthreads();
   if (PE_size < 64) {
     internal_direct_barrier_wg(pe, PE_start, stride, PE_size, pSync, wf_info);
@@ -193,6 +211,11 @@ __device__ void GDAContext::sync(rocshmem_team_t team) {
   long *p_sync = team_obj->barrier_pSync;
 
   ActiveWFInfo wf_info(ctx_id_);
+#if defined(USE_DAS)
+  if (internal_try_sync_pxn(team_obj, p_sync, ThreadScope::thread)) {
+    return;
+  }
+#endif
   internal_sync(pe, pe_start, pe_stride, pe_size, p_sync, wf_info);
 }
 
@@ -206,6 +229,11 @@ __device__ void GDAContext::sync_wave(rocshmem_team_t team) {
   long *p_sync = team_obj->barrier_pSync;
 
   ActiveWFInfo wf_info(ctx_id_, ThreadScope::wave);
+#if defined(USE_DAS)
+  if (internal_try_sync_pxn(team_obj, p_sync, ThreadScope::wave)) {
+    return;
+  }
+#endif
   internal_sync_wave(pe, pe_start, pe_stride, pe_size, p_sync, wf_info);
 }
 
@@ -219,6 +247,11 @@ __device__ void GDAContext::sync_wg(rocshmem_team_t team) {
   long *p_sync = team_obj->barrier_pSync;
 
   ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
+#if defined(USE_DAS)
+  if (internal_try_sync_pxn(team_obj, p_sync, ThreadScope::wg)) {
+    return;
+  }
+#endif
   internal_sync_wg(pe, pe_start, pe_stride, pe_size, p_sync, wf_info);
 }
 
@@ -266,6 +299,11 @@ __device__ void GDAContext::barrier(rocshmem_team_t team) {
 
   ActiveWFInfo wf_info(ctx_id_);
   internal_quiet(wf_info);
+#if defined(USE_DAS)
+  if (internal_try_sync_pxn(team_obj, p_sync, ThreadScope::thread)) {
+    return;
+  }
+#endif
   internal_sync(pe, pe_start, pe_stride, pe_size, p_sync, wf_info);
 }
 
@@ -280,6 +318,11 @@ __device__ void GDAContext::barrier_wave(rocshmem_team_t team) {
 
   ActiveWFInfo wf_info(ctx_id_, ThreadScope::wave);
   internal_quiet(wf_info);
+#if defined(USE_DAS)
+  if (internal_try_sync_pxn(team_obj, p_sync, ThreadScope::wave)) {
+    return;
+  }
+#endif
   internal_sync_wave(pe, pe_start, pe_stride, pe_size, p_sync, wf_info);
 }
 
@@ -296,6 +339,11 @@ __device__ void GDAContext::barrier_wg(rocshmem_team_t team) {
   if (is_thread_zero_in_block()) {
     internal_quiet(wf_info);
   }
+#if defined(USE_DAS)
+  if (internal_try_sync_pxn(team_obj, p_sync, ThreadScope::wg)) {
+    return;
+  }
+#endif
   internal_sync_wg(pe, pe_start, pe_stride, pe_size, p_sync, wf_info);
   __syncthreads();
 }
@@ -330,6 +378,11 @@ __device__ int GDAContext::broadcastmem_wave(rocshmem_team_t team, void *dest,
     team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
 
+#if defined(USE_DAS)
+  if (broadcastmem_wave_pxn(team, dest, source, nelems, PE_root)) {
+    return ROCSHMEM_SUCCESS;
+  }
+#endif
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
 
   int stride = team_obj->tinfo_wrt_world->stride;
@@ -493,6 +546,11 @@ __device__ int GDAContext::alltoallmem_wave(rocshmem_team_t team,
   if (dest == nullptr || source == nullptr)
     return ROCSHMEM_ERROR;
 
+#if defined(USE_DAS)
+  if (alltoallmem_wave_pxn(team, dest, source, nelems)) {
+    return ROCSHMEM_SUCCESS;
+  }
+#endif
   alltoallmem_linear_thread_puts_wave(team, dest, source, nelems);
 
   return ROCSHMEM_SUCCESS;
@@ -624,6 +682,11 @@ __device__ int GDAContext::fcollectmem_wave(rocshmem_team_t team, void *dst,
   if (dst == nullptr || src == nullptr || team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
 
+#if defined(USE_DAS)
+  if (fcollectmem_wave_pxn(team, dst, src, nelems)) {
+    return ROCSHMEM_SUCCESS;
+  }
+#endif
   fcollectmem_linear_wave(team, dst, src, nelems);
 
   return ROCSHMEM_SUCCESS;

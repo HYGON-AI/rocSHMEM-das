@@ -153,6 +153,9 @@ namespace envvar {
       "Comma separated list of NIC names that can be used by rocSHMEM. Unlike ROCSHMEM_USE_IB_HCA, when this variable is set, NIC auto-detection and mapping still executes, but NICs that are not in the list are discarded before auto-detection runs. Prefixing the list with ^ turns the list in an exclude list, NICs that are in the list are discarded before auto-detection runs. The default value is an empty string and rocSHMEM auto-detects the most appropriate NIC. Example value: bnxt_re1,bnxt_re11, ^mlx5_0,mlx5_3");
     const var<std::string> requested_nic("USE_IB_HCA",
       "Forces the NIC that this PE uses. When this value is set NIC auto-detection and mapping is disabled, the NIC specified in the variable will be selected. The default value is an empty string and rocSHMEM auto-detects the most appropriate NIC. Example value: bnxt_re0");
+    const var<bool> disable_pxn("DISABLE_PXN",
+      "Disable same-NIC proxy routing for GDA collectives. 0: enable PXN; 1: disable PXN",
+      true);
     const var<bool> disable_mixed_ipc("DISABLE_MIXED_IPC",
       "Defines whether to force using the network conduit even when IPC is available. 0: Use IPC when available; 1: Force network conduit",
       false);

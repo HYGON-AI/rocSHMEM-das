@@ -32,6 +32,10 @@
 #include "context_gda_device.hpp"
 #include "context_gda_tmpl_device.hpp"
 
+#if defined(USE_DAS)
+#include "gda/proxy/sync_device.hpp"
+#endif
+
 namespace rocshmem {
 
 __host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id)

@@ -44,22 +44,22 @@ class GDAContext : public Context {
       void *dst, const void *src, int nelems, int pe_root, ActiveWFInfo &wf_info);
 
   template <typename T>
-  __device__ void alltoall_wg_das(rocshmem_team_t team, T *dest, const T *source,
+  __device__ __noinline__ void alltoall_wg_das(rocshmem_team_t team, T *dest, const T *source,
                            int nelems, int elem_offset = 0,
                            int elem_count = -1);
 
   template <typename T>
-  __device__ void alltoall_linear_wg_das(rocshmem_team_t team, T *dest,
+  __device__ __noinline__ void alltoall_linear_wg_nopxn(rocshmem_team_t team, T *dest,
     const T *source, int nelems, int elem_offset = 0, int elem_count = -1);
 
   template <typename T>
-  __device__ void alltoall_linear_thread_puts_das(rocshmem_team_t team, T *dest,
+  __device__ void alltoall_linear_thread_puts_nopxn(rocshmem_team_t team, T *dest,
                                               const T *source, int nelems,
                                               int elem_offset = 0,
                                               int elem_count = -1);
 
   template <typename T>
-  __device__ void alltoallv_das(rocshmem_team_t team,
+  __device__ __noinline__ void alltoallv_das(rocshmem_team_t team,
                             T *dest, const size_t dest_nelems[],
                             const size_t dest_displs[],
                             T *source, const size_t source_nelems[],
@@ -67,7 +67,7 @@ class GDAContext : public Context {
                             int wg_count = 1);
 
   template <typename T>
-  __device__ void alltoallv_copy_das(rocshmem_team_t team,
+  __device__ __noinline__ void alltoallv_copy_nopxn(rocshmem_team_t team,
                                  T *dest, const size_t dest_nelems[],
                                  const size_t dest_displs[],
                                  T *source, const size_t source_nelems[],
@@ -75,7 +75,7 @@ class GDAContext : public Context {
                                  int wg_count);
 
   template <typename T>
-  __device__ void alltoallv_get_das(rocshmem_team_t team,
+  __device__ __noinline__ void alltoallv_get_nopxn(rocshmem_team_t team,
                                 T *dest, const size_t dest_nelems[],
                                 const size_t dest_displs[],
                                 T *source, const size_t source_nelems[],
@@ -86,11 +86,11 @@ class GDAContext : public Context {
                                   int nelement, int PE_root);
 
   template <typename T>
-  __device__ void fcollect_linear_das(rocshmem_team_t team, T *dest,
+  __device__ void fcollect_wg_das(rocshmem_team_t team, T *dest,
       const T *source, int nelems, int elem_offset, int elem_count);
 
   __device__ void internal_broadcastmem_wg_das(void *dest, const void *source, int nelems,
-      int pe_root, int pe_start, int stride, int pe_size, long *p_sync);
+      int pe_root, int pe_start, int stride, int pe_size, long *p_sync, GDATeam *team_obj = nullptr);
 
   template <typename T, ROCSHMEM_OP Op>
   __device__ void internal_ring_allreduce_das(T *dst, const T *src, int nelems,
@@ -98,16 +98,12 @@ class GDAContext : public Context {
       ActiveWFInfo &wf_info);
 
   template <typename T, ROCSHMEM_OP Op>
-  __device__ void internal_proxy_allreduce(T *dst, const T *src, int nelems,
-      GDATeam *team_obj, ActiveWFInfo &wf_info);
-
-  template <typename T, ROCSHMEM_OP Op>
   __device__ void internal_fused_ipc_reduce(T *dst, const T *src,
       int source_offset, int count, int local_size, int local_slot,
       int wg_id, int wg_size);
 
   template <typename T, ROCSHMEM_OP Op>
-  __device__ int reduce_das(rocshmem_team_t team, T *dest, const T *source, int nreduce);
+  __device__ int reduce_wg_das(rocshmem_team_t team, T *dest, const T *source, int nreduce);
 
   template <typename T, ROCSHMEM_OP Op>
   __device__ int reduce_scatter_wg_das(rocshmem_team_t team, T *dest, const T *source,
@@ -115,7 +111,7 @@ class GDAContext : public Context {
                                    int elem_count = -1);
 
   template <typename T, ROCSHMEM_OP Op>
-  __device__ int hybrid_reduce_scatter_wg(GDATeam *team_obj, T *dest, const T *source,
+  __device__ int hybrid_reduce_scatter_wg_nopxn(GDATeam *team_obj, T *dest, const T *source,
                                           int nreduce, int elem_offset,
                                           int elem_count, int PE_start, int stride,
                                           int PE_size, int team_rank);
@@ -401,6 +397,148 @@ class GDAContext : public Context {
 
  private:
 
+#if defined(USE_DAS)
+  // Collective algorithms live in collectives/; proxy/ supplies routing mechanisms.
+  // Proxy route plans and synchronization adapters are defined in their proxy headers.
+  // Original unrestricted broadcast path; PXN routing must not affect it.
+  __device__ void internal_get_broadcastmem_wg_nopxn(void *dst, const void *src,
+      int nelems, int pe_root, ActiveWFInfo &wf_info);
+  __device__ void internal_broadcastmem_wg_nopxn(void *dst, const void *src,
+      int nelems, int pe_root, int pe_start, int stride, int pe_size, long *p_sync);
+  __device__ bool internal_broadcastmem_wg_proxy_nopxn(void *dst, const void *src,
+      int nelems, int pe_root, int pe_start, int stride, int pe_size,
+      long *p_sync, ActiveWFInfo &wf_info);
+
+  __device__ __noinline__ void internal_proxy_putmem_wg(void *dst, const void *src, size_t bytes,
+      int peer, int qp_row, ActiveWFInfo &wf_info);
+  __device__ void internal_proxy_getmem_wg(void *dst, const void *src, size_t bytes,
+      int peer, int qp_row, ActiveWFInfo &wf_info);
+
+  __device__ __noinline__ void internal_proxy_sync_wave(GDATeam *team_obj, int64_t *p_sync,
+      ActiveWFInfo &wf_info, int64_t epoch);
+  __device__ __noinline__ bool internal_broadcastmem_wave_pxn(GDATeam *team_obj, void *dst, const void *src,
+      size_t bytes, int root, int64_t *p_sync, ActiveWFInfo &wf_info, int64_t &epoch);
+  __device__ bool broadcastmem_wave_pxn(rocshmem_team_t team, void *dst,
+      const void *src, int bytes, int root);
+  __device__ bool fcollectmem_wave_pxn(rocshmem_team_t team, void *dst,
+      const void *src, int bytes);
+  __device__ bool alltoallmem_wave_pxn(rocshmem_team_t team, void *dst,
+      const void *src, int bytes);
+  template <typename T, ROCSHMEM_OP Op, bool ReduceScatter>
+  __device__ bool reduce_wave_pxn(rocshmem_team_t team, T *dst,
+      const T *src, int nelems);
+
+  template <ThreadScope Scope>
+  __device__ __noinline__ bool internal_try_sync_scope_pxn(GDATeam *team_obj, int64_t *p_sync);
+
+  __device__ bool internal_try_sync_pxn(GDATeam *team_obj, int64_t *p_sync, ThreadScope scope);
+  __device__ bool internal_try_sync_range_pxn(int pe_start, int stride, int pe_size,
+      int64_t *p_sync, ThreadScope scope);
+  __device__ void internal_world_proxy_sync_thread(int pe, int pe_size, int64_t *p_sync,
+      ActiveWFInfo &wf_info, int64_t epoch, int proxy_qp_row);
+  __device__ void internal_team_proxy_sync_thread(GDATeam *team_obj, int64_t *p_sync,
+      ActiveWFInfo &wf_info, int64_t epoch);
+
+  __device__ void internal_require_pxn_route(GDATeam *team, int pe_start,
+                                             int stride, int pe_size,
+                                             const char *operation);
+
+  template <typename TryProxy>
+  __device__ bool internal_try_collective_pxn(GDATeam *team, int pe_start, int stride, int pe_size,
+                                              const char *operation, TryProxy try_proxy);
+
+  template <typename T>
+  __device__ __noinline__ void internal_broadcast_wg(T *dest, const T *source, int nelems,
+      int pe_root, int pe_start, int stride, int pe_size, long *p_sync,
+      int64_t proxy_epoch_base = 1,
+      int proxy_qp_row = -1,
+      GDATeam *team_obj = nullptr);
+
+  __device__ __noinline__ const int *internal_build_collective_proxy_plan_wg(
+      GDATeam *team_obj, uint64_t operation);
+
+  __device__ __noinline__ const int *internal_build_reduction_proxy_plan_wg(
+      GDATeam *team_obj, uint64_t operation, int requested_lanes, int &lanes);
+
+  __device__ __noinline__ int *internal_build_alltoall_routes_wg(GDATeam *team_obj,
+      int source_ipc_domain_first_pe);
+
+  __device__ __noinline__ bool internal_broadcastmem_wg_pxn(GDATeam *team_obj,
+      void *dst, const void *src, size_t bytes, int pe_root, int pe_start, int stride,
+      int pe_size, long *p_sync, ActiveWFInfo &wf_info, int64_t epoch, int qp_row);
+
+  template <typename T>
+  __device__ __noinline__ bool internal_broadcast_wg_pxn(GDATeam *team_obj, T *dst, const T *src, int nelems, int pe_root,
+      int pe_start, int stride, int pe_size, long *p_sync,
+      ActiveWFInfo &wf_info, int64_t proxy_epoch_base,
+      int proxy_qp_row);
+
+  template <typename T>
+  __device__ void internal_fcollect_wg_ipc_domain_pxn(GDATeam *team_obj, T *dst, const T *src, int nelems,
+      int elem_offset, int elem_count);
+
+  template <typename T>
+  __device__ void internal_alltoall_wg_rows_pxn(GDATeam *team_obj, T *dst, const T *src, int nelems,
+      int elem_offset, int elem_count);
+
+  template <typename T>
+  __device__ bool internal_alltoall_wg_pxn(GDATeam *team_obj, T *dst, const T *src, int nelems,
+      int elem_offset, int elem_count, ActiveWFInfo &wf_info);
+
+  // ReduceScatter=false serves allreduce; ReduceScatter=true serves reduce_scatter.
+  template <typename T, ROCSHMEM_OP Op, bool ReduceScatter>
+  __device__ __noinline__ void internal_reduce_wg_ipc_domain_pxn(GDATeam *team_obj, T *dest, const T *source, int nelems, int elem_offset = 0, int elem_count = -1);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ bool internal_try_reduce_wg_proxy(GDATeam *team_obj, T *dest, const T *source, int nelems,
+      ActiveWFInfo &wf_info);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ bool internal_try_reduce_scatter_wg_proxy(GDATeam *team_obj, T *dest, const T *source, int nelems, int elem_offset = 0, int elem_count = -1);
+
+  // WORLD alltoallv: collectively check layout, then use alltoall or packed rows.
+  struct ProxyAlltoallvLayout {
+    size_t count;
+    int64_t next_epoch;
+    bool uniform;
+  };
+
+  __device__ inline __noinline__ void internal_alltoallv_wg_world_proxy_check_uniform_layout_pxn(GDATeam *team_obj,
+      const size_t dest_nelems[], const size_t dest_displs[], const size_t source_nelems[],
+      const size_t source_displs[], ActiveWFInfo &wf_info, int64_t epoch, ProxyAlltoallvLayout *layout);
+
+  template <typename T>
+  __device__ __noinline__ int64_t internal_alltoallv_wg_world_proxy_packed_rows_pxn(GDATeam *team_obj, T *dest,
+      const size_t dest_nelems[], const size_t dest_displs[], T *source, const size_t source_nelems[],
+      const size_t source_displs[], int wg_id, int wg_count, ActiveWFInfo &wf_info, int64_t epoch);
+
+  template <typename T>
+  __device__ __noinline__ void internal_alltoallv_wg_world_proxy_pxn(GDATeam *team_obj, T *dest, const size_t dest_nelems[],
+      const size_t dest_displs[], T *source, const size_t source_nelems[],
+      const size_t source_displs[], int wg_id = 0, int wg_count = 1);
+
+  template <typename T>
+  __device__ __noinline__ void internal_alltoall_wg_routed_world_proxy_pxn(GDATeam *team_obj, T *dest, const T *source, int nelems,
+      int elem_offset, int elem_count, ActiveWFInfo &wf_info);
+
+  __device__ __noinline__ void internal_world_proxy_sync_wg(int pe, int PE_size,
+      int64_t *pSync, ActiveWFInfo &wf_info, int64_t epoch = 1,
+      int proxy_qp_row = -1);
+
+  __device__ __noinline__ void internal_team_proxy_sync_wg(GDATeam *team_obj,
+      int64_t *pSync, ActiveWFInfo &wf_info, int64_t epoch);
+
+  __device__ void internal_proxy_sync_wg(GDATeam *team_obj,
+      int64_t *pSync, ActiveWFInfo &wf_info, int64_t epoch);
+
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ __noinline__ void internal_reduce_wg_proxy_nopxn(T *dst, const T *src,
+      int nelems, GDATeam *team_obj, ActiveWFInfo &wf_info);
+#endif
+
+
+#if defined(USE_DAS)
   static constexpr size_t kHierarchicalMinBytes = 256 * 1024;  // 256 KB: minimum size for hierarchical/proxy algorithms
   struct CollectiveChunkPolicy {
     size_t max_bytes;
@@ -414,7 +552,8 @@ class GDAContext : public Context {
 
   template <typename T>
   __device__ __forceinline__ static int collective_chunk_elems(
-      int capacity, CollectiveChunkPolicy policy, bool inter_node = true);
+      int capacity, CollectiveChunkPolicy policy, bool uses_network = true);
+#endif  // USE_DAS
 
   //internal functions used by collective operations
   __device__ void internal_broadcastmem_wg(void *dest, const void *source, int nelems,
@@ -430,10 +569,6 @@ class GDAContext : public Context {
   template <typename T>
   __device__ void internal_broadcast_wave(T *dest, const T *source, int nelems,
       int pe_root, int pe_start, int stride, int pe_size, long *p_sync);  // NOLINT(runtime/int)
-
-  __device__ bool internal_proxy_broadcast(void *dst, const void *src, int nelems,
-      int pe_root, int pe_start, int stride, int pe_size, long *p_sync,
-      ActiveWFInfo &wf_info);  // NOLINT(runtime/int)
 
   template <typename T>
   __device__ void internal_put_broadcast_wave(T *dst, const T *src, int nelems,
@@ -704,8 +839,10 @@ class GDAContext : public Context {
    */
   __device__ __forceinline__ uint32_t get_qp_index(int pe, ActiveWFInfo wf_info);
 
+#if defined(USE_DAS)
   __device__ __forceinline__ uint32_t get_team_qp_index(
       const GDATeam *team_obj, int pe);
+#endif  // USE_DAS
 
   //Temporary scratchpad memory used by internal barrier algorithms.
   int64_t *barrier_sync{nullptr};

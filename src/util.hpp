@@ -637,6 +637,10 @@ template <MemcpyKind Kind = MemcpyKind::Put>
 
   
   for (int j = 16; j >= 1; j >>= 1) {
+    // Typed vector loads/stores require both addresses to match the copy width.
+    if ((reinterpret_cast<uintptr_t>(dst_def) | reinterpret_cast<uintptr_t>(src_def)) & (j - 1)) {
+      continue;
+    }
     cpy_size = size / j;
     for (int i = thread_id; i < cpy_size; i += block_size) {
       dst_bytes = dst_def;
@@ -674,6 +678,10 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   src_bytes = src_def;
 
   for (int j = 16; j >= 1; j >>= 1) {
+    // Typed vector loads/stores require both addresses to match the copy width.
+    if ((reinterpret_cast<uintptr_t>(dst_def) | reinterpret_cast<uintptr_t>(src_def)) & (j - 1)) {
+      continue;
+    }
     cpy_size = size / j;
     for (int i = wave_tid; i < cpy_size; i += wave_size) {
       dst_bytes = dst_def;

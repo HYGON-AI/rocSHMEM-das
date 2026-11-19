@@ -163,7 +163,7 @@ if(USE_GDA)
   list(APPEND BITCODE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/context_gda_device.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/context_gda_device_coll.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/context_gda_device_coll_das.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/collectives/broadcast_device.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/backend_gda.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/queue_pair.cpp
   )

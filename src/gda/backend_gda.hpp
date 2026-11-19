@@ -27,6 +27,10 @@
 
 #include <dlfcn.h>
 #include <map>
+#include "gda/proxy/candidate.hpp"
+#include "gda/proxy/layout.hpp"
+#include "gda/proxy/route_plan_host.hpp"
+#include <map>
 #include <vector>
 #include "ibv_core.hpp"
 #include "gda/nic_policy.hpp"
@@ -148,6 +152,7 @@ class GDABackend : public Backend {
 
   std::vector<NicDevice> nic_devices_;
   int num_nics_{0};
+  proxy::ProxyRoutingState proxy_routing_state_;
 
   uint32_t inline_threshold = 8;
   QueuePair *host_qps = nullptr;
@@ -223,6 +228,24 @@ class GDABackend : public Backend {
 
  public:
   GDAProvider get_gda_provider() const { return gda_provider; }
+  bool world_proxy_sync_available() const {
+    return proxy_routing_state_.world_sync_available;
+  }
+  bool world_proxy_aligned_data_available() const {
+    return proxy_routing_state_.world_aligned_data_available;
+  }
+  bool world_proxy_nic_layout_available() const {
+    return proxy_routing_state_.has_world_nic_layout();
+  }
+  int world_proxy_nic_name_count() const {
+    return proxy_routing_state_.world_nic_name_count;
+  }
+  const std::vector<int>& world_proxy_pe_nic_name_ids() const {
+    return proxy_routing_state_.world_pe_nic_name_ids;
+  }
+  const std::vector<int>& world_proxy_ipc_domain_first_pes() const {
+    return proxy_routing_state_.world_ipc_domain_first_pes;
+  }
 
   friend GDAContext;
 
@@ -467,6 +490,10 @@ class GDABackend : public Backend {
    * @brief Allocation and initialization of resources required to
    * support IPC handover.
    */
+  void setup_proxy_candidates();
+  void setup_pxn_sync_routes();
+  // Initialize and validate the proxy routes used by a newly created team.
+  void setup_team_proxy_routes(GDATeam *team_obj);
   void setup_ipc();
   void cleanup_ipc();
 
