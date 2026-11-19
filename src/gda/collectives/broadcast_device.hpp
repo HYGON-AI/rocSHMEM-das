@@ -25,7 +25,7 @@ __device__ __noinline__ bool GDAContext::internal_broadcast_wg_pxn(GDATeam *team
 }
 
 template <typename T>
-__device__ __noinline__ void GDAContext::internal_broadcast_wg_dispatch(T *dst, const T *src, int nelems, int pe_root,
+__device__ __noinline__ void GDAContext::internal_broadcast_wg(T *dst, const T *src, int nelems, int pe_root,
                                                                int pe_start, int stride, int pe_size, long *p_sync,
                                                                int64_t proxy_epoch_base, int proxy_qp_row,
                                                                GDATeam *team_obj) {  // NOLINT(runtime/int)

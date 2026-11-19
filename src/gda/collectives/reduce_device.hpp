@@ -130,7 +130,7 @@ __device__ __noinline__ void GDAContext::internal_reduce_wg_proxy_nopxn(T *dst, 
  * @return true when a proxy path completed the reduction and team barrier.
  */
 template <typename T, ROCSHMEM_OP Op>
-__device__ bool GDAContext::internal_reduce_wg_pxn(GDATeam *team_obj, T *dest, const T *source,
+__device__ bool GDAContext::internal_try_reduce_wg_proxy(GDATeam *team_obj, T *dest, const T *source,
                                                             int nelems, ActiveWFInfo &wf_info) {
   if (nelems <= 0) {
     return false;
@@ -160,7 +160,7 @@ __device__ bool GDAContext::internal_reduce_wg_pxn(GDATeam *team_obj, T *dest, c
 // PXN allreduce and reduce-scatter share local reduction and domain exchange;
 // only the output interval differs. Native reduce-scatter retains its ring.
 template <typename T, ROCSHMEM_OP Op>
-__device__ bool GDAContext::internal_reduce_scatter_wg_pxn(GDATeam *team_obj, T *dest, const T *source,
+__device__ bool GDAContext::internal_try_reduce_scatter_wg_proxy(GDATeam *team_obj, T *dest, const T *source,
                                                                  int nelems, int elem_offset, int elem_count) {
   if (nelems <= 0) {
     return false;
@@ -608,13 +608,13 @@ __device__ int GDAContext::reduce_wg_das(rocshmem_team_t team, T *dest, const T 
           return false;
         }
         internal_try_sync_pxn(team_obj, team_obj->barrier_pSync, ThreadScope::wg);
-        return nreduce == 0 || internal_reduce_wg_pxn<T, Op>(team_obj, dest, source, nreduce, wf_info);
+        return nreduce == 0 || internal_try_reduce_wg_proxy<T, Op>(team_obj, dest, source, nreduce, wf_info);
       })) {
     return ROCSHMEM_SUCCESS;
   }
 
   // Both NIC policies use the shared proxy dispatcher and completion barrier.
-  if (!constmem.pxn_enabled && internal_reduce_wg_pxn<T, Op>(team_obj, dest, source, nreduce, wf_info)) {
+  if (!constmem.pxn_enabled && internal_try_reduce_wg_proxy<T, Op>(team_obj, dest, source, nreduce, wf_info)) {
     return ROCSHMEM_SUCCESS;
   }
 
@@ -699,13 +699,13 @@ __device__ int GDAContext::reduce_scatter_wg_das(rocshmem_team_t team, T *dest, 
         // Publish all inputs before a proxy reads another PE's IPC mapping.
         internal_try_sync_pxn(team_obj, team_obj->barrier_pSync, ThreadScope::wg);
         return elem_count == 0 ||
-               internal_reduce_scatter_wg_pxn<T, Op>(team_obj, dest, source, nreduce, elem_offset, elem_count);
+               internal_try_reduce_scatter_wg_proxy<T, Op>(team_obj, dest, source, nreduce, elem_offset, elem_count);
       })) {
     return ROCSHMEM_SUCCESS;
   }
 
   if (!constmem.pxn_enabled &&
-      internal_reduce_scatter_wg_pxn<T, Op>(team_obj, dest, source, nreduce, elem_offset, elem_count)) {
+      internal_try_reduce_scatter_wg_proxy<T, Op>(team_obj, dest, source, nreduce, elem_offset, elem_count)) {
     return ROCSHMEM_SUCCESS;
   }
 

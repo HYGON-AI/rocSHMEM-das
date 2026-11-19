@@ -584,7 +584,7 @@ __device__ void GDAContext::internal_broadcastmem_wg_das(void *dst, const void *
                                                          int pe_start, int stride, int pe_size, long *p_sync,
                                                          GDATeam *team_obj) {  // NOLINT(runtime/int)
   // Typed and byte APIs share the same task routing and completion protocol.
-  internal_broadcast_wg_dispatch(static_cast<char *>(dst), static_cast<const char *>(src), nelems, pe_root, pe_start, stride,
+  internal_broadcast_wg(static_cast<char *>(dst), static_cast<const char *>(src), nelems, pe_root, pe_start, stride,
                         pe_size, p_sync, 1, -1, team_obj);
 }
 

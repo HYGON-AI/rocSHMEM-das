@@ -57,7 +57,7 @@ __device__ inline __noinline__ void GDAContext::internal_alltoallv_wg_world_prox
     __syncthreads();
     // Root-side proxies must not fetch the descriptor before aggregation ends.
     internal_world_proxy_sync_wg(constmem.my_pe, pe_size, team_obj->alltoall_pSync, wf_info, epoch++, proxy_qp_row);
-    internal_broadcast_wg_dispatch(control + 6, control + 4, 2, first, 0, 1, pe_size, team_obj->alltoall_pSync, epoch,
+    internal_broadcast_wg(control + 6, control + 4, 2, first, 0, 1, pe_size, team_obj->alltoall_pSync, epoch,
                           proxy_qp_row, team_obj);
     epoch += proxy::kWorldBroadcastSyncPhases;
     const size_t ipc_domain_regular = __hip_atomic_load(control + 6, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
@@ -115,7 +115,7 @@ __device__ __noinline__ int64_t GDAContext::internal_alltoallv_wg_world_proxy_pa
     __threadfence_system();
     __syncthreads();
     internal_world_proxy_sync_wg(constmem.my_pe, pe_size, team_obj->alltoall_pSync, wf_info, epoch++, proxy_qp_row);
-    internal_broadcast_wg_dispatch(received_count, stage_count, pe_size, source_pe, 0, 1, pe_size, team_obj->alltoall_pSync,
+    internal_broadcast_wg(received_count, stage_count, pe_size, source_pe, 0, 1, pe_size, team_obj->alltoall_pSync,
                           epoch, proxy_qp_row, team_obj);
     epoch += proxy::kWorldBroadcastSyncPhases;
 
@@ -159,7 +159,7 @@ __device__ __noinline__ int64_t GDAContext::internal_alltoallv_wg_world_proxy_pa
       __threadfence_system();
       __syncthreads();
       internal_world_proxy_sync_wg(constmem.my_pe, pe_size, team_obj->alltoall_pSync, wf_info, epoch++, proxy_qp_row);
-      internal_broadcast_wg_dispatch(received, stage, static_cast<int>(tile), source_pe, 0, 1, pe_size, team_obj->alltoall_pSync,
+      internal_broadcast_wg(received, stage, static_cast<int>(tile), source_pe, 0, 1, pe_size, team_obj->alltoall_pSync,
                             epoch, proxy_qp_row, team_obj);
       epoch += proxy::kWorldBroadcastSyncPhases;
       const size_t begin = max(offset, wanted_begin);

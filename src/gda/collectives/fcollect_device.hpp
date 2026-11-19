@@ -93,7 +93,7 @@ __device__ void GDAContext::internal_fcollect_wg_ipc_domain_pxn(GDATeam *team_ob
       for (int member = 0; member < members; member += batch_members) {
         const int rank = first_rank + member;
         const int root = pack_domain ? domain_proxies[domain] : team_obj->get_pe_in_world(rank);
-        internal_broadcast_wg_dispatch(dst + static_cast<size_t>(rank) * nelems + offset, packed, batch_members * count, root,
+        internal_broadcast_wg(dst + static_cast<size_t>(rank) * nelems + offset, packed, batch_members * count, root,
                               info->pe_start, info->stride, team_obj->num_pes, p_sync, epoch, qp_row, team_obj);
         epoch += proxy::TeamBroadcastPhaseCount(team_obj);
       }

@@ -448,7 +448,7 @@ class GDAContext : public Context {
                                               const char *operation, TryProxy try_proxy);
 
   template <typename T>
-  __device__ __noinline__ void internal_broadcast_wg_dispatch(T *dest, const T *source, int nelems,
+  __device__ __noinline__ void internal_broadcast_wg(T *dest, const T *source, int nelems,
       int pe_root, int pe_start, int stride, int pe_size, long *p_sync,
       int64_t proxy_epoch_base = 1,
       int proxy_qp_row = -1,
@@ -490,11 +490,11 @@ class GDAContext : public Context {
   __device__ __noinline__ void internal_reduce_wg_ipc_domain_pxn(GDATeam *team_obj, T *dest, const T *source, int nelems, int elem_offset = 0, int elem_count = -1);
 
   template <typename T, ROCSHMEM_OP Op>
-  __device__ bool internal_reduce_wg_pxn(GDATeam *team_obj, T *dest, const T *source, int nelems,
+  __device__ bool internal_try_reduce_wg_proxy(GDATeam *team_obj, T *dest, const T *source, int nelems,
       ActiveWFInfo &wf_info);
 
   template <typename T, ROCSHMEM_OP Op>
-  __device__ bool internal_reduce_scatter_wg_pxn(GDATeam *team_obj, T *dest, const T *source, int nelems, int elem_offset = 0, int elem_count = -1);
+  __device__ bool internal_try_reduce_scatter_wg_proxy(GDATeam *team_obj, T *dest, const T *source, int nelems, int elem_offset = 0, int elem_count = -1);
 
   // WORLD alltoallv: collectively check layout, then use alltoall or packed rows.
   struct ProxyAlltoallvLayout {

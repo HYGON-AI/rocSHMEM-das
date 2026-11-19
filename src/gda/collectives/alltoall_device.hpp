@@ -147,7 +147,7 @@ __device__ void GDAContext::internal_alltoall_wg_rows_pxn(GDATeam *team_obj, T *
     // This replaces one tiny broadcast per target with one stream per source.
     for (size_t offset = 0; offset < row_elements; offset += tile_capacity) {
       const int count = static_cast<int>(min(static_cast<size_t>(tile_capacity), row_elements - offset));
-      internal_broadcast_wg_dispatch(scratch, src + offset, count, source_pe, team_obj->tinfo_wrt_world->pe_start,
+      internal_broadcast_wg(scratch, src + offset, count, source_pe, team_obj->tinfo_wrt_world->pe_start,
                             team_obj->tinfo_wrt_world->stride, team_size, p_sync, epoch, qp_row, team_obj);
       const size_t begin = max(offset, wanted_begin);
       const size_t end = min(offset + count, wanted_end);
