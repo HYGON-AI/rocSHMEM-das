@@ -37,12 +37,9 @@
 #ifndef LIBRARY_SRC_GDA_IBV_CORE_HPP_
 #define LIBRARY_SRC_GDA_IBV_CORE_HPP_
 
-#include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
-
-#if defined(GDA_SHCA)
-
+#include "rocshmem/rocshmem_config.h"
+#if defined(GDA_SHCA) && !defined(ROCSHMEM_MULTI_PROVIDER_MLX5_ADAPTER)
 #include <infiniband/verbs.h>
-
 #else
 
 #include <stdint.h>
@@ -787,6 +784,6 @@ static inline uint16_t ibv_flow_label_to_udp_sport(uint32_t fl)
 
 } /* extern "C" */
 
-#endif  // defined(GDA_SHCA)
+#endif // SHCA SDK or standard verbs definitions
 
 #endif  // LIBRARY_SRC_GDA_IBV_CORE_HPP_

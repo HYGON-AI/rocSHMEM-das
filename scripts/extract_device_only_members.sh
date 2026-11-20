@@ -54,7 +54,10 @@ while IFS= read -r member; do
   # device_globals.cpp must remain a normal HIP translation unit.  Its host
   # half registers module-local device-global setters and carries the hidden
   # archive anchor, so CMake compiles it separately into the final archive.
-  if [[ "$member" == "device_globals.cpp.o" ]]; then
+  # SDK adapters contain no device bundle.
+  if [[ "$member" == "device_globals.cpp.o" ||
+        "$member" == "verbs_adapter_mlx5.cpp.o" ||
+        "$member" == "verbs_adapter_shca.cpp.o" ]]; then
     continue
   fi
 
