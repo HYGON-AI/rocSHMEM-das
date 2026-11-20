@@ -401,6 +401,9 @@ class GDABackend : public Backend {
    * @brief Handle for raw memory for broadcast sync
    */
   long *bcast_pSync_pool{nullptr};
+#if defined(USE_DAS)
+  long *bcast_ready_pool{nullptr};
+#endif
 
   /**
    * @brief Handle for raw memory for alltoall sync

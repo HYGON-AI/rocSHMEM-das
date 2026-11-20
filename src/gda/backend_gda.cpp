@@ -1395,6 +1395,9 @@ void GDABackend::setup_wrk_sync_buffer() {
                             ROCSHMEM_REDUCE_SYNC_SIZE +
                             ROCSHMEM_BCAST_SYNC_SIZE +
                             ROCSHMEM_ALLTOALL_SYNC_SIZE);
+#if defined(USE_DAS)
+  wrk_sync_pool_size_ += sizeof(long) * max_num_teams * ROCSHMEM_BARRIER_SYNC_SIZE;
+#endif
 
   /**
    * Size of work arrays for the teams
@@ -1487,6 +1490,13 @@ void GDABackend::setup_teams() {
   pWrk_pool = reinterpret_cast<void *>(wrk_sync_pool_top_);
   wrk_sync_pool_top_ += sizeof(double) * ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE
                             * max_num_teams;
+#if defined(USE_DAS)
+  // One symmetric ready array per team, independent of all pSync protocols.
+  const size_t bcast_ready_bytes = sizeof(long) * max_num_teams * ROCSHMEM_BARRIER_SYNC_SIZE;
+  bcast_ready_pool = reinterpret_cast<long *>(wrk_sync_pool_top_);
+  wrk_sync_pool_top_ += bcast_ready_bytes;
+  CHECK_HIP(hipMemset(bcast_ready_pool, 0, bcast_ready_bytes));
+#endif
 
   /**
    * Initialize the sync arrays in the pool with default values.

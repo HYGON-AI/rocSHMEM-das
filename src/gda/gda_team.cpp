@@ -52,6 +52,11 @@ GDATeam::GDATeam(Backend *backend, const TeamInfo& team_info_parent,
                       sizeof(long) * ROCSHMEM_REDUCE_SYNC_SIZE));
   CHECK_HIP(hipMemset(bcast_pSync, 0,
                       sizeof(long) * ROCSHMEM_BCAST_SYNC_SIZE));
+#if defined(USE_DAS)
+  bcast_ready = b->bcast_ready_pool + static_cast<size_t>(pool_index) * ROCSHMEM_BARRIER_SYNC_SIZE;
+  // Reused team slots start with no published segments and epoch one.
+  CHECK_HIP(hipMemset(bcast_ready, 0, sizeof(long) * ROCSHMEM_BARRIER_SYNC_SIZE));
+#endif
   CHECK_HIP(hipMemset(alltoall_pSync, 0,
                       sizeof(long) * ROCSHMEM_ALLTOALL_SYNC_SIZE));
   pWrk = reinterpret_cast<char *>(b->pWrk_pool) + ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double) * pool_index;

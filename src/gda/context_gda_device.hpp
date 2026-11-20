@@ -404,10 +404,26 @@ class GDAContext : public Context {
   __device__ void internal_get_broadcastmem_wg_nopxn(void *dst, const void *src,
       int nelems, int pe_root, ActiveWFInfo &wf_info);
   __device__ void internal_broadcastmem_wg_nopxn(void *dst, const void *src,
-      int nelems, int pe_root, int pe_start, int stride, int pe_size, long *p_sync);
+      int nelems, int pe_root, int pe_start, int stride, int pe_size, long *p_sync,
+      GDATeam *ready_team = nullptr);
   __device__ bool internal_broadcastmem_wg_proxy_nopxn(void *dst, const void *src,
       int nelems, int pe_root, int pe_start, int stride, int pe_size,
-      long *p_sync, ActiveWFInfo &wf_info);
+      long *p_sync, ActiveWFInfo &wf_info, GDATeam *ready_team);
+
+  struct BroadcastFanout {
+    char *dst;
+    size_t nbytes;
+    size_t chunk;
+    int proxies;
+    int local_slot;
+  };
+
+  __device__ bool try_broadcast_ready_fanout_wg_nopxn(const BroadcastFanout &fanout,
+      GDATeam *ready_team, int pe_size, ActiveWFInfo &wf_info);
+  __device__ void broadcast_gather_ready_segments_wg_nopxn(const BroadcastFanout &fanout,
+      long *ready, long epoch, ActiveWFInfo &wf_info);
+  __device__ void broadcast_gather_ready_segments_wave_nopxn(const BroadcastFanout &fanout,
+      long *ready, long epoch);
 
   __device__ __noinline__ void internal_proxy_putmem_wg(void *dst, const void *src, size_t bytes,
       int peer, int qp_row, ActiveWFInfo &wf_info);
