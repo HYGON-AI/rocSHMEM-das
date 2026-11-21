@@ -100,10 +100,13 @@ jobs:
     timeout-minutes: 360
     env:
       HARBOR_SITE: ${{ vars.HARBOR_SITE }}
-      DEVPI_URL: ${{ vars.DEVPI_URL }}
       DTK_VERSION: ${{ vars.DTK_VERSION }}
       DTK_PYTHON_VERSION: ${{ vars.PYTHON_VERSION }}
-      PIP_TRUSTED_HOST: ${{ vars.PIP_TRUSTED_HOST }}
+      # Image name portion of the DTK tag (for example, rockylinux8.6); change
+      # this repository variable to switch to another Rocky Linux 8.6 image.
+      IMAGE_NAME: ${{ vars.IMAGE_NAME }}
+      PIP_INDEX_URL: https://mirrors.ustc.edu.cn/pypi/simple
+      ROCSHMEM_CI_ROCKY_REPO: https://mirrors.ustc.edu.cn/rocky/8
       ROCSHMEM_CI_PRIMARY_HOST: github-nmz1
       ROCSHMEM_CI_SECONDARY_HOST: github-nmz2
       ROCSHMEM_CI_PRIMARY_IP: 10.17.1.1
@@ -157,8 +160,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          : "${HARBOR_SITE:?missing HARBOR_SITE}" "${DEVPI_URL:?missing DEVPI_URL}" "${PIP_TRUSTED_HOST:?missing PIP_TRUSTED_HOST}"
+          : "${HARBOR_SITE:?missing HARBOR_SITE}"
           : "${DTK_PYTHON_VERSION:?missing repository variable PYTHON_VERSION}"
+          : "${IMAGE_NAME:?missing repository variable IMAGE_NAME}"
           if [[ ! "$DTK_VERSION" =~ ^[0-9]{4}$ ]]; then
             echo '::error::DTK_VERSION must contain four digits (for example, 2610).'
             exit 1
@@ -167,9 +171,12 @@ jobs:
             echo "::error::Repository variable PYTHON_VERSION must look like 3.12 (got '${DTK_PYTHON_VERSION}')."
             exit 1
           fi
+          if [[ ! "$IMAGE_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::Repository variable IMAGE_NAME must be a bare image name such as rockylinux8.6 (got '${IMAGE_NAME}')."
+            exit 1
+          fi
           {
-            echo "ROCSHMEM_CI_IMAGE=${HARBOR_SITE%/}/hcu/base/dtk:${DTK_VERSION:0:2}.${DTK_VERSION:2:2}-ubuntu22.04-py${DTK_PYTHON_VERSION}"
-            echo "PIP_INDEX_URL=${DEVPI_URL%/}/nightly/dtk${DTK_VERSION}/+simple/"
+            echo "ROCSHMEM_CI_IMAGE=${HARBOR_SITE%/}/hcu/base/dtk:${DTK_VERSION:0:2}.${DTK_VERSION:2:2}-${IMAGE_NAME}-py${DTK_PYTHON_VERSION}"
           } >> "$GITHUB_ENV"
 
       - name: Select test suite
