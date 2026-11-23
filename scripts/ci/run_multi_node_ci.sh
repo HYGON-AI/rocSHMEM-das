@@ -76,12 +76,6 @@ generate_topology() {
     cat /home/topo.config
 }
 
-upgrade_rdma_core() {
-    apt-get install -y --no-install-recommends \
-        rdma-core libibverbs-dev ibverbs-utils libnuma-dev librdmacm-dev
-    dpkg-query -W rdma-core libibverbs-dev
-}
-
 prepare_container() {
     local source_tar="$1"
     local nic_name="$2"
@@ -94,16 +88,64 @@ prepare_container() {
 
     # shellcheck disable=SC1091
     source /etc/os-release
-    [[ "$ID" == ubuntu && "$VERSION_ID" == 22.04 ]] || {
-        echo 'ERROR: IMAGE must be the Ubuntu 22.04 build image' >&2; exit 1;
-    }
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update
-    apt-get install -y --no-install-recommends \
-        ca-certificates openssh-client openssh-server python3-pip iproute2 procps
-    upgrade_rdma_core
+    # Tests build and run inside a single image, so both the Rocky Linux 8.6
+    # and Ubuntu 22.04 images are accepted here. Release packaging is stricter
+    # (see upload_package.sh) because Ubuntu-built binaries are not portable to
+    # Rocky 8.6, while Rocky 8.6-built binaries run on both.
+    local distro="${ID:-unknown}"
+    local package_manager=""
+    local mirror="${ROCSHMEM_CI_ROCKY_REPO:-}" directory repo
+    local -a yum_options=(--setopt=install_weak_deps=False)
+    local -a system_packages rdma_packages verify_packages
+    case "$distro" in
+        rocky)
+            [[ "${VERSION_ID:-}" == 8.* ]] || \
+                echo "WARNING: expected Rocky Linux 8.6, got $distro ${VERSION_ID:-unknown}; continuing." >&2
+            package_manager=yum
+            system_packages=(ca-certificates openssh-clients openssh-server iproute procps-ng tar)
+            rdma_packages=(rdma-core rdma-core-devel libibverbs-utils numactl-devel)
+            verify_packages=(rdma-core rdma-core-devel libibverbs-utils)
+            ;;
+        ubuntu)
+            [[ "${VERSION_ID:-}" == "22.04" ]] || \
+                echo "WARNING: expected Ubuntu 22.04, got $distro ${VERSION_ID:-unknown}; continuing." >&2
+            package_manager=apt
+            system_packages=(ca-certificates openssh-client openssh-server iproute2 procps tar)
+            rdma_packages=(rdma-core libibverbs-dev ibverbs-utils libnuma-dev)
+            verify_packages=(rdma-core libibverbs-dev ibverbs-utils)
+            ;;
+        *)
+            echo "ERROR: unsupported CI image '${distro} ${VERSION_ID:-unknown}'; expected Rocky Linux 8.6 or Ubuntu 22.04" >&2
+            exit 1
+            ;;
+    esac
+    if [[ "$package_manager" == yum && -n "$mirror" ]]; then
+        echo "Rocky Linux yum mirror: $mirror"
+        for directory in BaseOS AppStream extras PowerTools; do
+            repo="${directory,,}"
+            yum_options+=(
+                "--setopt=$repo.mirrorlist="
+                "--setopt=$repo.metalink="
+                "--setopt=$repo.baseurl=${mirror%/}/$directory/x86_64/os/"
+            )
+        done
+    elif [[ -n "$mirror" ]]; then
+        echo "Ignoring ROCSHMEM_CI_ROCKY_REPO: it only applies to Rocky Linux images."
+    fi
+    echo "Installing system and RDMA dependencies."
+    if [[ "$package_manager" == yum ]]; then
+        yum "${yum_options[@]}" install -y "${system_packages[@]}" "${rdma_packages[@]}"
+        rpm -q "${verify_packages[@]}"
+    else
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update
+        apt-get install -y --no-install-recommends "${system_packages[@]}" "${rdma_packages[@]}"
+        dpkg -s "${verify_packages[@]}" >/dev/null
+    fi
+    echo "Activating DTK and installing PyYAML."
     activate_dtk
 
+    # Use pip from the Python bundled with the DTK image.
     python3 -m pip install pyyaml
     python3 -c 'import yaml; print("PyYAML", yaml.__version__)'
 
@@ -112,6 +154,7 @@ prepare_container() {
     grep -Eq "^${secondary_ip}[[:space:]]+${secondary_host}([[:space:]]|$)" /etc/hosts || \
         printf '%s %s\n' "$secondary_ip" "$secondary_host" >> /etc/hosts
 
+    echo "Starting container SSH on port $ssh_port."
     ssh-keygen -A
     install -d -m 0755 /run/sshd
     install -d -m 0700 /root/.ssh
@@ -133,6 +176,7 @@ EOF
     /usr/sbin/sshd -t
     /usr/sbin/sshd -p "$ssh_port"
 
+    echo "Checking GPU and RDMA topology for $nic_name."
     generate_topology "$nic_name" "$nic_index"
 
     local gid_type gid_value
@@ -154,6 +198,7 @@ EOF
     tar -xf "$source_tar" -C /home/rocSHMEM-das
     install -d /home/rocSHMEM-das/build
     cd /home/rocSHMEM-das/build
+    echo "Building and installing rocSHMEM with gda_mlx5."
     ../scripts/build_configs/gda_mlx5
 
     test -x /opt/rocshmem/share/rocshmem/run_ctest.sh
@@ -205,7 +250,7 @@ case "${1:-}" in
 esac
 
 required=(
-    ROCSHMEM_CI_IMAGE ROCSHMEM_CI_SUITE PIP_INDEX_URL PIP_TRUSTED_HOST
+    ROCSHMEM_CI_IMAGE ROCSHMEM_CI_SUITE PIP_INDEX_URL
     ROCSHMEM_CI_PRIMARY_HOST ROCSHMEM_CI_SECONDARY_HOST
 )
 for name in "${required[@]}"; do
@@ -236,6 +281,8 @@ LOG_ROOT="${ROCSHMEM_CI_LOG_DIR:-${LOCAL_ROOT}/logs}"
 SOURCE_TAR="${LOCAL_ROOT}/source.tar"
 SSH_DIR="${LOCAL_ROOT}/ssh"
 SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
+printf -v remote_yum_env '%q' "ROCSHMEM_CI_ROCKY_REPO=${ROCSHMEM_CI_ROCKY_REPO:-}"
+printf -v remote_trusted_host_env '%q' "PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST:-}"
 PRIMARY_CONTAINER="rocshmem-hygon-primary-${RUN_TOKEN}"
 SECONDARY_CONTAINER="rocshmem-hygon-secondary-${RUN_TOKEN}"
 PRIMARY_LOCK_PID=""
@@ -377,6 +424,7 @@ SECONDARY_IMAGE_ID="$(ssh "${SSH_OPTIONS[@]}" "$REMOTE" \
     exit 1
 }
 
+echo "Starting CI containers on ${PRIMARY_HOST} and ${SECONDARY_HOST}."
 docker run --name "$PRIMARY_CONTAINER" -u root \
     --ulimit memlock=-1:-1 --shm-size=32g --privileged \
     --device=/dev/kfd --device=/dev/mkfd --device=/dev/dri/ \
@@ -393,6 +441,7 @@ docker exec "$PRIMARY_CONTAINER" mkdir -p /work /patch/test_log
 ssh "${SSH_OPTIONS[@]}" "$REMOTE" \
     "docker exec '$SECONDARY_CONTAINER' mkdir -p /work /patch/test_log"
 
+echo "Copying CI inputs to ${PRIMARY_CONTAINER} and ${SECONDARY_CONTAINER}."
 docker cp "$SOURCE_TAR" "${PRIMARY_CONTAINER}:/work/source.tar"
 docker cp "$SCRIPT_PATH" "${PRIMARY_CONTAINER}:/work/run_multi_node_ci.sh"
 docker cp "$SSH_DIR" "${PRIMARY_CONTAINER}:/work/ssh"
@@ -401,23 +450,37 @@ ssh "${SSH_OPTIONS[@]}" "$REMOTE" \
      docker cp '$REMOTE_ROOT/run_multi_node_ci.sh' '${SECONDARY_CONTAINER}:/work/run_multi_node_ci.sh' && \
      docker cp '$REMOTE_ROOT/ssh' '${SECONDARY_CONTAINER}:/work/ssh'"
 
-timeout "$SETUP_TIMEOUT" docker exec \
-    -e PIP_INDEX_URL -e PIP_TRUSTED_HOST \
-    -e "ROCSHMEM_CI_GID_INDEX=${GID_INDEX}" \
-    "$PRIMARY_CONTAINER" bash /work/run_multi_node_ci.sh __prepare \
-    /work/source.tar "$PRIMARY_NIC" "$PRIMARY_NIC_INDEX" \
-    "$SSH_PORT" "$PRIMARY_HOST" "$SECONDARY_HOST" "$PRIMARY_IP" "$SECONDARY_IP" \
-    >"$LOG_ROOT/build-${PRIMARY_HOST}.log" 2>&1 &
+stream_build_log() {
+    local host="$1"
+    tee "$LOG_ROOT/build-${host}.log" |
+        awk -v host="$host" '{ print "[" host "] " $0; fflush() }'
+}
+
+echo "Preparing and building on both nodes in parallel. Build logs: $LOG_ROOT"
+# Wait on each subshell so its pipefail status covers the build and log stream.
+(
+    timeout "$SETUP_TIMEOUT" docker exec \
+        -e PIP_INDEX_URL -e PIP_TRUSTED_HOST -e ROCSHMEM_CI_ROCKY_REPO \
+        -e "ROCSHMEM_CI_GID_INDEX=${GID_INDEX}" \
+        "$PRIMARY_CONTAINER" bash /work/run_multi_node_ci.sh __prepare \
+        /work/source.tar "$PRIMARY_NIC" "$PRIMARY_NIC_INDEX" \
+        "$SSH_PORT" "$PRIMARY_HOST" "$SECONDARY_HOST" "$PRIMARY_IP" "$SECONDARY_IP" \
+        2>&1 | stream_build_log "$PRIMARY_HOST"
+) &
 PRIMARY_PID=$!
 
-ssh "${SSH_OPTIONS[@]}" "$REMOTE" \
-    "timeout '$SETUP_TIMEOUT' docker exec \
-       -e 'PIP_INDEX_URL=$PIP_INDEX_URL' -e 'PIP_TRUSTED_HOST=$PIP_TRUSTED_HOST' \
-       -e 'ROCSHMEM_CI_GID_INDEX=${GID_INDEX}' \
-       '$SECONDARY_CONTAINER' bash /work/run_multi_node_ci.sh __prepare \
-       /work/source.tar '$SECONDARY_NIC' '$SECONDARY_NIC_INDEX' \
-       '$SSH_PORT' '$PRIMARY_HOST' '$SECONDARY_HOST' '$PRIMARY_IP' '$SECONDARY_IP'" \
-    >"$LOG_ROOT/build-${SECONDARY_HOST}.log" 2>&1 &
+(
+    ssh "${SSH_OPTIONS[@]}" "$REMOTE" \
+        "timeout '$SETUP_TIMEOUT' docker exec \
+           -e 'PIP_INDEX_URL=$PIP_INDEX_URL' \
+           -e $remote_trusted_host_env \
+           -e $remote_yum_env \
+           -e 'ROCSHMEM_CI_GID_INDEX=${GID_INDEX}' \
+           '$SECONDARY_CONTAINER' bash /work/run_multi_node_ci.sh __prepare \
+           /work/source.tar '$SECONDARY_NIC' '$SECONDARY_NIC_INDEX' \
+           '$SSH_PORT' '$PRIMARY_HOST' '$SECONDARY_HOST' '$PRIMARY_IP' '$SECONDARY_IP'" \
+        2>&1 | stream_build_log "$SECONDARY_HOST"
+) &
 SECONDARY_PID=$!
 
 set +e
@@ -425,12 +488,11 @@ wait "$PRIMARY_PID"; PRIMARY_RC=$?
 wait "$SECONDARY_PID"; SECONDARY_RC=$?
 set -e
 if [[ "$PRIMARY_RC" -ne 0 || "$SECONDARY_RC" -ne 0 ]]; then
-    tail -n 100 "$LOG_ROOT/build-${PRIMARY_HOST}.log" || true
-    tail -n 100 "$LOG_ROOT/build-${SECONDARY_HOST}.log" || true
-    echo "ERROR: build failed: ${PRIMARY_HOST}=${PRIMARY_RC}, ${SECONDARY_HOST}=${SECONDARY_RC}" >&2
+    echo "ERROR: build failed: ${PRIMARY_HOST}=${PRIMARY_RC}, ${SECONDARY_HOST}=${SECONDARY_RC}. Logs: $LOG_ROOT" >&2
     exit 1
 fi
 
+echo "Both builds passed. Synchronizing the test binary and checking cross-node MPI."
 CANONICAL_BINARY="$(docker exec "$PRIMARY_CONTAINER" bash -c '
     for candidate in /opt/rocshmem/bin /opt/rocshmem/share/rocshmem; do
         if [ -x "$candidate/rocshmem_functional_tests" ]; then
@@ -455,6 +517,7 @@ docker exec "$PRIMARY_CONTAINER" bash -lc \
     "source /opt/dtk/env.sh && /opt/mpi/bin/mpirun --host '${PRIMARY_HOST},${SECONDARY_HOST}' \
      -np 2 --allow-run-as-root --map-by ppr:1:node -x PATH -x LD_LIBRARY_PATH hostname"
 
+echo "Running the ${ROCSHMEM_CI_SUITE} suite."
 set -o pipefail
 timeout --signal=TERM --kill-after=30s "$TEST_TIMEOUT" \
     docker exec "$PRIMARY_CONTAINER" bash /work/run_multi_node_ci.sh __test \

@@ -41,39 +41,57 @@ build_package() {
     # This entry point is ONLY for the disposable container created below.
     [[ -f /.dockerenv && "${ROCSHMEM_PACKAGE_CONTAINER:-}" == 1 ]]
     [[ "$(uname -m)" == x86_64 ]]
-    local dtk_dir
+    local dtk_dir shca_library shca_dependencies
+    # shellcheck source=/dev/null
+    source /etc/os-release
+    [[ "$ID" == rocky && "$VERSION_ID" == 8.6 ]] || {
+        echo "ERROR: expected Rocky Linux 8.6, got $ID $VERSION_ID" >&2; return 1;
+    }
+    local mirror="${ROCSHMEM_CI_ROCKY_REPO:-}" directory repo
+    local -a yum_options=(--setopt=install_weak_deps=False)
+    if [[ -n "$mirror" ]]; then
+        echo "Rocky Linux yum mirror: $mirror"
+        for directory in BaseOS AppStream extras PowerTools; do
+            repo="${directory,,}"
+            yum_options+=(
+                "--setopt=$repo.mirrorlist="
+                "--setopt=$repo.metalink="
+                "--setopt=$repo.baseurl=${mirror%/}/$directory/x86_64/os/"
+            )
+        done
+    fi
+    yum "${yum_options[@]}" install -y \
+        git ca-certificates binutils numactl-devel tar gzip
     case "$ROCSHMEM_PACKAGE_VARIANT" in
         mlx5)
-            # shellcheck source=/dev/null
-            source /etc/os-release
-            [[ "$ID" == ubuntu && "$VERSION_ID" == 22.04 ]]
-            export DEBIAN_FRONTEND=noninteractive
-            apt-get update
-            apt-get install -y --no-install-recommends \
-                git curl ca-certificates python3-pip binutils \
-                libnuma-dev rdma-core libibverbs-dev ibverbs-utils
+            yum "${yum_options[@]}" install -y rdma-core rdma-core-devel libibverbs-utils
             ;;
         shca)
-            # Same user-space SHCA setup as Mooncake, in the disposable container.
-            # shellcheck source=/dev/null
-            source /etc/os-release
-            [[ "$ID" == ubuntu && "$VERSION_ID" == 22.04 ]]
-            export DEBIAN_FRONTEND=noninteractive
-            apt-get update
-            apt-get install -y --no-install-recommends git curl ca-certificates python3-pip binutils libnuma-dev
-            mkdir /tmp/rocshmem-shca-setup
-            cd /tmp/rocshmem-shca-setup
-            curl --fail --location --retry 3 -o mlxtoshca.sh \
-                "${RESOURCE_SERVER_URL%/}/Jenkins/CompileDep/mooncake/mlxtoshca.sh"
-            curl --fail --location --retry 3 -o shca-tools_2.500.4.B068-Ubuntu22.04_amd64.deb \
-                "${RESOURCE_SERVER_URL%/}/Jenkins/CompileDep/mooncake/shca-tools_2.500.4.B068-Ubuntu22.04_amd64.deb"
-            bash ./mlxtoshca.sh
-            [[ "$(dpkg-query -W -f='${Status}' shca-tools)" == 'install ok installed' ]]
-            test -s /usr/include/infiniband/shca_dv.h
-            test -s /usr/lib/x86_64-linux-gnu/libshca.so
+            # SHCA supplies its own verbs development files.
+            if ! rpm -q shca-tools; then
+                : "${SHCA_TOOLS_RPM_BASE_URL:?missing repository variable SHCA_TOOLS_RPM_BASE_URL}"
+                local shca_rpm=/tmp/shca-tools-0.0.1_rocky8.10-1.x86_64.rpm
+                local shca_rpm_url="${SHCA_TOOLS_RPM_BASE_URL%/}/${shca_rpm##*/}"
+                yum "${yum_options[@]}" install -y curl
+                curl --fail --location --retry 3 --proto '=http,https' \
+                    --proto-redir '=http,https' --output "$shca_rpm" -- "$shca_rpm_url"
+                # Only the RPM tested on Rocky 8.6 may bypass its 8.10 install scripts.
+                printf '%s  %s\n' 612619ad3f57f7be31117c3c926ccecde1a447e3cf9d466d1506e31cec8241d1 "$shca_rpm" |
+                    sha256sum --check
+                yum "${yum_options[@]}" install -y \
+                    libev libnl3 libnl3-cli libnl3-devel libuv libwebsockets mosquitto tcp_wrappers-libs
+                yum "${yum_options[@]}" remove -y --setopt=clean_requirements_on_remove=False \
+                    libibverbs libibumad librdmacm infiniband-diags libibverbs-utils rdma-core-devel
+                rpm -ivh --nopre --nopost "$shca_rpm"
+            fi
             ldconfig
-            ldd /usr/lib/x86_64-linux-gnu/libshca.so > shca-ldd.log
-            if grep -F 'not found' shca-ldd.log; then
+            shca_library="$(ldconfig -p | awk '$1 == "libshca.so" && !found { print $NF; found = 1 }')"
+            if [[ ! -s /usr/include/infiniband/shca_dv.h || ! -s "$shca_library" ]]; then
+                echo 'ERROR: SHCA development header or libshca.so is missing' >&2
+                return 1
+            fi
+            shca_dependencies="$(ldd "$shca_library")"
+            if grep -F 'not found' <<< "$shca_dependencies"; then
                 echo 'ERROR: SHCA shared library dependencies are missing' >&2; return 1;
             fi
             ;;
@@ -149,9 +167,6 @@ build_package() {
     inspect="$(mktemp -d /tmp/rocshmem-run-inspect.XXXXXX)"
     validate_run_package "$installer" "$inspect/install"
 
-    local py_version py_tag
-    py_version="$(python3 -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])' 2>/dev/null || echo unknown)"
-    py_tag="$(python3 -c 'import sys; v = "%d%d" % sys.version_info[:2]; print("-cp" + v + "-cp" + v)' 2>/dev/null || echo unknown)"
     mkdir /tmp/rocshmem-run-artifacts
     cp "$installer" /tmp/rocshmem-run-artifacts/
     chmod 0755 "/tmp/rocshmem-run-artifacts/${expected_filename}"
@@ -160,8 +175,6 @@ build_package() {
             "$ROCSHMEM_PACKAGE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
         printf 'package_format=run\npackage_filename=%s\nupstream_version=%s\n' "$expected_filename" "$upstream_version"
         printf 'dtk_version=%s\ndtk_directory=%s\n' "$ROCSHMEM_PACKAGE_DTK_VERSION" "$dtk_dir"
-        printf 'python_tag=%s\npython_version=%s\npython_executable=%s\n' \
-            "$py_tag" "$py_version" "$(command -v python3 || echo unknown)"
         printf 'build_timezone=UTC+08:00\n'
         printf 'build_config=scripts/build_configs/gda_%s\nstrip=OFF\narchitecture=%s\n' \
             "$ROCSHMEM_PACKAGE_VARIANT" "$(uname -m)"
@@ -170,10 +183,10 @@ build_package() {
         /opt/mpi/bin/mpiexec --version
         cmake --version
         if [[ "$ROCSHMEM_PACKAGE_VARIANT" == shca ]]; then
-            dpkg-query -W shca-tools
-            sha256sum /tmp/rocshmem-shca-setup/mlxtoshca.sh /tmp/rocshmem-shca-setup/*.deb
+            rpm -q shca-tools
+            sha256sum /usr/include/infiniband/shca_dv.h "$shca_library"
         else
-            dpkg-query -W rdma-core libibverbs-dev ibverbs-utils
+            rpm -q rdma-core rdma-core-devel libibverbs-utils
         fi
     } > /tmp/rocshmem-run-artifacts/build-info.txt
     cd /tmp/rocshmem-run-artifacts
@@ -191,7 +204,7 @@ if [[ "${1:-}" == __build ]]; then
     exit 0
 fi
 
-for required in ROCSHMEM_CI_IMAGE PIP_INDEX_URL PIP_TRUSTED_HOST \
+for required in ROCSHMEM_CI_IMAGE PIP_INDEX_URL \
     ROCSHMEM_PACKAGE_VARIANT ROCSHMEM_PACKAGE_DTK_VERSION ROCSHMEM_PACKAGE_SHA \
     ROCSHMEM_PACKAGE_ROOT ROCSHMEM_PACKAGE_HOST_DIR \
     GITHUB_RUN_ID GITHUB_RUN_ATTEMPT; do
@@ -247,10 +260,11 @@ docker create --name "$container_name" --user root \
     --device=/dev/kfd --device=/dev/mkfd --device=/dev/dri/ \
     --network=host --ipc=host --group-add video \
     -v /opt/hyhal:/opt/hyhal:ro \
-    -e ROCSHMEM_PACKAGE_VARIANT -e ROCSHMEM_PACKAGE_DTK_VERSION -e RESOURCE_SERVER_URL \
+    -e ROCSHMEM_PACKAGE_VARIANT -e ROCSHMEM_PACKAGE_DTK_VERSION \
+    -e ROCSHMEM_CI_ROCKY_REPO -e SHCA_TOOLS_RPM_BASE_URL \
     -e ROCSHMEM_PACKAGE_CONTAINER=1 \
     -e ROCSHMEM_PACKAGE_SHA \
-    -e GITHUB_RUN_ID -e GITHUB_RUN_ATTEMPT -e PIP_INDEX_URL -e PIP_TRUSTED_HOST \
+    -e GITHUB_RUN_ID -e GITHUB_RUN_ATTEMPT -e PIP_INDEX_URL \
     "$image_id" tail -f /dev/null
 container_created=true
 docker start "$container_name"
