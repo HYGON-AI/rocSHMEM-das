@@ -25,8 +25,9 @@ jobs:
       matrix:
         variant: [mlx5, shca]
         # One entry per supported DTK; each pairs a version with the Python
-        # version baked into its image. Both come from repository variables,
-        # so moving to a new image never needs an edit here.
+        # version baked into its image. Versions, Python and the image name
+        # all come from repository variables, so moving to a new image never
+        # needs an edit here.
         dtk:
           - version: ${{ vars.DTK_VERSION }}
             python: ${{ vars.PYTHON_VERSION }}
@@ -34,12 +35,18 @@ jobs:
             python: ${{ vars.PYTHON_OLD_VERSION }}
     env:
       HARBOR_SITE: ${{ vars.HARBOR_SITE }}
-      DEVPI_URL: ${{ vars.DEVPI_URL }}
       DTK_VERSION: ${{ matrix.dtk.version }}
       DTK_PYTHON_VERSION: ${{ matrix.dtk.python }}
+      # Image name portion of the DTK tag (for example, rockylinux8.6); change
+      # this repository variable to switch to another Rocky Linux 8.6 image.
+      # Packages are built on Rocky Linux 8.6: binaries built on Ubuntu 22.04
+      # link against newer glibc/libstdc++ and do not run on Rocky 8.6, while
+      # Rocky 8.6 builds run on both images.
+      IMAGE_NAME: ${{ vars.IMAGE_NAME }}
       ROCSHMEM_PACKAGE_VARIANT: ${{ matrix.variant }}
-      RESOURCE_SERVER_URL: http://10.16.1.201:8000
-      PIP_TRUSTED_HOST: ${{ vars.PIP_TRUSTED_HOST }}
+      PIP_INDEX_URL: https://mirrors.ustc.edu.cn/pypi/simple
+      SHCA_TOOLS_RPM_BASE_URL: ${{ vars.SHCA_TOOLS_RPM_BASE_URL }}
+      ROCSHMEM_CI_ROCKY_REPO: https://mirrors.ustc.edu.cn/rocky/8
       ROCSHMEM_PACKAGE_SHA: ${{ github.sha }}
       ROCSHMEM_PACKAGE_HOST_DIR: /ci/github_ci_packages/rocshmem
     steps:
@@ -54,8 +61,9 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          : "${HARBOR_SITE:?missing HARBOR_SITE}" "${DEVPI_URL:?missing DEVPI_URL}" "${PIP_TRUSTED_HOST:?missing PIP_TRUSTED_HOST}"
+          : "${HARBOR_SITE:?missing HARBOR_SITE}"
           : "${DTK_PYTHON_VERSION:?missing repository variable PYTHON_VERSION / PYTHON_OLD_VERSION}"
+          : "${IMAGE_NAME:?missing repository variable IMAGE_NAME}"
           if [[ ! "$DTK_VERSION" =~ ^[0-9]{4}$ ]]; then
             echo '::error::Selected DTK version must contain four digits (for example, 2610).'
             exit 1
@@ -64,9 +72,12 @@ jobs:
             echo "::error::Repository variable PYTHON_VERSION / PYTHON_OLD_VERSION must look like 3.12 (got '${DTK_PYTHON_VERSION}')."
             exit 1
           fi
+          if [[ ! "$IMAGE_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::Repository variable IMAGE_NAME must be a bare image name such as rockylinux8.6 (got '${IMAGE_NAME}')."
+            exit 1
+          fi
           {
-            echo "ROCSHMEM_CI_IMAGE=${HARBOR_SITE%/}/hcu/base/dtk:${DTK_VERSION:0:2}.${DTK_VERSION:2:2}-ubuntu22.04-py${DTK_PYTHON_VERSION}"
-            echo "PIP_INDEX_URL=${DEVPI_URL%/}/nightly/dtk${DTK_VERSION}/+simple/"
+            echo "ROCSHMEM_CI_IMAGE=${HARBOR_SITE%/}/hcu/base/dtk:${DTK_VERSION:0:2}.${DTK_VERSION:2:2}-${IMAGE_NAME}-py${DTK_PYTHON_VERSION}"
             echo "ROCSHMEM_PACKAGE_ROOT=$RUNNER_TEMP/rocshmem-run/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-dtk$DTK_VERSION-$ROCSHMEM_PACKAGE_VARIANT"
           } >> "$GITHUB_ENV"
 
