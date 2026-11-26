@@ -86,62 +86,9 @@ prepare_container() {
     local primary_ip="$7"
     local secondary_ip="$8"
 
-    # shellcheck disable=SC1091
-    source /etc/os-release
-    # Tests build and run inside a single image, so both the Rocky Linux 8.6
-    # and Ubuntu 22.04 images are accepted here. Release packaging is stricter
-    # (see upload_package.sh) because Ubuntu-built binaries are not portable to
-    # Rocky 8.6, while Rocky 8.6-built binaries run on both.
-    local distro="${ID:-unknown}"
-    local package_manager=""
-    local mirror="${ROCSHMEM_CI_ROCKY_REPO:-}" directory repo
-    local -a yum_options=(--setopt=install_weak_deps=False)
-    local -a system_packages rdma_packages verify_packages
-    case "$distro" in
-        rocky)
-            [[ "${VERSION_ID:-}" == 8.* ]] || \
-                echo "WARNING: expected Rocky Linux 8.6, got $distro ${VERSION_ID:-unknown}; continuing." >&2
-            package_manager=yum
-            system_packages=(ca-certificates openssh-clients openssh-server iproute procps-ng tar)
-            rdma_packages=(rdma-core rdma-core-devel libibverbs-utils numactl-devel)
-            verify_packages=(rdma-core rdma-core-devel libibverbs-utils)
-            ;;
-        ubuntu)
-            [[ "${VERSION_ID:-}" == "22.04" ]] || \
-                echo "WARNING: expected Ubuntu 22.04, got $distro ${VERSION_ID:-unknown}; continuing." >&2
-            package_manager=apt
-            system_packages=(ca-certificates openssh-client openssh-server iproute2 procps tar)
-            rdma_packages=(rdma-core libibverbs-dev ibverbs-utils libnuma-dev)
-            verify_packages=(rdma-core libibverbs-dev ibverbs-utils)
-            ;;
-        *)
-            echo "ERROR: unsupported CI image '${distro} ${VERSION_ID:-unknown}'; expected Rocky Linux 8.6 or Ubuntu 22.04" >&2
-            exit 1
-            ;;
-    esac
-    if [[ "$package_manager" == yum && -n "$mirror" ]]; then
-        echo "Rocky Linux yum mirror: $mirror"
-        for directory in BaseOS AppStream extras PowerTools; do
-            repo="${directory,,}"
-            yum_options+=(
-                "--setopt=$repo.mirrorlist="
-                "--setopt=$repo.metalink="
-                "--setopt=$repo.baseurl=${mirror%/}/$directory/x86_64/os/"
-            )
-        done
-    elif [[ -n "$mirror" ]]; then
-        echo "Ignoring ROCSHMEM_CI_ROCKY_REPO: it only applies to Rocky Linux images."
-    fi
-    echo "Installing system and RDMA dependencies."
-    if [[ "$package_manager" == yum ]]; then
-        yum "${yum_options[@]}" install -y "${system_packages[@]}" "${rdma_packages[@]}"
-        rpm -q "${verify_packages[@]}"
-    else
-        export DEBIAN_FRONTEND=noninteractive
-        apt-get update
-        apt-get install -y --no-install-recommends "${system_packages[@]}" "${rdma_packages[@]}"
-        dpkg -s "${verify_packages[@]}" >/dev/null
-    fi
+    source "$(dirname "${BASH_SOURCE[0]}")/prepare_rocky.sh"
+    echo "Installing system and SHCA dependencies."
+    prepare_rocky_build_environment openssh-clients openssh-server iproute procps-ng
     echo "Activating DTK and installing PyYAML."
     activate_dtk
 
@@ -198,8 +145,11 @@ EOF
     tar -xf "$source_tar" -C /home/rocSHMEM-das
     install -d /home/rocSHMEM-das/build
     cd /home/rocSHMEM-das/build
-    echo "Building and installing rocSHMEM with gda_mlx5."
-    ../scripts/build_configs/gda_mlx5
+    echo "Building and installing rocSHMEM with gda_mlx5_shca."
+    ../scripts/build_configs/gda_mlx5_shca
+    grep -qx 'USE_GDA:BOOL=ON' CMakeCache.txt
+    grep -qx 'GDA_MLX5:BOOL=ON' CMakeCache.txt
+    grep -qx 'GDA_SHCA:BOOL=ON' CMakeCache.txt
 
     test -x /opt/rocshmem/share/rocshmem/run_ctest.sh
     # Upstream installs the test binaries into CMAKE_INSTALL_BINDIR (bin/);
@@ -281,7 +231,9 @@ LOG_ROOT="${ROCSHMEM_CI_LOG_DIR:-${LOCAL_ROOT}/logs}"
 SOURCE_TAR="${LOCAL_ROOT}/source.tar"
 SSH_DIR="${LOCAL_ROOT}/ssh"
 SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
+PREPARE_SCRIPT="$(dirname "$SCRIPT_PATH")/prepare_rocky.sh"
 printf -v remote_yum_env '%q' "ROCSHMEM_CI_ROCKY_REPO=${ROCSHMEM_CI_ROCKY_REPO:-}"
+printf -v remote_shca_rpm_env '%q' "SHCA_TOOLS_RPM_BASE_URL=${SHCA_TOOLS_RPM_BASE_URL:-}"
 printf -v remote_trusted_host_env '%q' "PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST:-}"
 PRIMARY_CONTAINER="rocshmem-hygon-primary-${RUN_TOKEN}"
 SECONDARY_CONTAINER="rocshmem-hygon-secondary-${RUN_TOKEN}"
@@ -403,7 +355,8 @@ echo "Cross-node locks acquired; selected container SSH port ${SSH_PORT}."
 
 
 ssh "${SSH_OPTIONS[@]}" "$REMOTE" "mkdir -p '$REMOTE_ROOT/ssh' '$REMOTE_ROOT/logs'"
-scp "${SSH_OPTIONS[@]}" "$SOURCE_TAR" "$SCRIPT_PATH" "$SSH_DIR/id_ed25519" "$SSH_DIR/id_ed25519.pub" "${REMOTE}:${REMOTE_ROOT}/"
+scp "${SSH_OPTIONS[@]}" "$SOURCE_TAR" "$SCRIPT_PATH" "$PREPARE_SCRIPT" \
+    "$SSH_DIR/id_ed25519" "$SSH_DIR/id_ed25519.pub" "${REMOTE}:${REMOTE_ROOT}/"
 ssh "${SSH_OPTIONS[@]}" "$REMOTE" "mv '$REMOTE_ROOT/id_ed25519' '$REMOTE_ROOT/id_ed25519.pub' '$REMOTE_ROOT/ssh/'"
 
 echo "Pulling CI image on ${PRIMARY_HOST}: ${ROCSHMEM_CI_IMAGE}"
@@ -444,10 +397,12 @@ ssh "${SSH_OPTIONS[@]}" "$REMOTE" \
 echo "Copying CI inputs to ${PRIMARY_CONTAINER} and ${SECONDARY_CONTAINER}."
 docker cp "$SOURCE_TAR" "${PRIMARY_CONTAINER}:/work/source.tar"
 docker cp "$SCRIPT_PATH" "${PRIMARY_CONTAINER}:/work/run_multi_node_ci.sh"
+docker cp "$PREPARE_SCRIPT" "${PRIMARY_CONTAINER}:/work/prepare_rocky.sh"
 docker cp "$SSH_DIR" "${PRIMARY_CONTAINER}:/work/ssh"
 ssh "${SSH_OPTIONS[@]}" "$REMOTE" \
     "docker cp '$REMOTE_ROOT/source.tar' '${SECONDARY_CONTAINER}:/work/source.tar' && \
      docker cp '$REMOTE_ROOT/run_multi_node_ci.sh' '${SECONDARY_CONTAINER}:/work/run_multi_node_ci.sh' && \
+     docker cp '$REMOTE_ROOT/prepare_rocky.sh' '${SECONDARY_CONTAINER}:/work/prepare_rocky.sh' && \
      docker cp '$REMOTE_ROOT/ssh' '${SECONDARY_CONTAINER}:/work/ssh'"
 
 stream_build_log() {
@@ -461,6 +416,7 @@ echo "Preparing and building on both nodes in parallel. Build logs: $LOG_ROOT"
 (
     timeout "$SETUP_TIMEOUT" docker exec \
         -e PIP_INDEX_URL -e PIP_TRUSTED_HOST -e ROCSHMEM_CI_ROCKY_REPO \
+        -e SHCA_TOOLS_RPM_BASE_URL \
         -e "ROCSHMEM_CI_GID_INDEX=${GID_INDEX}" \
         "$PRIMARY_CONTAINER" bash /work/run_multi_node_ci.sh __prepare \
         /work/source.tar "$PRIMARY_NIC" "$PRIMARY_NIC_INDEX" \
@@ -475,6 +431,7 @@ PRIMARY_PID=$!
            -e 'PIP_INDEX_URL=$PIP_INDEX_URL' \
            -e $remote_trusted_host_env \
            -e $remote_yum_env \
+           -e $remote_shca_rpm_env \
            -e 'ROCSHMEM_CI_GID_INDEX=${GID_INDEX}' \
            '$SECONDARY_CONTAINER' bash /work/run_multi_node_ci.sh __prepare \
            /work/source.tar '$SECONDARY_NIC' '$SECONDARY_NIC_INDEX' \
