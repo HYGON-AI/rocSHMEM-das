@@ -181,6 +181,37 @@ namespace envvar {
       "Maximum number of symmetric user buffers an application can register "
       "with rocshmem_buffer_register_symmetric. The default value is 4",
       4);
+    const var<int32_t> ib_gid_index("IB_GID_INDEX",
+      "Forces the GID index used by the GDA backend when creating QPs, overriding GID auto-selection. "
+      "When unset, rocSHMEM selects the GID index automatically. The value must be a valid index in the "
+      "GID table of the port in use. Example value: 1",
+      -1);
+    const var<bool> disable_hdp_flush("DISABLE_HDP_FLUSH",
+      "Defines whether the GDA backend acquires the HDP memory flush control register. "
+      "0: Use HDP flush; 1: Do not use HDP flush",
+      false);
+    const var<std::string> allowed_ibv_devices("ALLOWED_IBV_DEVICES",
+      "Comma separated list of NIC names kept during libibverbs device enumeration. This filter runs "
+      "before ROCSHMEM_HCA_LIST and before NIC auto-detection, so devices that are not in the list are "
+      "never opened nor considered. Prefixing the list with ^ turns the list into an exclude list. The "
+      "default value is an empty string and every enumerated device is kept. "
+      "Example value: mlx5_0,mlx5_1, ^mlx5_6,mlx5_7");
+    const var<std::string> topo_file_force("TOPO_FILE_FORCE",
+      "Path to a topology file that forces the GPU to NIC mapping, bypassing automatic topology detection. "
+      "The default value is an empty string and rocSHMEM detects the mapping automatically. "
+      "Example value: /etc/rocshmem/topo.config");
+    const var<bool> disable_autotopo("DISABLE_AUTOTOPO",
+      "Defines whether automatic GPU to NIC topology detection is disabled. When disabled, NICs are "
+      "assigned by device index instead of by PCIe distance. 0: Auto-detection enabled; 1: Disabled",
+      false);
+    const var<bool> disable_xdp("DISABLE_XDP",
+      "Defines whether the finegrained heap allocator may use the XDP memory path when the driver reports "
+      "XDP support. 0: Use XDP when available; 1: Never use XDP",
+      false);
+    const var<bool> gdr_disable_xdp("GDR_DISABLE_XDP",
+      "DEPRECATED: Synonym for ROCSHMEM_DISABLE_XDP. Never use the XDP memory path for the "
+      "finegrained heap allocator",
+      false);
   }  // inline namespace _base
 
   namespace bootstrap {

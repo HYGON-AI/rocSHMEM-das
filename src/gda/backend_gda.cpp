@@ -2646,9 +2646,10 @@ void GDABackend::select_gid_index(NicDevice &nic) {
   nic.gid_index = selected_gid_index;
   nic.gid_type  = selected_gid_type;
   nic.gid       = selected_gid;
-  const char* userGid = std::getenv("ROCSHMEM_IB_GID_INDEX");
-  if (userGid) {
-      int gid_index = atoi(userGid);
+  // ROCSHMEM_IB_GID_INDEX overrides the auto-selected GID when it is set.
+  // An explicitly set value must be a valid index in the port GID table.
+  if (!envvar::ib_gid_index.is_default()) {
+      int gid_index = envvar::ib_gid_index.get_value();
       if (gid_index < 0 || gid_index >= gid_tbl_entries) {
         LOG_ERROR_EXIT("ROCSHMEM_IB_GID_INDEX=%d is out of range [0, %zd)", gid_index, gid_tbl_entries);
       }

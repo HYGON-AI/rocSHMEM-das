@@ -551,6 +551,28 @@ namespace envvar {
      * be honored by other backends as they gain symmetric-registration support.
      */
     extern const var<size_t> max_symm_regions;
+
+    /**
+     * @brief NIC, topology and memory-path overrides.
+     *
+     * These are consumed by the GDA backend and the heap allocator, but they
+     * keep the plain ROCSHMEM_ prefix (instead of ROCSHMEM_GDA_) because
+     * deployment scripts and guides already set them under these names.
+     */
+    extern const var<int32_t> ib_gid_index;
+    extern const var<bool> disable_hdp_flush;
+    extern const var<std::string> allowed_ibv_devices;
+    extern const var<std::string> topo_file_force;
+    extern const var<bool> disable_autotopo;
+    extern const var<bool> disable_xdp;
+
+    /**
+     * @brief DEPRECATED, renamed to disable_xdp.
+     *
+     * Still honored as a synonym so that existing deployments keep working.
+     * Remove after one release.
+     */
+    extern const var<bool> gdr_disable_xdp;
   }  // inline namespace _base
 
   namespace bootstrap {

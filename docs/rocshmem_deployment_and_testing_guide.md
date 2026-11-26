@@ -129,7 +129,7 @@ export ROCSHMEM_HCA_LIST=mlx5_0,mlx5_1,mlx5_2,mlx5_3
 export ROCSHMEM_GDA_PROVIDER=mlx5
 ```
 
-`ROCSHMEM_HCA_LIST` 在自动拓扑选择阶段过滤候选 NIC；`ROCSHMEM_ALLOWED_IBV_DEVICES` 在更早的 IBV 设备枚举阶段过滤设备，通常不需要设置。两者同时设置时只保留共同允许的设备，不要配置两份相同列表。
+`ROCSHMEM_HCA_LIST` 在自动拓扑选择阶段过滤候选 NIC；`ROCSHMEM_ALLOWED_IBV_DEVICES` 在更早的 IBV 设备枚举阶段过滤设备，被它排除的设备不会被打开，通常不需要设置。两者同时设置时只保留共同允许的设备，不要配置两份相同列表。注意 `ROCSHMEM_ALLOWED_IBV_DEVICES` 会改变设备列表的下标编号，与 `ROCSHMEM_TOPO_FILE_FORCE` 同时使用时，拓扑文件第三列的下标需按过滤后的列表核对。
 
 启动脚本按 local rank 设置 `HIP_VISIBLE_DEVICES`，保证一进程一 HCU。不建议为整个多 PE 作业统一设置单个 `ROCSHMEM_USE_IB_HCA`，否则所有 PE 会集中到同一 NIC。
 
@@ -300,7 +300,7 @@ mkdir -p build-perf-gda-mlx5 && cd build-perf-gda-mlx5
 | `ROCSHMEM_TEST_UUID` | `1` | 固定 unique-ID bootstrap |
 | `ROCSHMEM_HEAP_SIZE` | IPC：`42949672960`；GDA：`50737418240` | 为对应后端的大规模并发测试预留约 40/47 GiB 对称堆 |
 | `ROCSHMEM_ALIGN_BW_WITH_RCCL` | `1` | 统一 rocSHMEM 与 RCCL 的带宽计算口径 |
-| `ROCSHMEM_GDR_DISABLE_XDP` | `1` | 禁用 XDP 路径，固定对比数据路径 |
+| `ROCSHMEM_DISABLE_XDP` | `1` | 禁用 XDP 路径，固定对比数据路径 |
 | `ROCSHMEM_IB_GID_INDEX`、`UCX_IB_GID_INDEX` | 示例为 `1` | 按业务网实际 GID index 设置，两个通信栈及所有 rank 保持一致 |
 | `-noverif` | 仅单项性能测试使用 | 跳过结果校验；必须在正确性测试通过后使用 |
 
@@ -316,7 +316,7 @@ mpirun --allow-run-as-root --map-by numa --mca coll_hcoll_enable 0 \
   -np 8 -x ROCSHMEM_BACKEND=ipc -x LD_LIBRARY_PATH -x PATH \
   -x ROCSHMEM_TEST_UUID=1 -x ROCSHMEM_HEAP_SIZE=42949672960 \
   -x ROCSHMEM_MAX_NUM_CONTEXTS=32 \
-  -x ROCSHMEM_ALIGN_BW_WITH_RCCL=1 -x ROCSHMEM_GDR_DISABLE_XDP=1 \
+  -x ROCSHMEM_ALIGN_BW_WITH_RCCL=1 -x ROCSHMEM_DISABLE_XDP=1 \
   tests/functional_tests/rocshmem_functional_tests \
   -a 19 -w 32 -z 512 -s 8388608
 ```
@@ -333,7 +333,7 @@ mpirun --allow-run-as-root --mca coll_hcoll_enable 0 \
   -x LD_LIBRARY_PATH -x PATH -x ROCSHMEM_TEST_UUID=1 \
   -x ROCSHMEM_HEAP_SIZE=50737418240 -x ROCSHMEM_ALIGN_BW_WITH_RCCL=1 \
   -x ROCSHMEM_IB_GID_INDEX=1 -x UCX_IB_GID_INDEX=1 \
-  -x ROCSHMEM_GDR_DISABLE_XDP=1 \
+  -x ROCSHMEM_DISABLE_XDP=1 \
   -x ROCSHMEM_GDA_NUM_QPS_PER_PE_DEFAULT_CTX=5 \
   -x ROCSHMEM_GDA_NUM_QPS_PER_PE_USR_CTX=5 \
   tests/functional_tests/rocshmem_functional_tests \
