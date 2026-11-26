@@ -139,6 +139,13 @@ __device__ void GDAContext::fcollect_wg_das(rocshmem_team_t team, T *dst, const 
 
   ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
 
+  if (!constmem.pxn_enabled && try_fcollectmem_same_slot_wg_nopxn(
+          team_obj, dst, src, static_cast<size_t>(nelems) * sizeof(T),
+          static_cast<size_t>(elem_offset) * sizeof(T),
+          static_cast<size_t>(elem_count) * sizeof(T))) {
+    return;
+  }
+
   // Chunk the linear path below instead of selecting the synchronization-heavy
   // hierarchical path solely because more workgroups are active.
   if (pe_size >= 4 && static_cast<size_t>(elem_count) * sizeof(T) >= kHierarchicalMinBytes) {

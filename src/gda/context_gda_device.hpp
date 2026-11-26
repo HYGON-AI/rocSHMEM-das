@@ -89,6 +89,7 @@ class GDAContext : public Context {
   __device__ void fcollect_wg_das(rocshmem_team_t team, T *dest,
       const T *source, int nelems, int elem_offset, int elem_count);
 
+
   __device__ void internal_broadcastmem_wg_das(void *dest, const void *source, int nelems,
       int pe_root, int pe_start, int stride, int pe_size, long *p_sync, GDATeam *team_obj = nullptr);
 
@@ -396,6 +397,11 @@ class GDAContext : public Context {
   __device__ uint64_t get_p2p_ptr(void *dest, int rank, int dst_rank);
 
  private:
+#if defined(USE_DAS)
+  __device__ __noinline__ bool try_fcollectmem_same_slot_wg_nopxn(
+      GDATeam *team, void *dest, const void *source, size_t rank_bytes,
+      size_t offset_bytes, size_t count_bytes);
+#endif
 
 #if defined(USE_DAS)
   // Collective algorithms live in collectives/; proxy/ supplies routing mechanisms.

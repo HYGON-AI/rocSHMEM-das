@@ -56,6 +56,17 @@ GDATeam::GDATeam(Backend *backend, const TeamInfo& team_info_parent,
   bcast_ready = b->bcast_ready_pool + static_cast<size_t>(pool_index) * ROCSHMEM_BARRIER_SYNC_SIZE;
   // Reused team slots start with no published segments and epoch one.
   CHECK_HIP(hipMemset(bcast_ready, 0, sizeof(long) * ROCSHMEM_BARRIER_SYNC_SIZE));
+  const size_t fcollect_bank_offset =
+      static_cast<size_t>(pool_index) * 2 * ROCSHMEM_BARRIER_SYNC_SIZE;
+  fcollect_ready = b->fcollect_ready_pool + fcollect_bank_offset;
+  fcollect_pSync = b->fcollect_pSync_pool + fcollect_bank_offset;
+  fcollect_control = b->fcollect_control_pool + static_cast<size_t>(pool_index) * 8;
+  // A recycled team slot must not retain ready counts or admission decisions.
+  CHECK_HIP(hipMemset(fcollect_ready, 0,
+                      sizeof(long) * 2 * ROCSHMEM_BARRIER_SYNC_SIZE));
+  CHECK_HIP(hipMemset(fcollect_pSync, 0,
+                      sizeof(long) * 2 * ROCSHMEM_BARRIER_SYNC_SIZE));
+  CHECK_HIP(hipMemset(fcollect_control, 0, sizeof(long) * 8));
 #endif
   CHECK_HIP(hipMemset(alltoall_pSync, 0,
                       sizeof(long) * ROCSHMEM_ALLTOALL_SYNC_SIZE));

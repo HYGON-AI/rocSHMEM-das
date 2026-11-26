@@ -31,6 +31,7 @@ target_sources(
     context_gda_device.cpp
     context_gda_device_coll.cpp
     collectives/broadcast_device.cpp
+    collectives/fcollect_device.cpp
     context_gda_host.cpp
     backend_gda.cpp
     ibv_wrapper.cpp

@@ -403,6 +403,10 @@ class GDABackend : public Backend {
   long *bcast_pSync_pool{nullptr};
 #if defined(USE_DAS)
   long *bcast_ready_pool{nullptr};
+  // Private non-PXN fcollect state; each team owns both alternating banks.
+  long *fcollect_ready_pool{nullptr};
+  long *fcollect_pSync_pool{nullptr};
+  long *fcollect_control_pool{nullptr};
 #endif
 
   /**
