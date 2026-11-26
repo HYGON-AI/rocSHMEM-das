@@ -106,6 +106,7 @@ jobs:
       # this repository variable to switch to another Rocky Linux 8.6 image.
       IMAGE_NAME: ${{ vars.IMAGE_NAME }}
       PIP_INDEX_URL: https://mirrors.ustc.edu.cn/pypi/simple
+      SHCA_TOOLS_RPM_BASE_URL: ${{ vars.SHCA_TOOLS_RPM_BASE_URL }}
       ROCSHMEM_CI_ROCKY_REPO: https://mirrors.ustc.edu.cn/rocky/8
       ROCSHMEM_CI_PRIMARY_HOST: github-nmz1
       ROCSHMEM_CI_SECONDARY_HOST: github-nmz2
