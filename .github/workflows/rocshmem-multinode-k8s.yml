@@ -34,12 +34,8 @@ jobs:
       MN_CARDS_PER_NODE: ${{ inputs.cards_per_node || '8' }}
       MN_SUITE: ${{ inputs.suite || 'standard' }}
       MN_RUN_ID: ${{ github.run_id }}
-      ROCSHMEM_CI_PRIMARY_HOST: k8s-w0
-      ROCSHMEM_CI_SECONDARY_HOST: k8s-w1
-      ROCSHMEM_CI_PRIMARY_IP: 127.0.0.1
-      ROCSHMEM_CI_SECONDARY_IP: 127.0.0.1
-      ROCSHMEM_CI_REMOTE_USER: root
       ROCSHMEM_CI_GID_INDEX: "3"
+      ROCSHMEM_CI_SETUP_TIMEOUT: "3600"
     steps:
       - name: Checkout the tree under test
         uses: actions/checkout@v4
@@ -58,38 +54,73 @@ jobs:
           cp scripts/ci/run_multi_node_ci.sh "$R/"
           cat > "$R/worker.sh" <<'EOS'
           #!/bin/bash
-          set -euo pipefail
           R=/ci_public/mn/rocshmem-$MN_RUN_ID
-          H0=$MN_NAME-w0; H1=$MN_NAME-w1
-          for i in $(seq 1 40); do
+          H0=$MN_NAME-w0
+          H1=$MN_NAME-w1
+          echo "[worker] rank=$NODE_RANK name=$MN_NAME suite=$MN_SUITE dir=$R"
+          echo "[worker] expect hosts: $H0 $H1"
+
+          for i in $(seq 1 60); do
             getent hosts "$H0" >/dev/null 2>&1 && getent hosts "$H1" >/dev/null 2>&1 && break
             sleep 3
           done
           IP0=$(getent hosts "$H0" | awk '{print $1}' | head -1)
           IP1=$(getent hosts "$H1" | awk '{print $1}' | head -1)
-          echo "rank=$NODE_RANK $H0=$IP0 $H1=$IP1"
-          NIC=$(for d in /sys/class/infiniband/*; do [ -f "$d/ports/1/state" ] || continue; grep -q ACTIVE "$d/ports/1/state" && basename "$d"; done | head -1)
-          echo "NIC=$NIC"
+          echo "[worker] resolved $H0=${IP0:-EMPTY} $H1=${IP1:-EMPTY}"
+          if [ -z "${IP0:-}" ] || [ -z "${IP1:-}" ]; then
+            echo "[worker] ERROR: DNS 解析失败"
+            touch "$R/fail"
+            exit 1
+          fi
+
+          NIC=$(for d in /sys/class/infiniband/*; do
+                  [ -f "$d/ports/1/state" ] || continue
+                  grep -q ACTIVE "$d/ports/1/state" && basename "$d"
+                done | head -1)
+          echo "[worker] NIC=$NIC"
+          if [ -z "$NIC" ]; then
+            echo "[worker] ERROR: 没有 ACTIVE 的 IB 口"
+            touch "$R/fail"
+            exit 1
+          fi
+
           mkdir -p /work/ssh
           if [ "$NODE_RANK" = "0" ] && [ ! -f "$R/ssh/id_ed25519" ]; then
             mkdir -p "$R/ssh"
             ssh-keygen -t ed25519 -N '' -f "$R/ssh/id_ed25519" -q
           fi
-          for i in $(seq 1 40); do [ -f "$R/ssh/id_ed25519" ] && break; sleep 2; done
+          for i in $(seq 1 60); do [ -f "$R/ssh/id_ed25519" ] && break; sleep 2; done
           cp "$R/ssh/id_ed25519" "$R/ssh/id_ed25519.pub" /work/ssh/
+
           export ROCSHMEM_CI_PRIMARY_HOST="$H0" ROCSHMEM_CI_SECONDARY_HOST="$H1"
           export ROCSHMEM_CI_PRIMARY_IP="$IP0" ROCSHMEM_CI_SECONDARY_IP="$IP1"
           export ROCSHMEM_CI_GID_INDEX="${ROCSHMEM_CI_GID_INDEX:-3}"
           export ROCSHMEM_CI_REMOTE_USER=root
-          bash "$R/run_multi_node_ci.sh" __prepare "$R/source.tar" "$NIC" 0 2222 "$H0" "$H1" "$IP0" "$IP1"
+
+          echo "[worker] start __prepare $(date -u +%H:%M:%S)"
+          if ! bash "$R/run_multi_node_ci.sh" __prepare "$R/source.tar" "$NIC" 0 2222 "$H0" "$H1" "$IP0" "$IP1"; then
+            echo "[worker] ERROR: __prepare 失败"
+            touch "$R/fail"
+            exit 1
+          fi
+          echo "[worker] __prepare done $(date -u +%H:%M:%S)"
+
           if [ "$NODE_RANK" = "0" ]; then
+            echo "[worker] start __test $(date -u +%H:%M:%S)"
             bash "$R/run_multi_node_ci.sh" __test "$MN_SUITE" "$H0" "$H1" "$ROCSHMEM_CI_GID_INDEX"
             rc=$?
-            touch "$R/done"
+            echo "[worker] __test rc=$rc $(date -u +%H:%M:%S)"
+            if [ $rc -eq 0 ]; then touch "$R/done"; else touch "$R/fail"; fi
             exit $rc
           else
-            for i in $(seq 1 720); do [ -f "$R/done" ] && break; sleep 10; done
-            echo "peer saw done"
+            echo "[worker] peer waiting for rank0"
+            for i in $(seq 1 1080); do
+              [ -f "$R/done" ] && { echo "[worker] peer saw done"; exit 0; }
+              [ -f "$R/fail" ] && { echo "[worker] peer saw fail"; exit 1; }
+              sleep 10
+            done
+            echo "[worker] peer wait timeout"
+            exit 1
           fi
           EOS
           chmod +x "$R/worker.sh"
