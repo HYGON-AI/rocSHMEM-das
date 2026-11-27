@@ -31,7 +31,7 @@ jobs:
     env:
       MN_IMAGE: 10.16.1.152:5000/hcu/base/dtk:26.10-rockylinux8.6-py3.12
       MN_NODES: ${{ inputs.nodes || '2' }}
-      MN_CARDS_PER_NODE: ${{ inputs.cards_per_node || '8' }}
+      MN_CARDS_PER_NODE: ${{ inputs.cards_per_node || '4' }}
       MN_SUITE: ${{ inputs.suite || 'standard' }}
       MN_RUN_ID: ${{ github.run_id }}
       ROCSHMEM_CI_GID_INDEX: "3"
