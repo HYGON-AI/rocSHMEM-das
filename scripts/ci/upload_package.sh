@@ -41,62 +41,11 @@ build_package() {
     # This entry point is ONLY for the disposable container created below.
     [[ -f /.dockerenv && "${ROCSHMEM_PACKAGE_CONTAINER:-}" == 1 ]]
     [[ "$(uname -m)" == x86_64 ]]
-    local dtk_dir shca_library shca_dependencies
-    # shellcheck source=/dev/null
-    source /etc/os-release
-    [[ "$ID" == rocky && "$VERSION_ID" == 8.6 ]] || {
-        echo "ERROR: expected Rocky Linux 8.6, got $ID $VERSION_ID" >&2; return 1;
-    }
-    local mirror="${ROCSHMEM_CI_ROCKY_REPO:-}" directory repo
-    local -a yum_options=(--setopt=install_weak_deps=False)
-    if [[ -n "$mirror" ]]; then
-        echo "Rocky Linux yum mirror: $mirror"
-        for directory in BaseOS AppStream extras PowerTools; do
-            repo="${directory,,}"
-            yum_options+=(
-                "--setopt=$repo.mirrorlist="
-                "--setopt=$repo.metalink="
-                "--setopt=$repo.baseurl=${mirror%/}/$directory/x86_64/os/"
-            )
-        done
-    fi
-    yum "${yum_options[@]}" install -y \
-        git ca-certificates binutils numactl-devel tar gzip
-    case "$ROCSHMEM_PACKAGE_VARIANT" in
-        mlx5)
-            yum "${yum_options[@]}" install -y rdma-core rdma-core-devel libibverbs-utils
-            ;;
-        shca)
-            # SHCA supplies its own verbs development files.
-            if ! rpm -q shca-tools; then
-                : "${SHCA_TOOLS_RPM_BASE_URL:?missing repository variable SHCA_TOOLS_RPM_BASE_URL}"
-                local shca_rpm=/tmp/shca-tools-0.0.1_rocky8.10-1.x86_64.rpm
-                local shca_rpm_url="${SHCA_TOOLS_RPM_BASE_URL%/}/${shca_rpm##*/}"
-                yum "${yum_options[@]}" install -y curl
-                curl --fail --location --retry 3 --proto '=http,https' \
-                    --proto-redir '=http,https' --output "$shca_rpm" -- "$shca_rpm_url"
-                # Only the RPM tested on Rocky 8.6 may bypass its 8.10 install scripts.
-                printf '%s  %s\n' 612619ad3f57f7be31117c3c926ccecde1a447e3cf9d466d1506e31cec8241d1 "$shca_rpm" |
-                    sha256sum --check
-                yum "${yum_options[@]}" install -y \
-                    libev libnl3 libnl3-cli libnl3-devel libuv libwebsockets mosquitto tcp_wrappers-libs
-                yum "${yum_options[@]}" remove -y --setopt=clean_requirements_on_remove=False \
-                    libibverbs libibumad librdmacm infiniband-diags libibverbs-utils rdma-core-devel
-                rpm -ivh --nopre --nopost "$shca_rpm"
-            fi
-            ldconfig
-            shca_library="$(ldconfig -p | awk '$1 == "libshca.so" && !found { print $NF; found = 1 }')"
-            if [[ ! -s /usr/include/infiniband/shca_dv.h || ! -s "$shca_library" ]]; then
-                echo 'ERROR: SHCA development header or libshca.so is missing' >&2
-                return 1
-            fi
-            shca_dependencies="$(ldd "$shca_library")"
-            if grep -F 'not found' <<< "$shca_dependencies"; then
-                echo 'ERROR: SHCA shared library dependencies are missing' >&2; return 1;
-            fi
-            ;;
-        *) echo 'ERROR: unknown package variant' >&2; return 1 ;;
-    esac
+    # shellcheck source=scripts/ci/prepare_rocky.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/prepare_rocky.sh"
+    prepare_rocky_build_environment
+
+    local dtk_dir
     dtk_dir="$(readlink -f /opt/dtk)"
     if [[ -f /opt/dtk/.dtk_version ]]; then
         grep -Eq "^DTK-${ROCSHMEM_PACKAGE_DTK_VERSION:0:2}\.${ROCSHMEM_PACKAGE_DTK_VERSION:2:2}([^0-9]|$)" /opt/dtk/.dtk_version || {
@@ -129,15 +78,10 @@ build_package() {
     mkdir build
     cd build
     export ASAN=OFF BUILD_TYPE=Release INSTALL_PREFIX=/opt/rocshmem TZ=UTC-8
-    bash "../scripts/build_configs/gda_${ROCSHMEM_PACKAGE_VARIANT}"
+    bash ../scripts/build_configs/gda_mlx5_shca
     grep -qx 'USE_GDA:BOOL=ON' CMakeCache.txt
-    if [[ "$ROCSHMEM_PACKAGE_VARIANT" == shca ]]; then
-        grep -qx 'GDA_SHCA:BOOL=ON' CMakeCache.txt
-        grep -qx 'GDA_MLX5:BOOL=OFF' CMakeCache.txt
-    else
-        grep -qx 'GDA_MLX5:BOOL=ON' CMakeCache.txt
-        grep -qx 'GDA_SHCA:BOOL=OFF' CMakeCache.txt
-    fi
+    grep -qx 'GDA_MLX5:BOOL=ON' CMakeCache.txt
+    grep -qx 'GDA_SHCA:BOOL=ON' CMakeCache.txt
 
     local upstream_version expected_filename
     upstream_version="$(sed -n 's/^set(CPACK_PACKAGE_VERSION "\([^"]*\)")$/\1/p' CPackConfig.cmake)"
@@ -176,18 +120,13 @@ build_package() {
         printf 'package_format=run\npackage_filename=%s\nupstream_version=%s\n' "$expected_filename" "$upstream_version"
         printf 'dtk_version=%s\ndtk_directory=%s\n' "$ROCSHMEM_PACKAGE_DTK_VERSION" "$dtk_dir"
         printf 'build_timezone=UTC+08:00\n'
-        printf 'build_config=scripts/build_configs/gda_%s\nstrip=OFF\narchitecture=%s\n' \
-            "$ROCSHMEM_PACKAGE_VARIANT" "$(uname -m)"
+        printf 'build_config=scripts/build_configs/gda_mlx5_shca\nstrip=OFF\narchitecture=%s\n' "$(uname -m)"
         cat /etc/os-release
         hipcc --version
         /opt/mpi/bin/mpiexec --version
         cmake --version
-        if [[ "$ROCSHMEM_PACKAGE_VARIANT" == shca ]]; then
-            rpm -q shca-tools
-            sha256sum /usr/include/infiniband/shca_dv.h "$shca_library"
-        else
-            rpm -q rdma-core rdma-core-devel libibverbs-utils
-        fi
+        rpm -q shca-tools
+        sha256sum /usr/include/infiniband/shca_dv.h "$(shca_library_path)"
     } > /tmp/rocshmem-run-artifacts/build-info.txt
     cd /tmp/rocshmem-run-artifacts
     sha256sum ./*.run > SHA256SUMS
@@ -205,7 +144,7 @@ if [[ "${1:-}" == __build ]]; then
 fi
 
 for required in ROCSHMEM_CI_IMAGE PIP_INDEX_URL \
-    ROCSHMEM_PACKAGE_VARIANT ROCSHMEM_PACKAGE_DTK_VERSION ROCSHMEM_PACKAGE_SHA \
+    ROCSHMEM_PACKAGE_DTK_VERSION ROCSHMEM_PACKAGE_SHA \
     ROCSHMEM_PACKAGE_ROOT ROCSHMEM_PACKAGE_HOST_DIR \
     GITHUB_RUN_ID GITHUB_RUN_ATTEMPT; do
     [[ -n "${!required:-}" ]] || { echo "ERROR: missing ${required}" >&2; exit 1; }
@@ -215,10 +154,6 @@ done
     echo 'ERROR: unexpected host package directory' >&2; exit 1;
 }
 [[ "$ROCSHMEM_PACKAGE_SHA" =~ ^[0-9a-f]{40}$ ]]
-case "$ROCSHMEM_PACKAGE_VARIANT" in
-    mlx5|shca) ;;
-    *) echo 'ERROR: unknown package variant' >&2; exit 1 ;;
-esac
 [[ "$(git rev-parse HEAD)" == "$ROCSHMEM_PACKAGE_SHA" ]]
 [[ "$(git rev-parse --is-shallow-repository)" == false ]]
 mkdir -p "$ROCSHMEM_PACKAGE_ROOT/logs"
@@ -228,7 +163,7 @@ exec > >(tee "$ROCSHMEM_PACKAGE_ROOT/logs/package.log") 2>&1
 exec 9>/tmp/mooncake-hcu-cross-node.lock
 flock -w 900 9 || { echo 'ERROR: timed out waiting for nmz1 CI lock'; exit 1; }
 task_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/rocshmem-package.XXXXXX")"
-container_name="rocshmem-run-${ROCSHMEM_PACKAGE_VARIANT}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$$"
+container_name="rocshmem-run-dtk${ROCSHMEM_PACKAGE_DTK_VERSION}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$$"
 container_created=false
 host_copy_temp=""
 cleanup() {
@@ -260,7 +195,7 @@ docker create --name "$container_name" --user root \
     --device=/dev/kfd --device=/dev/mkfd --device=/dev/dri/ \
     --network=host --ipc=host --group-add video \
     -v /opt/hyhal:/opt/hyhal:ro \
-    -e ROCSHMEM_PACKAGE_VARIANT -e ROCSHMEM_PACKAGE_DTK_VERSION \
+    -e ROCSHMEM_PACKAGE_DTK_VERSION \
     -e ROCSHMEM_CI_ROCKY_REPO -e SHCA_TOOLS_RPM_BASE_URL \
     -e ROCSHMEM_PACKAGE_CONTAINER=1 \
     -e ROCSHMEM_PACKAGE_SHA \
@@ -270,6 +205,7 @@ container_created=true
 docker start "$container_name"
 docker cp "$task_dir/source.bundle" "$container_name:/tmp/rocshmem-source.bundle"
 docker cp scripts/ci/upload_package.sh "$container_name:/tmp/upload_package.sh"
+docker cp scripts/ci/prepare_rocky.sh "$container_name:/tmp/prepare_rocky.sh"
 timeout --signal=TERM --kill-after=30s 6000s \
     docker exec "$container_name" bash /tmp/upload_package.sh __build
 mkdir -p "$ROCSHMEM_PACKAGE_ROOT/packages"

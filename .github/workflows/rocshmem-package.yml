@@ -15,15 +15,14 @@ concurrency:
 
 jobs:
   package:
-    name: Package merged commit (dtk${{ matrix.dtk.version }}, py${{ matrix.dtk.python }}, ${{ matrix.variant }})
+    name: Package merged commit (dtk${{ matrix.dtk.version }}, py${{ matrix.dtk.python }})
     runs-on: [self-hosted, Linux, X64, ci, nmz1, bw1100]
     timeout-minutes: 120
     strategy:
       fail-fast: false
-      # Both variants publish on nmz1 and share its cross-node CI lock.
+      # Both DTK builds publish on nmz1 and share its cross-node CI lock.
       max-parallel: 1
       matrix:
-        variant: [mlx5, shca]
         # One entry per supported DTK; each pairs a version with the Python
         # version baked into its image. Versions, Python and the image name
         # all come from repository variables, so moving to a new image never
@@ -43,7 +42,6 @@ jobs:
       # link against newer glibc/libstdc++ and do not run on Rocky 8.6, while
       # Rocky 8.6 builds run on both images.
       IMAGE_NAME: ${{ vars.IMAGE_NAME }}
-      ROCSHMEM_PACKAGE_VARIANT: ${{ matrix.variant }}
       PIP_INDEX_URL: https://mirrors.ustc.edu.cn/pypi/simple
       SHCA_TOOLS_RPM_BASE_URL: ${{ vars.SHCA_TOOLS_RPM_BASE_URL }}
       ROCSHMEM_CI_ROCKY_REPO: https://mirrors.ustc.edu.cn/rocky/8
@@ -78,7 +76,7 @@ jobs:
           fi
           {
             echo "ROCSHMEM_CI_IMAGE=${HARBOR_SITE%/}/hcu/base/dtk:${DTK_VERSION:0:2}.${DTK_VERSION:2:2}-${IMAGE_NAME}-py${DTK_PYTHON_VERSION}"
-            echo "ROCSHMEM_PACKAGE_ROOT=$RUNNER_TEMP/rocshmem-run/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-dtk$DTK_VERSION-$ROCSHMEM_PACKAGE_VARIANT"
+            echo "ROCSHMEM_PACKAGE_ROOT=$RUNNER_TEMP/rocshmem-run/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-dtk$DTK_VERSION"
           } >> "$GITHUB_ENV"
 
       - name: Build and validate RUN in a fresh container
@@ -92,7 +90,7 @@ jobs:
       - name: Save RUN and provenance (host publishing happens in the build step)
         uses: actions/upload-artifact@v4
         with:
-          name: rocshmem-run-dtk${{ matrix.dtk.version }}-${{ matrix.variant }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: rocshmem-run-dtk${{ matrix.dtk.version }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.ROCSHMEM_PACKAGE_ROOT }}/packages/
           if-no-files-found: error
           retention-days: 30
@@ -101,7 +99,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: rocshmem-run-logs-dtk${{ matrix.dtk.version }}-${{ matrix.variant }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: rocshmem-run-logs-dtk${{ matrix.dtk.version }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.ROCSHMEM_PACKAGE_ROOT }}/logs/
           if-no-files-found: warn
           retention-days: 14
