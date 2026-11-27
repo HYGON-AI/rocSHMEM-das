@@ -30,9 +30,9 @@ jobs:
       image: 10.16.1.152:5000/hcu/base/dtk:26.10-rockylinux8.6-py3.12
     env:
       MN_IMAGE: 10.16.1.152:5000/hcu/base/dtk:26.10-rockylinux8.6-py3.12
-      MN_NODES: ${{ inputs.nodes }}
-      MN_CARDS_PER_NODE: ${{ inputs.cards_per_node }}
-      MN_SUITE: ${{ inputs.suite }}
+      MN_NODES: ${{ inputs.nodes || '2' }}
+      MN_CARDS_PER_NODE: ${{ inputs.cards_per_node || '8' }}
+      MN_SUITE: ${{ inputs.suite || 'standard' }}
       MN_RUN_ID: ${{ github.run_id }}
       ROCSHMEM_CI_PRIMARY_HOST: k8s-w0
       ROCSHMEM_CI_SECONDARY_HOST: k8s-w1
