@@ -132,6 +132,9 @@ def parse_rocshmem(root: Path, node: str, selected_w: Optional[int] = None,
                 continue
             if selected_z is not None and file_z != selected_z:
                 continue
+        # Keep RCCL-enabled host runs separate when choosing the best bandwidth.
+        if op in HOST_TO_COMPARISON and path.name.lower().endswith("_userccl.log"):
+            op += "_userccl"
         try:
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError as exc:
@@ -214,12 +217,24 @@ def write_number(ws, row, col, value, fmt):
         ws.write_number(row, col, value, fmt)
 
 
+def host_comparison_groups(points, host_ops, include_rccl=True):
+    groups = {"主机侧": {}}
+    if include_rccl:
+        groups["主机侧_UseRccl"] = {}
+    for (node, op, size), point in points.items():
+        if op in host_ops:
+            groups["主机侧"][(node, host_ops[op], size)] = point
+        elif include_rccl and op.endswith("_userccl"):
+            original_op = op[:-len("_userccl")]
+            if original_op in HOST_TO_COMPARISON:
+                groups["主机侧_UseRccl"][(node, HOST_TO_COMPARISON[original_op], size)] = point
+    return groups
+
+
 def build_workbook(output, device_type, roc, rccl, minimum, maximum, device_groups=None, label_a="BASE", label_b="RCCL"):
-    host = {(node, HOST_TO_COMPARISON[op], size): point
-            for (node, op, size), point in roc.items() if op in HOST_TO_COMPARISON}
     if device_groups is None:
         device_groups = {"设备侧": {key: point for key, point in roc.items() if key[1] in OP_ORDER}}
-    groups = {"主机侧": host, **device_groups}
+    groups = {**host_comparison_groups(roc, HOST_TO_COMPARISON), **device_groups}
     return build_roc_comparison(output, device_type, groups, {name: rccl for name in groups},
                                 label_a, label_b, minimum, maximum, rccl_mode=True)
 
@@ -271,12 +286,12 @@ def load_comparison_groups(intra, inter, ws, zs, ops="coll"):
     if ops in ("rma", "all"):
         host_ops.update({op: op for op in RMA_HOST_ORDER})
         device_ops.update(RMA_DEVICE_ORDER)
-    groups = {"主机侧": {}}
+    groups = host_comparison_groups({}, host_ops, include_rccl=ops in ("coll", "all"))
     for w, z in product(ws or [None], zs or [None]):
         points = parse_rocshmem(intra, "intranode", w, z)
         points.update(parse_rocshmem(inter, "internode", w, z))
-        groups["主机侧"].update({(node, host_ops[op], size): point
-            for (node, op, size), point in points.items() if op in host_ops})
+        for name, host_points in host_comparison_groups(points, host_ops, include_rccl=ops in ("coll", "all")).items():
+            groups[name].update(host_points)
         groups[device_sheet_name(w, z)] = {key: point for key, point in points.items() if key[1] in device_ops}
     return groups
 
@@ -546,3 +561,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
