@@ -259,8 +259,79 @@ AdjustGridBarrierProblemSize() {
   echo "$adjusted_wg"
 }
 
+IsHostCollectivePerf() {
+  case "$1" in
+    alltoallmem_on_stream|alltoallv_on_stream|broadcastmem_on_stream|fcollect_on_stream|reduce_on_stream|reduce_scatter_on_stream) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Resolve explicit settings once; MPI exports take precedence over the environment.
+HostCollectivePerfModes() {
+  local mode=${ROCSHMEM_DISABLE_RCCL-}
+  local specified=${ROCSHMEM_DISABLE_RCCL+x}
+  if [[ "${USE_SLR:-0}" != "1" ]]; then
+    local -a params
+    local i arg
+    read -ra params <<< "${ROCSHMEM_TEST_MPI_PARAMS:-}"
+    for ((i = 0; i < ${#params[@]}; ++i)); do
+      arg=${params[i]}
+      if [[ "$arg" == -x ]]; then
+        i=$((i + 1))
+        arg=${params[i]:-}
+      else
+        [[ "$arg" == -x* ]] || continue
+        arg=${arg#-x}
+      fi
+      case "$arg" in
+        ROCSHMEM_DISABLE_RCCL=*) mode=${arg#*=}; specified=x ;;
+        ROCSHMEM_DISABLE_RCCL) mode=${ROCSHMEM_DISABLE_RCCL-}; specified=x ;;
+      esac
+    done
+  fi
+  if [[ -z "$specified" ]]; then
+    printf '%s\n' '1 0'
+    return 0
+  fi
+  case "$mode" in
+    0|1) printf '%s\n' "$mode" ;;
+    *) echo "ROCSHMEM_DISABLE_RCCL must be 0 or 1 (got '$mode')." >&2; return 1 ;;
+  esac
+}
+
+# Label RCCL-enabled host collective perf runs (individual sizes may fall back).
+PerfCollectiveLogSuffix() {
+  [[ "${TEST:-}" == perf* ]] || return 0
+  IsHostCollectivePerf "$1" || return 0
+  [[ "${PERF_DISABLE_RCCL_OVERRIDE:-}" == "0" ]] || return 0
+  printf '%s' '_userccl'
+}
+
+# Update the caller's local cmd array; keep launcher arguments as separate tokens.
+ApplyPerfRcclMode() {
+  [[ -n "${PERF_DISABLE_RCCL_OVERRIDE:-}" ]] || return 0
+  local -a filtered_cmd=()
+  local i
+  for ((i = 0; i < ${#cmd[@]}; ++i)); do
+    if [[ "${cmd[i]}" == "-x" ]] &&
+       [[ "${cmd[i+1]:-}" == "ROCSHMEM_DISABLE_RCCL" || "${cmd[i+1]:-}" == ROCSHMEM_DISABLE_RCCL=* ]]; then
+      i=$((i + 1))
+      continue
+    fi
+    case "${cmd[i]}" in
+      -xROCSHMEM_DISABLE_RCCL|-xROCSHMEM_DISABLE_RCCL=*) continue ;;
+    esac
+    filtered_cmd+=("${cmd[i]}")
+  done
+  cmd=("${filtered_cmd[@]}" -x "ROCSHMEM_DISABLE_RCCL=$PERF_DISABLE_RCCL_OVERRIDE")
+}
+
 # Router function - dispatches to appropriate implementation
 ExecTest() {
+  if [[ -n "${PERF_DISABLE_RCCL_OVERRIDE:-}" ]]; then
+    local -x ROCSHMEM_DISABLE_RCCL=$PERF_DISABLE_RCCL_OVERRIDE
+  fi
+
   if [ $USE_SLR -eq 1 ]; then
     ExecTest_SLR "$@"
   else
@@ -369,6 +440,8 @@ ExecTest_SLR() {
   # Create a human-readable representation of the command for logging purposes
   CMD="${cmd[@]}"
 
+  TEST_LOG_NAME+="$(PerfCollectiveLogSuffix "$TEST_NAME")"
+
   # Determine log file name based on whether this is a retry
   if [ $IS_RETRY -eq 1 ]; then
     LOG_FILE="$LOG_DIR/$TEST_LOG_NAME.retry.log"
@@ -398,7 +471,7 @@ ExecTest_SLR() {
       # Track failed tests with their parameters for potential retry
       # Capture environment/config state to ensure retry runs under same conditions
       FAILED_LIST="$FAILED_LIST $TEST_LOG_NAME"
-      FAILED_TESTS+=("$TEST_NAME|$NUM_RANKS|$NUM_WG|$NUM_THREADS|$MAX_MSG_SIZE|${ROCSHMEM_TEST_USE_DEFAULT_STREAM:-}|${ROCSHMEM_MAX_NUM_CONTEXTS:-}|${NOTIMEOUT:-}|${NOVERIF:-}|$NUM_WF")
+      FAILED_TESTS+=("$TEST_NAME|$NUM_RANKS|$NUM_WG|$NUM_THREADS|$MAX_MSG_SIZE|${ROCSHMEM_TEST_USE_DEFAULT_STREAM:-}|${ROCSHMEM_MAX_NUM_CONTEXTS:-}|${NOTIMEOUT:-}|${NOVERIF:-}|$NUM_WF|${PERF_DISABLE_RCCL_OVERRIDE:-}")
     else
       # Track tests that failed even after retry
       RETRY_FAILED_LIST="$RETRY_FAILED_LIST $TEST_LOG_NAME"
@@ -492,6 +565,8 @@ ExecTest_MPI() {
     cmd=("$LAUNCHER" -n "$NUM_RANKS" "${mpi_params[@]}")
   fi
 
+  ApplyPerfRcclMode
+
   if [[ "${ROCSHMEM_TEST_ALLOW_ROOT:-0}" == "1" ]]; then
     cmd+=(--allow-run-as-root)
   fi
@@ -525,6 +600,8 @@ ExecTest_MPI() {
   # Create a human-readable representation of the command for logging purposes
   CMD="${cmd[@]}"
 
+  TEST_LOG_NAME+="$(PerfCollectiveLogSuffix "$TEST_NAME")"
+
   # Determine log file name based on whether this is a retry
   if [ $IS_RETRY -eq 1 ]; then
     LOG_FILE="$LOG_DIR/$TEST_LOG_NAME.retry.log"
@@ -552,7 +629,7 @@ ExecTest_MPI() {
       # Track failed tests with their parameters for potential retry
       # Capture environment/config state to ensure retry runs under same conditions
       FAILED_LIST="$FAILED_LIST $TEST_LOG_NAME"
-      FAILED_TESTS+=("$TEST_NAME|$NUM_RANKS|$NUM_WG|$NUM_THREADS|$MAX_MSG_SIZE|${ROCSHMEM_TEST_USE_DEFAULT_STREAM:-}|${ROCSHMEM_MAX_NUM_CONTEXTS:-}|${NOTIMEOUT:-}|${NOVERIF:-}|$NUM_WF")
+      FAILED_TESTS+=("$TEST_NAME|$NUM_RANKS|$NUM_WG|$NUM_THREADS|$MAX_MSG_SIZE|${ROCSHMEM_TEST_USE_DEFAULT_STREAM:-}|${ROCSHMEM_MAX_NUM_CONTEXTS:-}|${NOTIMEOUT:-}|${NOVERIF:-}|$NUM_WF|${PERF_DISABLE_RCCL_OVERRIDE:-}")
     else
       # Track tests that failed even after retry
       RETRY_FAILED_LIST="$RETRY_FAILED_LIST $TEST_LOG_NAME"
@@ -1163,7 +1240,7 @@ TestPerfAMO() {
   ExecPerfTest  "amo_or"               2               "$MAX_MESSAGE_SIZE"
 }
 
-TestPerfColl() {
+TestPerfCollDev() {
   ##############################################################################
   #       | Name                     | Ranks               |  Max Message Size #
   ##############################################################################
@@ -1173,12 +1250,23 @@ TestPerfColl() {
   ExecPerfTest  "fcollect"                  "$RANKS"  "$MAX_MESSAGE_SIZE"
   ExecPerfTest  "teamreduction"             "$RANKS"  "$MAX_MESSAGE_SIZE"
   ExecPerfTest  "teamreducescatter"         "$RANKS"  "$MAX_MESSAGE_SIZE"
+}
+
+TestPerfCollHost() {
+  ##############################################################################
+  #       | Name                     | Ranks               |  Max Message Size #
+  ##############################################################################
   ExecPerfTest  "alltoallmem_on_stream"     "$RANKS"  "$MAX_MESSAGE_SIZE"
   ExecPerfTest  "broadcastmem_on_stream"    "$RANKS"  "$MAX_MESSAGE_SIZE"
   ExecPerfTest  "alltoallv_on_stream"       "$RANKS"  "$MAX_MESSAGE_SIZE"
   ExecPerfTest  "reduce_scatter_on_stream"  "$RANKS"  "$MAX_MESSAGE_SIZE"
   ExecPerfTest  "fcollect_on_stream"        "$RANKS"  "$MAX_MESSAGE_SIZE"
   ExecPerfTest  "reduce_on_stream"          "$RANKS"  "$MAX_MESSAGE_SIZE"
+}
+
+TestPerfColl() {
+  TestPerfCollHost
+  TestPerfCollDev
 }
 
 TestPerfRMA() {
@@ -1226,6 +1314,23 @@ TestPerf() {
 }
 
 ExecPerfTest() {
+  if IsHostCollectivePerf "$1"; then
+    local PERF_DISABLE_RCCL_OVERRIDE modes
+    if ! modes=$(HostCollectivePerfModes); then
+      DRIVER_RETURN_STATUS=1
+      return 1
+    fi
+    local -a rccl_modes
+    read -ra rccl_modes <<< "$modes"
+    for PERF_DISABLE_RCCL_OVERRIDE in "${rccl_modes[@]}"; do
+      ExecPerfTestImpl "$@"
+    done
+  else
+    ExecPerfTestImpl "$@"
+  fi
+}
+
+ExecPerfTestImpl() {
   NOTIMEOUT=1
   TIMEOUT=$((20 * 60)) # Performance test timeout in seconds
   NOVERIF=1
@@ -1235,6 +1340,8 @@ ExecPerfTest() {
   local test_name=$1
   local num_ranks=$2
   local max_msg_size=$3
+  local log_suffix
+  log_suffix=$(PerfCollectiveLogSuffix "$test_name")
 
   local -a wg_options
   read -ra wg_options <<< "${ROCSHMEM_TEST_WGS:-16}"
@@ -1271,7 +1378,7 @@ ExecPerfTest() {
 
       ExecTest "$test_name" "$num_ranks" "$wg" "$threads" "$max_msg_size"
 
-      local log_file="$LOG_DIR/${test_name}_n${num_ranks}_w${wg}_z${threads}_${max_msg_size}B.log"
+      local log_file="$LOG_DIR/${test_name}_n${num_ranks}_w${wg}_z${threads}_${max_msg_size}B${log_suffix}.log"
 
       if [ ! -f "$log_file" ]; then
         continue
@@ -1318,7 +1425,7 @@ ExecPerfTest() {
     done
   done
 
-  local result_file="$LOG_DIR/${test_name}_n${num_ranks}_${max_msg_size}B_best.log"
+  local result_file="$LOG_DIR/${test_name}_n${num_ranks}_${max_msg_size}B_best${log_suffix}.log"
 
   local has_extra_cols=0
   for volume in "${!best_alg_bw[@]}"; do
@@ -1448,9 +1555,11 @@ RerunFailedTests() {
   RETRY_FAILED_LIST=""
   RETRY_PASSED_LIST=""
 
+  local PERF_DISABLE_RCCL_OVERRIDE
+
   # Rerun each failed test with the same environment/config state
   for test_params in "${FAILED_TESTS[@]}"; do
-    IFS='|' read -r test_name num_ranks num_wg num_threads max_msg_size use_default_stream max_contexts notimeout noverif num_wf <<< "$test_params"
+    IFS='|' read -r test_name num_ranks num_wg num_threads max_msg_size use_default_stream max_contexts notimeout noverif num_wf PERF_DISABLE_RCCL_OVERRIDE <<< "$test_params"
 
     # Restore environment state from original test run
     if [[ -n "$use_default_stream" ]]; then
@@ -1617,6 +1726,10 @@ case $TEST in
       TestPerfAMO
     elif [ "$NAME" == "rma" ]; then
       TestPerfRMA
+    elif [ "$NAME" == "coll-host" ]; then
+      TestPerfCollHost
+    elif [ "$NAME" == "coll-dev" ]; then
+      TestPerfCollDev
     elif [ "$NAME" == "coll" ]; then
       TestPerfColl
     elif [ "$NAME" == "amo" ]; then
@@ -1785,3 +1898,4 @@ elif [[ -n "$ARTIFACT_DIR" && $EXIT_STATUS -ne 0 ]]; then
 fi
 
 exit $EXIT_STATUS
+
