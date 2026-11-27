@@ -1,6 +1,9 @@
 name: rocSHMEM multi-node (K8s PoC)
 
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/rocshmem-multinode-k8s.yml'
   workflow_dispatch:
     inputs:
       suite:
