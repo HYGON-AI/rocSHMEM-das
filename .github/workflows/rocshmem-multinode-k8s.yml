@@ -1,0 +1,100 @@
+name: rocSHMEM multi-node (K8s PoC)
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: rocSHMEM test suite
+        type: choice
+        options: [standard, full]
+        default: standard
+      nodes:
+        description: number of nodes
+        default: "2"
+      cards_per_node:
+        description: cards per node
+        default: "8"
+
+permissions:
+  contents: read
+
+jobs:
+  multinode:
+    name: multi-node (hygon-bw1100-16card)
+    runs-on: hygon-bw1100-16card
+    timeout-minutes: 360
+    container:
+      image: 10.16.1.152:5000/hcu/base/dtk:26.10-rockylinux8.6-py3.12
+    env:
+      MN_IMAGE: 10.16.1.152:5000/hcu/base/dtk:26.10-rockylinux8.6-py3.12
+      MN_NODES: ${{ inputs.nodes }}
+      MN_CARDS_PER_NODE: ${{ inputs.cards_per_node }}
+      MN_SUITE: ${{ inputs.suite }}
+      MN_RUN_ID: ${{ github.run_id }}
+      ROCSHMEM_CI_PRIMARY_HOST: k8s-w0
+      ROCSHMEM_CI_SECONDARY_HOST: k8s-w1
+      ROCSHMEM_CI_PRIMARY_IP: 127.0.0.1
+      ROCSHMEM_CI_SECONDARY_IP: 127.0.0.1
+      ROCSHMEM_CI_REMOTE_USER: root
+      ROCSHMEM_CI_GID_INDEX: "3"
+    steps:
+      - name: Checkout the tree under test
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Stage source and worker script
+        shell: bash
+        run: |
+          set -euo pipefail
+          R=/ci_public/mn/rocshmem-$MN_RUN_ID
+          rm -rf "$R"; mkdir -p "$R"
+          tar -czf "$R/source.tar" --exclude=.git .
+          cp scripts/ci/run_multi_node_ci.sh "$R/"
+          cat > "$R/worker.sh" <<'EOS'
+          #!/bin/bash
+          set -euo pipefail
+          R=/ci_public/mn/rocshmem-$MN_RUN_ID
+          H0=$MN_NAME-w0; H1=$MN_NAME-w1
+          for i in $(seq 1 40); do
+            getent hosts "$H0" >/dev/null 2>&1 && getent hosts "$H1" >/dev/null 2>&1 && break
+            sleep 3
+          done
+          IP0=$(getent hosts "$H0" | awk '{print $1}' | head -1)
+          IP1=$(getent hosts "$H1" | awk '{print $1}' | head -1)
+          echo "rank=$NODE_RANK $H0=$IP0 $H1=$IP1"
+          NIC=$(for d in /sys/class/infiniband/*; do [ -f "$d/ports/1/state" ] || continue; grep -q ACTIVE "$d/ports/1/state" && basename "$d"; done | head -1)
+          echo "NIC=$NIC"
+          mkdir -p /work/ssh
+          if [ "$NODE_RANK" = "0" ] && [ ! -f "$R/ssh/id_ed25519" ]; then
+            mkdir -p "$R/ssh"
+            ssh-keygen -t ed25519 -N '' -f "$R/ssh/id_ed25519" -q
+          fi
+          for i in $(seq 1 40); do [ -f "$R/ssh/id_ed25519" ] && break; sleep 2; done
+          cp "$R/ssh/id_ed25519" "$R/ssh/id_ed25519.pub" /work/ssh/
+          export ROCSHMEM_CI_PRIMARY_HOST="$H0" ROCSHMEM_CI_SECONDARY_HOST="$H1"
+          export ROCSHMEM_CI_PRIMARY_IP="$IP0" ROCSHMEM_CI_SECONDARY_IP="$IP1"
+          export ROCSHMEM_CI_GID_INDEX="${ROCSHMEM_CI_GID_INDEX:-3}"
+          export ROCSHMEM_CI_REMOTE_USER=root
+          bash "$R/run_multi_node_ci.sh" __prepare "$R/source.tar" "$NIC" 0 2222 "$H0" "$H1" "$IP0" "$IP1"
+          if [ "$NODE_RANK" = "0" ]; then
+            bash "$R/run_multi_node_ci.sh" __test "$MN_SUITE" "$H0" "$H1" "$ROCSHMEM_CI_GID_INDEX"
+            rc=$?
+            touch "$R/done"
+            exit $rc
+          else
+            for i in $(seq 1 720); do [ -f "$R/done" ] && break; sleep 10; done
+            echo "peer saw done"
+          fi
+          EOS
+          chmod +x "$R/worker.sh"
+          ls -la "$R"
+
+      - name: Run multi-node test via dispatcher
+        shell: bash
+        env:
+          MN_CMD: bash /ci_public/mn/rocshmem-${{ github.run_id }}/worker.sh
+          MN_SRC: /ci_public/mn/rocshmem-${{ github.run_id }}/source.tar
+        run: python3 /script/mn-dispatch.py
