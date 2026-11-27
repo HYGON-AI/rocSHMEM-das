@@ -67,6 +67,12 @@ class GDATeam : public Team {
   // Only ordinary non-PXN WG broadcasts consume this ready state.
   long *bcast_ready{nullptr};
   uint64_t bcast_sequence_number = 0;
+  // Non-PXN WG fcollect never borrows another collective's synchronization.
+  long *fcollect_ready{nullptr};
+  long *fcollect_pSync{nullptr};
+  long *fcollect_control{nullptr};
+  uint64_t fcollect_sequence_number = 0;
+  uint64_t fcollect_ready_base[2] = {0, 0};
 #endif
 };
 

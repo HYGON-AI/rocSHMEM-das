@@ -1397,6 +1397,8 @@ void GDABackend::setup_wrk_sync_buffer() {
                             ROCSHMEM_ALLTOALL_SYNC_SIZE);
 #if defined(USE_DAS)
   wrk_sync_pool_size_ += sizeof(long) * max_num_teams * ROCSHMEM_BARRIER_SYNC_SIZE;
+  wrk_sync_pool_size_ += sizeof(long) * max_num_teams *
+                        (4 * ROCSHMEM_BARRIER_SYNC_SIZE + 8);
 #endif
 
   /**
@@ -1496,6 +1498,19 @@ void GDABackend::setup_teams() {
   bcast_ready_pool = reinterpret_cast<long *>(wrk_sync_pool_top_);
   wrk_sync_pool_top_ += bcast_ready_bytes;
   CHECK_HIP(hipMemset(bcast_ready_pool, 0, bcast_ready_bytes));
+
+  const size_t fcollect_bank_bytes =
+      sizeof(long) * max_num_teams * 2 * ROCSHMEM_BARRIER_SYNC_SIZE;
+  fcollect_ready_pool = reinterpret_cast<long *>(wrk_sync_pool_top_);
+  wrk_sync_pool_top_ += fcollect_bank_bytes;
+  CHECK_HIP(hipMemset(fcollect_ready_pool, 0, fcollect_bank_bytes));
+  fcollect_pSync_pool = reinterpret_cast<long *>(wrk_sync_pool_top_);
+  wrk_sync_pool_top_ += fcollect_bank_bytes;
+  CHECK_HIP(hipMemset(fcollect_pSync_pool, 0, fcollect_bank_bytes));
+  const size_t fcollect_control_bytes = sizeof(long) * max_num_teams * 8;
+  fcollect_control_pool = reinterpret_cast<long *>(wrk_sync_pool_top_);
+  wrk_sync_pool_top_ += fcollect_control_bytes;
+  CHECK_HIP(hipMemset(fcollect_control_pool, 0, fcollect_control_bytes));
 #endif
 
   /**

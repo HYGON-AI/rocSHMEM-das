@@ -645,6 +645,13 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
 
 __device__ void GDAContext::fcollectmem_wg(rocshmem_team_t team, void *dst,
                                      const void *src, int nelems) {
+#if defined(USE_DAS)
+  if (!constmem.pxn_enabled && try_fcollectmem_same_slot_wg_nopxn(
+          reinterpret_cast<GDATeam *>(team), dst, src,
+          static_cast<size_t>(nelems), 0, static_cast<size_t>(nelems))) {
+    return;
+  }
+#endif
   fcollectmem_linear_wg(team, dst, src, nelems);
 }
 
