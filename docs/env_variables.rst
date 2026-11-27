@@ -167,10 +167,9 @@ control the behavior of rocSHMEM.
       - | ``0``: Use HDP flush.
         | ``1``: Do not use HDP flush.
 
-    * - | ``ROCSHMEM_DISABLE_XDP``
+    * - | ``ROCSHMEM_GDR_DISABLE_XDP``
         | Defines whether the finegrained heap allocator may use the XDP memory path when the driver
         | reports XDP support.
-        | Formerly named ``ROCSHMEM_GDR_DISABLE_XDP``, which is deprecated but still honored.
       - ``0``
       - | ``0``: Use XDP when available.
         | ``1``: Never use XDP.

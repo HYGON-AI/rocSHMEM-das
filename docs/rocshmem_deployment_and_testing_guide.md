@@ -300,7 +300,7 @@ mkdir -p build-perf-gda-mlx5 && cd build-perf-gda-mlx5
 | `ROCSHMEM_TEST_UUID` | `1` | 固定 unique-ID bootstrap |
 | `ROCSHMEM_HEAP_SIZE` | IPC：`42949672960`；GDA：`50737418240` | 为对应后端的大规模并发测试预留约 40/47 GiB 对称堆 |
 | `ROCSHMEM_ALIGN_BW_WITH_RCCL` | `1` | 统一 rocSHMEM 与 RCCL 的带宽计算口径 |
-| `ROCSHMEM_DISABLE_XDP` | `1` | 禁用 XDP 路径，固定对比数据路径 |
+| `ROCSHMEM_GDR_DISABLE_XDP` | `1` | 禁用 XDP 路径，固定对比数据路径 |
 | `ROCSHMEM_IB_GID_INDEX`、`UCX_IB_GID_INDEX` | 示例为 `1` | 按业务网实际 GID index 设置，两个通信栈及所有 rank 保持一致 |
 | `-noverif` | 仅单项性能测试使用 | 跳过结果校验；必须在正确性测试通过后使用 |
 
@@ -316,7 +316,7 @@ mpirun --allow-run-as-root --map-by numa --mca coll_hcoll_enable 0 \
   -np 8 -x ROCSHMEM_BACKEND=ipc -x LD_LIBRARY_PATH -x PATH \
   -x ROCSHMEM_TEST_UUID=1 -x ROCSHMEM_HEAP_SIZE=42949672960 \
   -x ROCSHMEM_MAX_NUM_CONTEXTS=32 \
-  -x ROCSHMEM_ALIGN_BW_WITH_RCCL=1 -x ROCSHMEM_DISABLE_XDP=1 \
+  -x ROCSHMEM_ALIGN_BW_WITH_RCCL=1 -x ROCSHMEM_GDR_DISABLE_XDP=1 \
   tests/functional_tests/rocshmem_functional_tests \
   -a 19 -w 32 -z 512 -s 8388608
 ```
@@ -333,7 +333,7 @@ mpirun --allow-run-as-root --mca coll_hcoll_enable 0 \
   -x LD_LIBRARY_PATH -x PATH -x ROCSHMEM_TEST_UUID=1 \
   -x ROCSHMEM_HEAP_SIZE=50737418240 -x ROCSHMEM_ALIGN_BW_WITH_RCCL=1 \
   -x ROCSHMEM_IB_GID_INDEX=1 -x UCX_IB_GID_INDEX=1 \
-  -x ROCSHMEM_DISABLE_XDP=1 \
+  -x ROCSHMEM_GDR_DISABLE_XDP=1 \
   -x ROCSHMEM_GDA_NUM_QPS_PER_PE_DEFAULT_CTX=5 \
   -x ROCSHMEM_GDA_NUM_QPS_PER_PE_USR_CTX=5 \
   tests/functional_tests/rocshmem_functional_tests \

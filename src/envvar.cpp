@@ -204,13 +204,9 @@ namespace envvar {
       "Defines whether automatic GPU to NIC topology detection is disabled. When disabled, NICs are "
       "assigned by device index instead of by PCIe distance. 0: Auto-detection enabled; 1: Disabled",
       false);
-    const var<bool> disable_xdp("DISABLE_XDP",
+    const var<bool> gdr_disable_xdp("GDR_DISABLE_XDP",
       "Defines whether the finegrained heap allocator may use the XDP memory path when the driver reports "
       "XDP support. 0: Use XDP when available; 1: Never use XDP",
-      false);
-    const var<bool> gdr_disable_xdp("GDR_DISABLE_XDP",
-      "DEPRECATED: Synonym for ROCSHMEM_DISABLE_XDP. Never use the XDP memory path for the "
-      "finegrained heap allocator",
       false);
   }  // inline namespace _base
 

@@ -415,9 +415,8 @@ public:
 
 private:
   static bool is_xdp_enabled() {
-    // ROCSHMEM_DISABLE_XDP 强制禁用 XDP
-    // ROCSHMEM_GDR_DISABLE_XDP 是其废弃别名，仍然兼容
-    if (envvar::disable_xdp || envvar::gdr_disable_xdp) {
+    // ROCSHMEM_GDR_DISABLE_XDP 强制禁用 XDP
+    if (envvar::gdr_disable_xdp) {
       return false;
     }
 

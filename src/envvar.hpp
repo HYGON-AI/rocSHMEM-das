@@ -564,14 +564,6 @@ namespace envvar {
     extern const var<std::string> allowed_ibv_devices;
     extern const var<std::string> topo_file_force;
     extern const var<bool> disable_autotopo;
-    extern const var<bool> disable_xdp;
-
-    /**
-     * @brief DEPRECATED, renamed to disable_xdp.
-     *
-     * Still honored as a synonym so that existing deployments keep working.
-     * Remove after one release.
-     */
     extern const var<bool> gdr_disable_xdp;
   }  // inline namespace _base
 
