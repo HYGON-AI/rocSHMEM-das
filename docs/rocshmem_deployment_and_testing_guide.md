@@ -129,7 +129,7 @@ export ROCSHMEM_HCA_LIST=mlx5_0,mlx5_1,mlx5_2,mlx5_3
 export ROCSHMEM_GDA_PROVIDER=mlx5
 ```
 
-`ROCSHMEM_HCA_LIST` 在自动拓扑选择阶段过滤候选 NIC；`ROCSHMEM_ALLOWED_IBV_DEVICES` 在更早的 IBV 设备枚举阶段过滤设备，通常不需要设置。两者同时设置时只保留共同允许的设备，不要配置两份相同列表。
+`ROCSHMEM_HCA_LIST` 在自动拓扑选择阶段过滤候选 NIC；`ROCSHMEM_ALLOWED_IBV_DEVICES` 在更早的 IBV 设备枚举阶段过滤设备，被它排除的设备不会被打开，通常不需要设置。两者同时设置时只保留共同允许的设备，不要配置两份相同列表。注意 `ROCSHMEM_ALLOWED_IBV_DEVICES` 会改变设备列表的下标编号，与 `ROCSHMEM_TOPO_FILE_FORCE` 同时使用时，拓扑文件第三列的下标需按过滤后的列表核对。
 
 启动脚本按 local rank 设置 `HIP_VISIBLE_DEVICES`，保证一进程一 HCU。不建议为整个多 PE 作业统一设置单个 `ROCSHMEM_USE_IB_HCA`，否则所有 PE 会集中到同一 NIC。
 

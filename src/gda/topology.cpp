@@ -24,6 +24,7 @@
 
 #include "log.hpp"
 #include "topology.hpp"
+#include "envvar.hpp"
 #include "ibv_wrapper.hpp"
 
 #include <numa.h>
@@ -360,15 +361,14 @@ namespace rocshmem
         return ibvDeviceList;
       }
 
-      char* allowedDevicesEnv = std::getenv("ROCSHMEM_ALLOWED_IBV_DEVICES");
-      if (allowedDevicesEnv) {
-          std::string envStr(allowedDevicesEnv);
-          // A leading '^' turns the list into an exclusion (blacklist): devices
-          // named in it are dropped and everything else is kept, e.g.
-          //   ^mlx5_6,mlx5_7  ->  exclude mlx5_6 and mlx5_7
-          // Without '^' it stays an inclusion (allowlist, original behavior):
-          //   mlx5_0,mlx5_1   ->  keep only mlx5_0 and mlx5_1
-          if (!envStr.empty() && envStr[0] == '^') {
+      // A leading '^' turns the list into an exclusion (blacklist): devices
+      // named in it are dropped and everything else is kept, e.g.
+      //   ^mlx5_6,mlx5_7  ->  exclude mlx5_6 and mlx5_7
+      // Without '^' it stays an inclusion (allowlist, original behavior):
+      //   mlx5_0,mlx5_1   ->  keep only mlx5_0 and mlx5_1
+      std::string envStr(envvar::allowed_ibv_devices.get_value());
+      if (!envStr.empty()) {
+          if (envStr[0] == '^') {
               isExcludeList = true;
               envStr.erase(0, 1);
           }
@@ -1001,7 +1001,7 @@ namespace rocshmem
         std::istringstream iss(line);
         std::string busId, nic;
         int thirdColumn;
-        
+
         if (iss >> busId >> nic >> thirdColumn) {
             mOut[busId] = {nic, thirdColumn};
         }
@@ -1096,8 +1096,8 @@ namespace rocshmem
   static bool GetClosestNicToGpuFromForcedTopo(std::vector<int>& closestNicId,
                          int gpuIndex,
                          std::string* dev_name) {
-    const char* userTopo = std::getenv("ROCSHMEM_TOPO_FILE_FORCE");
-    if (!userTopo) return false;
+    const std::string& userTopo = envvar::topo_file_force.get_value();
+    if (userTopo.empty()) return false;
 
     GPU2NIC map;
     readBusToNic(userTopo, map);
@@ -1212,12 +1212,7 @@ namespace rocshmem
     static bool isInitialized = false;
     static std::vector<int> closestNicId;
     static auto const& ibvDeviceList = GetIbvDeviceList();
-    const char* env = std::getenv("ROCSHMEM_DISABLE_AUTOTOPO");
-    bool disable_autoTopo = false;
-    if (env != nullptr) {
-        std::string val(env);
-        disable_autoTopo = !val.empty() && val != "0";
-    }
+    bool disable_autoTopo = envvar::disable_autotopo;
 
     int numGpus = GetNumDevices(rocshmem::EXE_GPU);
     if (gpuIndex < 0 || gpuIndex >= numGpus) return -1;

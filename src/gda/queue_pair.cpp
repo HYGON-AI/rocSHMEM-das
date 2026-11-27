@@ -30,6 +30,7 @@
 #include "constmem.hpp"
 #include <cstring>
 #include "constants.hpp"
+#include "envvar.hpp"
 #include "util.hpp"
 
 namespace rocshmem {
@@ -74,8 +75,7 @@ QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider) {
   }
 
   // 控制是否需要刷新hdp
-  const char* hdpDisableFlushEnv = getenv("ROCSHMEM_DISABLE_HDP_FLUSH");
-  if (hdpDisableFlushEnv == NULL || strcmp(hdpDisableFlushEnv, "1") != 0) {
+  if (!envvar::disable_hdp_flush) {
     hipDeviceGetAttribute((int*)&gpuHdpReg, hipDeviceAttributeHdpMemFlushCntl, deviceId);
   }
 

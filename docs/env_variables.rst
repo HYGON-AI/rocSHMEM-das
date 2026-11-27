@@ -132,6 +132,48 @@ control the behavior of rocSHMEM.
       - `` ``
       - | Example value: ``bnxt_re1,bnxt_re11``, ``^mlx5_0,mlx5_3``
 
+    * - | ``ROCSHMEM_ALLOWED_IBV_DEVICES``
+        | Comma separated list of NIC names kept during libibverbs device enumeration. This filter runs before
+        | ``ROCSHMEM_HCA_LIST`` and before NIC auto-detection, so devices that are not in the list are never
+        | opened nor considered. Prefixing the list with ``^`` turns the list in an *exclude* list.
+        | The default value is an empty string and every enumerated device is kept.
+        | Normally not needed: prefer ``ROCSHMEM_HCA_LIST`` unless a device must not be opened at all.
+      - `` ``
+      - | Example value: ``mlx5_0,mlx5_1``, ``^mlx5_6,mlx5_7``
+
+    * - | ``ROCSHMEM_TOPO_FILE_FORCE``
+        | Path to a topology file that forces the GPU to NIC mapping, bypassing automatic topology detection.
+        | The default value is an empty string and rocSHMEM detects the mapping automatically.
+      - `` ``
+      - | Example value: ``/etc/rocshmem/topo.config``
+
+    * - | ``ROCSHMEM_DISABLE_AUTOTOPO``
+        | Defines whether automatic GPU to NIC topology detection is disabled.
+        | When disabled, NICs are assigned by device index instead of by PCIe distance.
+      - ``0``
+      - | ``0``: Auto-detection enabled.
+        | ``1``: Auto-detection disabled.
+
+    * - | ``ROCSHMEM_IB_GID_INDEX``
+        | Forces the GID index used by the GDA backend when creating QPs, overriding GID auto-selection.
+        | When unset, rocSHMEM selects the GID index automatically. An explicitly set value must be a valid
+        | index in the GID table of the port in use, otherwise initialization fails.
+      - | auto-selected
+      - | Example value: ``1``
+
+    * - | ``ROCSHMEM_DISABLE_HDP_FLUSH``
+        | Defines whether the GDA backend acquires the HDP memory flush control register.
+      - ``0``
+      - | ``0``: Use HDP flush.
+        | ``1``: Do not use HDP flush.
+
+    * - | ``ROCSHMEM_GDR_DISABLE_XDP``
+        | Defines whether the finegrained heap allocator may use the XDP memory path when the driver
+        | reports XDP support.
+      - ``0``
+      - | ``0``: Use XDP when available.
+        | ``1``: Never use XDP.
+
     * - | ``ROCSHMEM_BOOTSTRAP_SOCKET_IFNAME``
         | Chooses the interface to bootstrap rocSHMEM with.
         | Only valid when not using MPI.

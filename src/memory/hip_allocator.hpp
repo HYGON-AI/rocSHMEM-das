@@ -32,6 +32,7 @@
  */
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
+#include "envvar.hpp"
 #include "memory_allocator.hpp"
 #include "hip_allocator_vmm_common.hpp"
 
@@ -414,25 +415,9 @@ public:
 
 private:
   static bool is_xdp_enabled() {
-    // 检查环境变量 ROCSHMEM_GDR_DISABLE_XDP
-    char* env_disable_xdp = getenv("ROCSHMEM_GDR_DISABLE_XDP");
-    if (env_disable_xdp != NULL) {
-      // 如果环境变量设置为"1"、"true"、"on"、"yes"等，则禁用XDP
-      char disable_value[16];
-      strncpy(disable_value, env_disable_xdp, sizeof(disable_value) - 1);
-      disable_value[sizeof(disable_value) - 1] = '\0';
-
-      // 转换为小写比较
-      for (char* p = disable_value; *p; ++p) {
-        *p = tolower(*p);
-      }
-
-      if (strcmp(disable_value, "1") == 0 ||
-          strcmp(disable_value, "true") == 0 ||
-          strcmp(disable_value, "on") == 0 ||
-          strcmp(disable_value, "yes") == 0) {
-        return false;  // 环境变量强制禁用XDP
-      }
+    // ROCSHMEM_GDR_DISABLE_XDP 强制禁用 XDP
+    if (envvar::gdr_disable_xdp) {
+      return false;
     }
 
     // 读取系统参数
